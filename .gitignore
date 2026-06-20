@@ -19,6 +19,7 @@ antigravity.yaml
 # Credentials and secrets (IMPORTANT)
 credentials/
 *.json
+!.agents/skills.json
 
 # Local data and cache
 .sync_cache

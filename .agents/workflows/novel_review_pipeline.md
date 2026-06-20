@@ -20,7 +20,13 @@ mkdir -p novel_check_results/[TARGET_FILE_BASENAME]
 echo "Agent: Please run novel-formatter on [TARGET_FILE] and save to novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt. Wait for completion of this file's formatting."
 ```
 
-3. Once a file's formatting is complete, run the following 7 review skills **in parallel** on its formatted text `novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt`. Each skill outputs **YAML format** with `accepted: "n"` fields.
+3. Once a file's formatting is complete, run the following 7 review skills **in parallel** on its formatted text `novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt`. 
+
+**CRITICAL INSTRUCTION FOR LLM LIMITS:**
+To avoid output token limits and ensure multiple findings are generated per skill without being truncated:
+- The agent MUST execute the prompt for each skill **multiple times** (e.g., "Find the first 3 issues", then "Find the next 3 issues excluding the previous ones") OR split the target text into halves/thirds and review each chunk independently.
+- The agent must then consolidate these multiple outputs into a single YAML file per skill.
+- Each skill outputs **YAML format** with `accepted: "n"` fields.
 
 - `world-logic-guard` -> `novel_check_results/[TARGET_FILE_BASENAME]/02_world_logic.yaml`
 - `consistency-checker` -> `novel_check_results/[TARGET_FILE_BASENAME]/03_consistency.yaml`
@@ -31,7 +37,7 @@ echo "Agent: Please run novel-formatter on [TARGET_FILE] and save to novel_check
 - `character-voice-checker` -> `novel_check_results/[TARGET_FILE_BASENAME]/08_character_voice.yaml`
 
 ```bash
-echo "Agent: Please execute the above 7 skills in parallel to generate the YAML review reports for [TARGET_FILE_BASENAME]."
+echo "Agent: Please execute the above 7 skills. For each skill, use split-prompting or text-chunking to bypass token limits, gather multiple findings, and merge them into the final YAML reports for [TARGET_FILE_BASENAME]."
 ```
 
 4. **Human Review (per file):** After all 7 `.yaml` files are generated, the user opens each file and changes `accepted: "n"` to `accepted: "y"` for findings they wish to apply. When done, the user instructs the agent to proceed.

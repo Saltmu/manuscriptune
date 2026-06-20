@@ -1,6 +1,19 @@
 import re
 import argparse
 import os
+import glob
+
+def resolve_latest_file(pattern, default=None):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    full_pattern = os.path.join(project_root, pattern)
+    files = glob.glob(full_pattern)
+    if not files:
+        files = glob.glob(pattern)
+        if not files:
+            return default
+    files.sort()
+    return files[-1]
 
 def parse_plot(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -84,7 +97,8 @@ def get_chapter_episodes(chapters, chapter_title):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse novel plot files.")
-    parser.add_argument("--file", default="data/sources/04-1_第1幕プロット.txt", help="Path to the plot file.")
+    default_plot = resolve_latest_file("data/sources/*第1幕プロット*.txt", "data/sources/04_1_第1幕プロットver.3.0.txt")
+    parser.add_argument("--file", default=default_plot, help="Path to the plot file.")
     parser.add_argument("--list", action="store_true", help="List all chapters and episodes.")
     parser.add_argument("--get-chapter", type=str, help="Get episodes for a specific chapter (e.g., '第1章').")
     

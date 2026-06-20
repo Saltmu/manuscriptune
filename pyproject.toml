@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "novel-tools-system"
+version = "0.1.0"
+description = "小説の整合性と世界観をチェックするエージェント環境"
+authors = ["sshioyama"]
+package-mode = false
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+google-auth = "^2.49.1"
+google-api-python-client = "^2.192.0"
+pyyaml = "^6.0.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

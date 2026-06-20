@@ -20,7 +20,14 @@ shared:
     auth_file: "./credentials/your-service-account-key.json"
 
 skills:
-  # === 1. Core Verification (基本検証) ===
+  # === 1. Writing (執筆) ===
+  # 小説執筆：設定やプロットに基づいて執筆
+  - path: "./skills/novel-writer"
+
+  # 小説執筆 (Gemini CLI版)：Gemini CLIを利用した小説執筆
+  - path: "./skills/novel_writer_geminicli"
+
+  # === 2. Core Verification (基本検証) ===
   # 過去記述チェック：特定のドライブフォルダから既刊要約などを取得
   - path: "./skills/consistency-checker"
     sources:
@@ -31,11 +38,11 @@ skills:
     sources:
       - *gdrive_source
 
-  # === 2. Formatting (フォーマット調整) ===
+  # === 3. Formatting (フォーマット調整) ===
   # 小説フォーマッター：NotebookLMなどの出力をウェブ小説向けに成形
   - path: "./skills/novel-formatter"
 
-  # === 3. Quality Enhancement (品質向上) ===
+  # === 4. Quality Enhancement (品質向上) ===
   # キャラクターの口調・声に関する一貫性の担保
   - path: "./skills/character-voice-checker"
 
