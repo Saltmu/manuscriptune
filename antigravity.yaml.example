@@ -24,8 +24,8 @@ skills:
   # 小説執筆：設定やプロットに基づいて執筆
   - path: "./skills/novel-writer"
 
-  # 小説執筆 (Gemini CLI版)：Gemini CLIを利用した小説執筆
-  - path: "./skills/novel_writer_geminicli"
+  # 小説執筆 (Antigravity CLI版)：Antigravity CLIを利用した小説執筆
+  - path: "./skills/novel_writer_antigravitycli"
 
   # === 2. Core Verification (基本検証) ===
   # 過去記述チェック：特定のドライブフォルダから既刊要約などを取得

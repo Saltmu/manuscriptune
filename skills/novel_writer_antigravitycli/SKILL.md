@@ -1,6 +1,6 @@
 ---
-name: "Novel-Writer-GeminiCLI"
-description: "「重天の調律師」シリーズの執筆に特化した小説執筆スキル（Gemini CLI版）。設定資料、キャラクター概要、プロットに基づき、指定された執筆ポリシーに従って小説を生成します。トークン制限を回避するため、geminiのCLIツールを用いてローカルからAPIを呼び出します。"
+name: "Novel-Writer-AntigravityCLI"
+description: "「重天の調律師」シリーズの執筆に特化した小説執筆スキル（Antigravity CLI版）。設定資料、キャラクター概要、プロットに基づき、指定された執筆ポリシーに従って小説を生成します。トークン制限を回避するため、Antigravity CLIツール（agy）を用いてローカルからAPIを呼び出します。"
 version: "1.0.0"
 category: "Novel-Writing"
 ---
@@ -23,16 +23,16 @@ category: "Novel-Writing"
 4. **物理と叙情:** 重力やネフェス圧を、生々しい肉体的苦痛（骨の軋み、呼吸の困難）として描写し、同時に世界の美しさを表現する。
 
 # 使用方法
-このスキルはチャット上のAIに直接執筆させるのではなく、専用のPythonスクリプト `writer_cli.py` を通じて `gemini` CLIを呼び出し、モデル（標準では `gemini-2.5-pro` など）に執筆させます。
+このスキルはチャット上のAIに直接執筆させるのではなく、専用のPythonスクリプト `writer_cli.py` を通じて Antigravity CLI（`agy`）を呼び出し、モデル（標準では `Gemini 3.5 Flash (High)` など）に執筆させます。
 
 ## エージェントへの依頼
-「第1章第1話をGemini CLIを使って執筆して」や「第2幕第3話をnovel_writer_geminicliで書いて」と依頼してください。
+「第1章第1話をAntigravity CLIを使って執筆して」や「第2幕第3話をnovel_writer_antigravitycliで書いて」と依頼してください。
 
 エージェントは以下のコマンドを実行します。
 
 ```bash
 # プロジェクトルートディレクトリ(novel_tools)で実行します
-poetry run python skills/novel_writer_geminicli/writer_cli.py --episode "第1話"
+poetry run python skills/novel_writer_antigravitycli/writer_cli.py --episode "第1話"
 ```
 
 ## 出力
@@ -41,4 +41,4 @@ poetry run python skills/novel_writer_geminicli/writer_cli.py --episode "第1話
 
 > [!IMPORTANT]
 > 執筆したテキストは、必要に応じて `novel-formatter` スキル等を併用してウェブ小説向けに整形することを推奨します。
-> このスキルを実行するにはシステムに `gemini` CLIがインストールされ、認証情報などが正しく設定されている必要があります。
+> このスキルを実行するにはシステムに Antigravity CLI（`agy`）がインストールされ、認証情報などが正しく設定されている必要があります。

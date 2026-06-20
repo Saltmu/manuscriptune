@@ -92,11 +92,11 @@ def extract_numbers(text):
     return match.group(0) if match else "0"
 
 def main():
-    parser = argparse.ArgumentParser(description="Use gemini CLI to write a novel episode.")
+    parser = argparse.ArgumentParser(description="Use Antigravity CLI (agy) to write a novel episode.")
     parser.add_argument("--episode", required=True, help="Episode title (e.g., '第1話')")
     default_plot = writer_helper.resolve_latest_file("data/sources/*第1幕プロット*.txt", "data/sources/04_1_第1幕プロットver.3.0.txt")
     parser.add_argument("--plot-file", default=default_plot, help="Path to the plot file.")
-    parser.add_argument("--model", default="gemini-2.5-pro", help="Model to use with gemini CLI (default: gemini-2.5-pro)")
+    parser.add_argument("--model", default="Gemini 3.5 Flash (High)", help="Model to use with Antigravity CLI (default: Gemini 3.5 Flash (High))")
     
     args = parser.parse_args()
     
@@ -121,10 +121,10 @@ def main():
     print(f"Model: {args.model}")
     print(f"Output will be saved to: {output_filename}")
     
-    # gemini CLI の呼び出し
-    # echo プロンプト | gemini -p "" -m model で実行する
+    # Antigravity CLI の呼び出し
+    # echo プロンプト | agy -p "" --model model で実行する
     # -p で空の文字列を渡し、標準入力から本文を流し込む
-    cmd = ["gemini", "-p", "", "-e", "null", "-m", args.model]
+    cmd = ["agy", "-p", "", "--model", args.model]
     
     try:
         # subprocess.run を使って、標準入力を経由してプロンプトを渡す
@@ -132,7 +132,7 @@ def main():
         stdout, stderr = process.communicate(input=prompt)
         
         if process.returncode != 0:
-            print(f"Error calling gemini CLI:", file=sys.stderr)
+            print(f"Error calling Antigravity CLI (agy):", file=sys.stderr)
             print(stderr, file=sys.stderr)
             sys.exit(process.returncode)
             
@@ -143,7 +143,7 @@ def main():
         print(f"Success! Novel saved to {output_filename}")
         
     except FileNotFoundError:
-        print("Error: 'gemini' CLI not found. Please ensure it is installed and in your PATH.", file=sys.stderr)
+        print("Error: 'agy' CLI not found. Please ensure it is installed and in your PATH.", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
