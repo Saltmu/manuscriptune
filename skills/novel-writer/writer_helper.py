@@ -28,7 +28,7 @@ def parse_plot(file_path):
     interlude_pattern = re.compile(r'^(幕間[一二三四五六七八九十IVX]+)：(.*)$')
 
     for line in lines:
-        line = line.strip()
+        line = line.strip().replace('\u200b', '').replace('\ufeff', '')
         if not line:
             if current_episode:
                 current_episode['content'].append('')
