@@ -28,6 +28,11 @@ skills:
   - path: "./skills/novel_writer_antigravitycli"
 
   # === 2. Core Verification (基本検証) ===
+  # 整合性と世界観、伏線の統合レビュー
+  - path: "./skills/logic-consistency-reviewer"
+    sources:
+      - *gdrive_source
+
   # 過去記述チェック：特定のドライブフォルダから既刊要約などを取得
   - path: "./skills/consistency-checker"
     sources:
@@ -39,6 +44,11 @@ skills:
       - *gdrive_source
 
   # === 3. Formatting (フォーマット調整) ===
+  # 描写、リズム、口調、ペースの統合レビュー
+  - path: "./skills/style-expression-reviewer"
+    sources:
+      - *gdrive_source
+
   # 小説フォーマッター：NotebookLMなどの出力をウェブ小説向けに成形
   - path: "./skills/novel-formatter"
 
