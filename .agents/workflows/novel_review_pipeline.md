@@ -22,17 +22,17 @@ echo "Agent: Please run novel-formatter on [TARGET_FILE] and save to novel_check
 
 3. Once a file's formatting is complete, run the following 2 integrated review skills **in parallel** on its formatted text `novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt`. 
 
-**CRITICAL INSTRUCTION FOR LLM LIMITS:**
-To avoid output token limits and ensure multiple findings are generated per skill without being truncated:
-- The agent MUST execute the prompt for each skill **multiple times** (e.g., "Find the first 3 issues", then "Find the next 3 issues excluding the previous ones") OR split the target text into halves/thirds and review each chunk independently.
-- The agent must then consolidate these multiple outputs into a single YAML file per skill.
+**OPTIMIZED SINGLE-PASS RUN:**
+To optimize token consumption and utilize the large context capabilities:
+- The agent MUST execute each review skill in a **single pass** without splitting the text or calling the prompt multiple times.
+- To prevent output truncation, the agent must prioritize finding the most critical issues (severity: `high` or `medium`) and limit the output findings to a **maximum of 15 items** per skill.
 - Each skill outputs **YAML format** with `accepted: "n"` fields.
 
 - `logic-consistency-reviewer` -> `novel_check_results/[TARGET_FILE_BASENAME]/02_logic_consistency.yaml`
 - `style-expression-reviewer` -> `novel_check_results/[TARGET_FILE_BASENAME]/03_style_expression.yaml`
 
 ```bash
-echo "Agent: Please execute the above 2 integrated skills. For each skill, use split-prompting or text-chunking to bypass token limits, gather multiple findings, and merge them into the final YAML reports for [TARGET_FILE_BASENAME]."
+echo "Agent: Please execute the above 2 integrated skills in a single pass without chunking. Prioritize key issues and limit findings to a maximum of 15 items for each report."
 ```
 
 4. **Human Review (per file):** After all 2 `.yaml` files are generated, the user opens each file and changes `accepted: "n"` to `accepted: "y"` for findings they wish to apply. When done, the user instructs the agent to proceed.
