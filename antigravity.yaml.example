@@ -6,8 +6,9 @@ project:
 # 使用するAIモデルや基本動作の設定
 agent:
   name: "Editor-AI"
-  model: "gemini-3.1-pro"
+  model: "gemini-3.5-flash"
   temperature: 0.2
+  context_caching: true
   system_prompt: |
     あなたはプロの編集者であり、設定考証の専門家です。
     提供されたスキルを活用し、物語の矛盾を厳格に指摘してください。

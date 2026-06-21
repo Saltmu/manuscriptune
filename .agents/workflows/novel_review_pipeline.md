@@ -6,6 +6,10 @@ description: Run the entire novel review pipeline (Formatting -> Parallel Review
 
 This workflow executes all available skills for one or more novel files. It is designed to be highly parallel: multiple files can be processed independently, and for each file, multiple review skills are executed concurrently. After reviews complete, the user selects which findings to accept, and the agent applies them.
 
+> [!TIP]
+> **Context Caching:**
+> Since multiple review skills are executed on the same formatted chapter and settings context, the executing agent system or API runtime should enable **Context Caching** to cache the common system prompts, settings context, and formatted chapter text. This dramatically reduces API token consumption and costs.
+
 // turbo-all
 
 0. Identify all target novel files (e.g., all `.txt` files in the `novels/` directory). **Steps 1-3 should be executed for each file independently and in parallel.**
@@ -15,12 +19,17 @@ This workflow executes all available skills for one or more novel files. It is d
 mkdir -p novel_check_results/[TARGET_FILE_BASENAME]
 ```
 
-2. Format the novel and save the output. Please replace `[TARGET_FILE]` with the path to the novel text file you want to review. **Important:** Wait for this step to complete for the *specific file* before proceeding to Step 3 for that same file, as the review skills depend on its formatted text.
+2. Format the novel and save the output. Please replace `[TARGET_FILE]` with the path to the novel text file you want to review. **Important:** Wait for this step to complete for the *specific file* before proceeding to the filtering step for that same file.
 ```bash
 echo "Agent: Please run novel-formatter on [TARGET_FILE] and save to novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt. Wait for completion of this file's formatting."
 ```
 
-3. Once a file's formatting is complete, run the following 2 integrated review skills **in parallel** on its formatted text `novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt`. 
+2.5. Run the keyword-based RAG filter script to generate a compact settings context file.
+```bash
+poetry run python src/filter_context.py novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt novel_check_results/[TARGET_FILE_BASENAME]/01_filtered_context.txt
+```
+
+3. Once a file's formatting and context filtering are complete, run the following 2 integrated review skills **in parallel** on its formatted text `novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt`. 
 
 **OPTIMIZED SINGLE-PASS RUN:**
 To optimize token consumption and utilize the large context capabilities:
@@ -28,11 +37,11 @@ To optimize token consumption and utilize the large context capabilities:
 - To prevent output truncation, the agent must prioritize finding the most critical issues (severity: `high` or `medium`) and limit the output findings to a **maximum of 15 items** per skill.
 - Each skill outputs **YAML format** with `accepted: "n"` fields.
 
-- `logic-consistency-reviewer` -> `novel_check_results/[TARGET_FILE_BASENAME]/02_logic_consistency.yaml`
+- `logic-consistency-reviewer` -> `novel_check_results/[TARGET_FILE_BASENAME]/02_logic_consistency.yaml` (Note: The agent should read `novel_check_results/[TARGET_FILE_BASENAME]/01_filtered_context.txt` as the settings context, rather than the raw data files in `data/sources/`.)
 - `style-expression-reviewer` -> `novel_check_results/[TARGET_FILE_BASENAME]/03_style_expression.yaml`
 
 ```bash
-echo "Agent: Please execute the above 2 integrated skills in a single pass without chunking. Prioritize key issues and limit findings to a maximum of 15 items for each report."
+echo "Agent: Please run filter_context.py first. Then execute the 2 integrated skills in a single pass. For logic-consistency-reviewer, use 01_filtered_context.txt as settings reference."
 ```
 
 4. **Human Review (per file):** After all 2 `.yaml` files are generated, the user opens each file and changes `accepted: "n"` to `accepted: "y"` for findings they wish to apply. When done, the user instructs the agent to proceed.
