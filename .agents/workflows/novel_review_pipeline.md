@@ -20,7 +20,7 @@ mkdir -p novel_check_results/[TARGET_FILE_BASENAME]
 echo "Agent: Please run novel-formatter on [TARGET_FILE] and save to novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt. Wait for completion of this file's formatting."
 ```
 
-3. Once a file's formatting is complete, run the following 7 review skills **in parallel** on its formatted text `novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt`. 
+3. Once a file's formatting is complete, run the following 2 integrated review skills **in parallel** on its formatted text `novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt`. 
 
 **CRITICAL INSTRUCTION FOR LLM LIMITS:**
 To avoid output token limits and ensure multiple findings are generated per skill without being truncated:
@@ -28,19 +28,14 @@ To avoid output token limits and ensure multiple findings are generated per skil
 - The agent must then consolidate these multiple outputs into a single YAML file per skill.
 - Each skill outputs **YAML format** with `accepted: "n"` fields.
 
-- `world-logic-guard` -> `novel_check_results/[TARGET_FILE_BASENAME]/02_world_logic.yaml`
-- `consistency-checker` -> `novel_check_results/[TARGET_FILE_BASENAME]/03_consistency.yaml`
-- `show-dont-tell-enhancer` -> `novel_check_results/[TARGET_FILE_BASENAME]/04_show_dont_tell.yaml`
-- `foreshadowing-tracker` -> `novel_check_results/[TARGET_FILE_BASENAME]/05_foreshadowing.yaml`
-- `plot-pacing-analyzer` -> `novel_check_results/[TARGET_FILE_BASENAME]/06_pacing.yaml`
-- `rhythm-vocabulary-optimizer` -> `novel_check_results/[TARGET_FILE_BASENAME]/07_rhythm.yaml`
-- `character-voice-checker` -> `novel_check_results/[TARGET_FILE_BASENAME]/08_character_voice.yaml`
+- `logic-consistency-reviewer` -> `novel_check_results/[TARGET_FILE_BASENAME]/02_logic_consistency.yaml`
+- `style-expression-reviewer` -> `novel_check_results/[TARGET_FILE_BASENAME]/03_style_expression.yaml`
 
 ```bash
-echo "Agent: Please execute the above 7 skills. For each skill, use split-prompting or text-chunking to bypass token limits, gather multiple findings, and merge them into the final YAML reports for [TARGET_FILE_BASENAME]."
+echo "Agent: Please execute the above 2 integrated skills. For each skill, use split-prompting or text-chunking to bypass token limits, gather multiple findings, and merge them into the final YAML reports for [TARGET_FILE_BASENAME]."
 ```
 
-4. **Human Review (per file):** After all 7 `.yaml` files are generated, the user opens each file and changes `accepted: "n"` to `accepted: "y"` for findings they wish to apply. When done, the user instructs the agent to proceed.
+4. **Human Review (per file):** After all 2 `.yaml` files are generated, the user opens each file and changes `accepted: "n"` to `accepted: "y"` for findings they wish to apply. When done, the user instructs the agent to proceed.
 
 5. **Apply Accepted Findings:** The agent reads all `.yaml` files in `novel_check_results/[TARGET_FILE_BASENAME]/`, collects every finding where `accepted: "y"`, and applies the corresponding `suggestion` to `novel_check_results/[TARGET_FILE_BASENAME]/01_formatted.txt`. The agent should process findings in order of `location` (line number) from bottom to top to avoid line-number shifts. After all accepted findings are applied, save the updated file.
 ```bash
