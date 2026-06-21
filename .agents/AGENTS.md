@@ -9,6 +9,7 @@
 ## 2. PowerShellコマンドの実行と文字コード
 - **コンソール出力のUTF-8化**:
   PowerShellコマンドを実行する（`run_command`を使用する）際は、出力の文字化けを防ぐため、コマンドの先頭に必ず `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8;` をプレフィックスとして付加してください。
+  （※注意: 各コマンドの実行ツールは毎回独立した新しいPowerShellプロセスで起動されるため、セッションは共有されず、実行ごとに毎回このプレフィックスを付加する必要があります）
   *例*: `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; <実際のコマンド>`
 
 - **ファイル入出力時のエンコーディング指定**:
