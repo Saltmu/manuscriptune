@@ -1,0 +1,50 @@
+<!-- VIEW 1: Dashboard -->
+<div class="view-content active" id="view-dashboard">
+    <div class="scrollable-view">
+        <div class="view-title-area">
+            <h2>ダッシュボード</h2>
+            <p>執筆済みドラフトの管理、新規執筆、校閲ステータスの一覧。</p>
+        </div>
+        
+        <div class="card">
+            <h3>小説ドラフト一覧</h3>
+            <div style="overflow-x: auto;">
+                <table id="novels-table">
+                    <thead>
+                        <tr>
+                            <th>ファイル名</th>
+                            <th>サイズ</th>
+                            <th>最終更新日</th>
+                            <th>校閲指摘</th>
+                            <th>アクション</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populate via API -->
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: var(--text-muted)">読み込み中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div class="card">
+                <h3>Google Drive 同期状況</h3>
+                <div id="drive-sync-status-area" style="font-size: 0.9rem; color: var(--text-muted); display:flex; flex-direction:column; gap:10px;">
+                    <!-- Populate via API -->
+                    読み込み中...
+                </div>
+                <button class="btn-secondary btn-sm" onclick="switchView('sync')">同期画面へ</button>
+            </div>
+            <div class="card">
+                <h3>クイックAI執筆</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted);">
+                    プロットに沿ったエピソードのドラフトを自動生成します。
+                </p>
+                <button class="btn-primary btn-sm" onclick="switchView('write')">執筆画面へ</button>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,83 @@
+<!-- VIEW 3: AI Writing -->
+<div class="view-content" id="view-write">
+    <div class="scrollable-view">
+        <div class="view-title-area">
+            <h2>AI小説執筆</h2>
+            <p>「<span id="novel-title-display">小説</span>」のプロットに基づき、指定された話のエピソードをAIに自動執筆させます。</p>
+        </div>
+
+        <div class="grid-2">
+            <div class="card">
+                <h3>執筆パラメーター設定</h3>
+                <div class="form-group">
+                    <label for="write-episode">執筆する話 (例: 第1話、第2話)</label>
+                    <input type="text" id="write-episode" placeholder="第1話">
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="write-title">小説タイトル</label>
+                    <input type="text" id="write-title" placeholder="重天の調律師">
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="write-model">使用するAIモデル</label>
+                    <select id="write-model">
+                        <option value="Gemini 3.5 Flash (High)">Gemini 3.5 Flash (High)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="write-plot">プロットファイル</label>
+                    <select id="write-plot">
+                        <option value="">(デフォルト/自動解決)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="write-policy-global">全体執筆ポリシー</label>
+                    <select id="write-policy-global">
+                        <option value="">(デフォルト/自動解決)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="write-policy-chapter">章執筆ポリシー</label>
+                    <select id="write-policy-chapter">
+                        <option value="">(デフォルト/自動解決)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="write-settings">設定資料集</label>
+                    <select id="write-settings">
+                        <option value="">(デフォルト/自動解決)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="write-character">キャラクター概要</label>
+                    <select id="write-character">
+                        <option value="">(デフォルト/自動解決)</option>
+                    </select>
+                </div>
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 12px; margin-bottom: 12px;">
+                    ※プロットファイルに存在するエピソード名を正確に入力してください。
+                </p>
+                <div>
+                    <button class="btn-primary" id="btn-run-write" onclick="runAiWriting()">
+                        ✍️ 執筆を開始する
+                    </button>
+                </div>
+            </div>
+            <div class="card">
+                <h3>執筆プロセスの特徴</h3>
+                <ul style="font-size: 0.85rem; color: var(--text-muted); padding-left: 20px; display:flex; flex-direction:column; gap:8px;">
+                    <li>最新の設定資料集・キャラクター概要をコンテキストに含めます。</li>
+                    <li>「執筆ポリシー」に基づいたルビや文体のリズムを自動的に再現します。</li>
+                    <li>成果物は <code>novels/</code> フォルダに自動保存されます。</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="console-container">
+            <div class="console-header">
+                <span>AI Generation Stream</span>
+                <span id="write-console-status">READY</span>
+            </div>
+            <div class="console-log" id="write-console-log">--- 待機中 ---</div>
+        </div>
+    </div>
+</div>
