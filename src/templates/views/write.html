@@ -1,6 +1,11 @@
 <!-- VIEW 3: AI Writing -->
 <div class="view-content" id="view-write">
+    <div class="view-loading-overlay active" id="write-loading-overlay">
+        <div class="spinner"></div>
+        <div class="view-loading-text">AIモデルと設定資料を読み込み中...</div>
+    </div>
     <div class="scrollable-view">
+
         <div class="view-title-area">
             <h2>AI小説執筆</h2>
             <p>「<span id="novel-title-display">小説</span>」のプロットに基づき、指定された話のエピソードをAIに自動執筆させます。</p>

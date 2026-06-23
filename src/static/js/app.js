@@ -199,6 +199,10 @@ function runDriveSync() {
 }
 
 async function loadSourcesForWrite() {
+    const overlay = document.getElementById('write-loading-overlay');
+    if (overlay) {
+        overlay.classList.add('active');
+    }
     try {
         // Load sources
         const response = await fetch('/api/sync/status');
@@ -282,8 +286,13 @@ async function loadSourcesForWrite() {
 
     } catch (err) {
         console.error('Failed to load sources for write:', err);
+    } finally {
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
     }
 }
+
 
 // Trigger AI Novel Writing
 function runAiWriting() {
