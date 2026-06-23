@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Novel Review Editor</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&family=Sawarabi+Mincho&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: #1e293b;
+            --border-color: #334155;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --accent-color: #6366f1;
+            --accent-hover: #4f46e5;
+            
+            --severity-high: #ef4444;
+            --severity-medium: #f97316;
+            --severity-low: #3b82f6;
+            --severity-info: #64748b;
+            
+            --logic-color: #a855f7;
+            --style-color: #0d9488;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        header {
+            background-color: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .header-title-area h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #a5b4fc, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 2px;
+        }
+
+        .header-title-area p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .stats-counter {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            background: rgba(51, 65, 85, 0.5);
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .stats-counter span {
+            color: #818cf8;
+            font-weight: 600;
+        }
+
+        button {
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background-color: var(--accent-color);
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background-color: transparent;
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        /* Main Layout */
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        /* Left Panel - Novel Text */
+        .novel-panel {
+            flex: 3;
+            border-right: 1px solid var(--border-color);
+            background-color: #0b0f19;
+        }
+
+        .panel-header {
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(30, 41, 59, 0.4);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-header h2 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .novel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            font-family: 'Sawarabi Mincho', serif;
+            font-size: 1.05rem;
+            line-height: 2.0;
+            color: #e2e8f0;
+        }
+
+        .novel-line-wrapper {
+            display: flex;
+            position: relative;
+            padding: 2px 0 2px 48px;
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+
+        .novel-line-wrapper:hover {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .novel-line-number {
+            position: absolute;
+            left: 0;
+            width: 40px;
+            text-align: right;
+            color: #475569;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            user-select: none;
+            padding-right: 8px;
+            line-height: 2.0;
+        }
+
+        .novel-line-text {
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
+
+        .novel-line-wrapper.has-finding {
+            cursor: pointer;
+        }
+
+        .novel-line-wrapper.has-finding .novel-line-text {
+            text-decoration: underline dotted #6366f1 2px;
+            text-underline-offset: 4px;
+        }
+
+        .novel-line-wrapper.has-finding.finding-logic .novel-line-text {
+            text-decoration-color: var(--logic-color);
+        }
+
+        .novel-line-wrapper.has-finding.finding-style .novel-line-text {
+            text-decoration-color: var(--style-color);
+        }
+
+        .novel-line-wrapper.highlight {
+            background-color: rgba(99, 102, 241, 0.15) !important;
+            box-shadow: inset 3px 0 0 var(--accent-color);
+        }
+
+        .novel-line-wrapper.highlight.finding-logic {
+            background-color: rgba(168, 85, 247, 0.15) !important;
+            box-shadow: inset 3px 0 0 var(--logic-color);
+        }
+
+        .novel-line-wrapper.highlight.finding-style {
+            background-color: rgba(13, 148, 136, 0.15) !important;
+            box-shadow: inset 3px 0 0 var(--style-color);
+        }
+
+        /* Right Panel - Findings */
+        .findings-panel {
+            flex: 2;
+            background-color: var(--panel-bg);
+            min-width: 400px;
+        }
+
+        .filter-bar {
+            display: flex;
+            gap: 8px;
+            padding: 8px 20px;
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(15, 23, 42, 0.2);
+            overflow-x: auto;
+        }
+
+        .filter-btn {
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background-color: rgba(51, 65, 85, 0.3);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .filter-btn:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+
+        .filter-btn.active {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+            color: #ffffff;
+        }
+
+        .findings-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Finding Card */
+        .finding-card {
+            background-color: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .finding-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 4px;
+            background-color: var(--severity-low);
+        }
+
+        .finding-card.logic::before {
+            background-color: var(--logic-color);
+        }
+
+        .finding-card.style::before {
+            background-color: var(--style-color);
+        }
+
+        .finding-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+            border-color: #475569;
+        }
+
+        .finding-card.active {
+            border-color: var(--accent-color);
+            background-color: rgba(99, 102, 241, 0.05);
+            box-shadow: 0 8px 20px rgba(99, 102, 241, 0.1);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .card-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-id {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+        }
+
+        .badge-category {
+            background-color: rgba(99, 102, 241, 0.15);
+            color: #a5b4fc;
+        }
+
+        .badge-category.logic {
+            background-color: rgba(168, 85, 247, 0.15);
+            color: #d8b4fe;
+        }
+
+        .badge-category.style {
+            background-color: rgba(13, 148, 136, 0.15);
+            color: #99f6e4;
+        }
+
+        .badge-severity {
+            color: #ffffff;
+        }
+
+        .badge-severity.high { background-color: var(--severity-high); }
+        .badge-severity.medium { background-color: var(--severity-medium); }
+        .badge-severity.low { background-color: var(--severity-low); }
+        .badge-severity.info { background-color: var(--severity-info); }
+
+        .card-location {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        /* Toggle Switch */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            user-select: none;
+        }
+
+        .toggle-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 22px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #334155;
+            transition: .3s;
+            border-radius: 34px;
+            border: 1px solid var(--border-color);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(22px);
+        }
+
+        /* Card Content fields */
+        .card-field {
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .field-label {
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 2px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        .field-value {
+            color: var(--text-main);
+        }
+
+        .original-text {
+            background-color: rgba(239, 68, 68, 0.08);
+            border-left: 2px solid var(--severity-high);
+            padding: 6px 10px;
+            border-radius: 0 6px 6px 0;
+            font-family: 'Sawarabi Mincho', serif;
+            margin-top: 4px;
+        }
+
+        .suggestion-text {
+            background-color: rgba(16, 185, 129, 0.08);
+            border-left: 2px solid #10b981;
+            padding: 6px 10px;
+            border-radius: 0 6px 6px 0;
+            font-family: 'Sawarabi Mincho', serif;
+            margin-top: 4px;
+        }
+
+        .analysis-text {
+            color: #cbd5e1;
+            font-style: italic;
+        }
+
+        /* Modal dialogs */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 28px;
+            max-width: 480px;
+            width: 90%;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            transform: scale(0.95);
+            transition: transform 0.3s ease;
+            text-align: center;
+        }
+
+        .modal-overlay.active .modal {
+            transform: scale(1);
+        }
+
+        .modal h3 {
+            font-size: 1.3rem;
+            margin-bottom: 12px;
+        }
+
+        .modal p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+
+        .modal-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background-color: rgba(30, 41, 59, 0.9);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 20px;
+            color: var(--text-main);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            z-index: 200;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title-area">
+            <h1 id="novel-title">Novel Review Editor</h1>
+            <p id="novel-subtitle">校閲指摘の精査・反映</p>
+        </div>
+        <div class="header-actions">
+            <div class="stats-counter">
+                採用: <span id="accepted-count">0</span> / <span id="total-count">0</span> 件
+            </div>
+            <button class="btn-secondary" onclick="confirmShutdown()">終了</button>
+            <button class="btn-primary" onclick="confirmApply()">小説へ反映して終了</button>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Left Panel: Novel Draft -->
+        <div class="panel novel-panel">
+            <div class="panel-header">
+                <h2 id="filename-display">01_formatted.txt</h2>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">
+                    ※ 下線の行をクリックすると指摘に移動します
+                </div>
+            </div>
+            <div class="novel-content" id="novel-content">
+                <!-- Lines populated dynamically -->
+            </div>
+        </div>
+
+        <!-- Right Panel: Findings -->
+        <div class="panel findings-panel">
+            <div class="panel-header" style="border-bottom: none; padding-bottom: 4px;">
+                <h2>校閲指摘一覧</h2>
+            </div>
+            <!-- Filter Options -->
+            <div class="filter-bar">
+                <button class="filter-btn active" onclick="filterCategory('all', this)">すべて</button>
+                <button class="filter-btn" onclick="filterCategory('logic', this)">設定監査 (Logic)</button>
+                <button class="filter-btn" onclick="filterCategory('style', this)">文芸表現 (Style)</button>
+                <div style="width: 1px; height: 16px; background-color: var(--border-color); align-self: center; margin: 0 4px;"></div>
+                <button class="filter-btn" onclick="filterSeverity('all', this)">全重要度</button>
+                <button class="filter-btn" onclick="filterSeverity('high', this)">重大 (High)</button>
+                <button class="filter-btn" onclick="filterSeverity('medium', this)">中 (Medium)</button>
+                <button class="filter-btn" onclick="filterSeverity('low', this)">軽微 (Low)</button>
+            </div>
+            <div class="findings-list" id="findings-list">
+                <!-- Cards populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Apply Modal -->
+    <div class="modal-overlay" id="apply-modal">
+        <div class="modal">
+            <h3>変更を小説に反映しますか？</h3>
+            <p>採用マークした指摘事項を小説テキストに適用し、この編集サーバーを終了します。適用前にバックアップファイルが自動的に作成されます。</p>
+            <div class="modal-buttons">
+                <button class="btn-secondary" onclick="closeModal('apply-modal')">キャンセル</button>
+                <button class="btn-primary" onclick="executeApply()">反映を実行</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Shutdown Modal -->
+    <div class="modal-overlay" id="shutdown-modal">
+        <div class="modal">
+            <h3>編集を終了しますか？</h3>
+            <p>変更した採用状態はYAMLファイルに保存されていますが、小説本文への反映は行わずにサーバーを終了します。</p>
+            <div class="modal-buttons">
+                <button class="btn-secondary" onclick="closeModal('shutdown-modal')">キャンセル</button>
+                <button class="btn-primary" style="background-color: var(--severity-high);" onclick="executeShutdown()">終了する</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast">保存しました</div>
+
+    <script>
+        let novelLines = [];
+        let findings = [];
+        let activeCategoryFilter = 'all';
+        let activeSeverityFilter = 'all';
+        let activeHighlightLine = null;
+
+        // Parse line number from location (e.g., "8行目" -> 8)
+        function parseLineNumber(locationStr) {
+            if (!locationStr) return null;
+            const match = String(locationStr).match(/(\d+)/);
+            return match ? parseInt(match[0], 10) : null;
+        }
+
+        // Fetch Initial Data
+        async function loadData() {
+            try {
+                const response = await fetch('/api/data');
+                if (!response.ok) throw new Error('Data fetch failed');
+                
+                const data = await response.json();
+                novelLines = data.novel_lines;
+                findings = data.findings;
+                
+                document.getElementById('filename-display').textContent = data.novel_filename;
+                
+                renderNovel();
+                renderFindings();
+                updateStats();
+            } catch (err) {
+                console.error(err);
+                alert('データの読み込みに失敗しました。サーバーの起動状態を確認してください。');
+            }
+        }
+
+        // Render Left Panel (Novel Text)
+        function renderNovel() {
+            const container = document.getElementById('novel-content');
+            container.innerHTML = '';
+
+            // Group findings by line number for underlining
+            const findingsByLine = {};
+            findings.forEach(f => {
+                const lineNo = parseLineNumber(f.location);
+                if (lineNo) {
+                    if (!findingsByLine[lineNo]) findingsByLine[lineNo] = [];
+                    findingsByLine[lineNo].push(f);
+                }
+            });
+
+            novelLines.forEach((line, index) => {
+                const lineNo = index + 1;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'novel-line-wrapper';
+                wrapper.id = `novel-line-${lineNo}`;
+
+                // Add Line Number
+                const numSpan = document.createElement('span');
+                numSpan.className = 'novel-line-number';
+                numSpan.textContent = lineNo;
+                wrapper.appendChild(numSpan);
+
+                // Add Text Content
+                const textSpan = document.createElement('span');
+                textSpan.className = 'novel-line-text';
+                textSpan.textContent = line || ' '; // Keep spacing
+                wrapper.appendChild(textSpan);
+
+                // Check for findings associated with this line
+                const lineFindings = findingsByLine[lineNo];
+                if (lineFindings && lineFindings.length > 0) {
+                    wrapper.classList.add('has-finding');
+                    
+                    // Determine dominant category type for underline styling
+                    const hasLogic = lineFindings.some(f => isLogicCategory(f.category));
+                    const hasStyle = lineFindings.some(f => !isLogicCategory(f.category));
+                    
+                    if (hasLogic && hasStyle) {
+                        wrapper.classList.add('finding-logic'); // fallback
+                    } else if (hasLogic) {
+                        wrapper.classList.add('finding-logic');
+                    } else if (hasStyle) {
+                        wrapper.classList.add('finding-style');
+                    }
+
+                    // Click handler to scroll to and highlight finding card
+                    wrapper.addEventListener('click', () => {
+                        highlightLine(lineNo);
+                        // Find first finding card
+                        const cardId = `finding-card-${lineFindings[0].id}`;
+                        const cardEl = document.getElementById(cardId);
+                        if (cardEl) {
+                            cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            highlightCard(lineFindings[0].id);
+                        }
+                    });
+                }
+
+                container.appendChild(wrapper);
+            });
+        }
+
+        // Helper to check if category belongs to logic
+        function isLogicCategory(category) {
+            const cat = String(category).toLowerCase();
+            return cat.includes('ロジック') || cat.includes('設定') || cat.includes('矛盾') || cat.includes('伏線') || cat.includes('整合性') || cat.includes('logic');
+        }
+
+        // Highlight line in left panel
+        function highlightLine(lineNo) {
+            if (activeHighlightLine) {
+                const prev = document.getElementById(`novel-line-${activeHighlightLine}`);
+                if (prev) prev.classList.remove('highlight');
+            }
+            const current = document.getElementById(`novel-line-${lineNo}`);
+            if (current) {
+                current.classList.add('highlight');
+                activeHighlightLine = lineNo;
+            }
+        }
+
+        // Highlight card in right panel
+        function highlightCard(id) {
+            document.querySelectorAll('.finding-card').forEach(c => c.classList.remove('active'));
+            const current = document.getElementById(`finding-card-${id}`);
+            if (current) {
+                current.classList.add('active');
+            }
+        }
+
+        // Render Right Panel (Findings Cards)
+        function renderFindings() {
+            const container = document.getElementById('findings-list');
+            container.innerHTML = '';
+
+            const filtered = findings.filter(f => {
+                // Category filter
+                const isLogic = isLogicCategory(f.category);
+                if (activeCategoryFilter === 'logic' && !isLogic) return false;
+                if (activeCategoryFilter === 'style' && isLogic) return false;
+
+                // Severity filter
+                if (activeSeverityFilter !== 'all' && String(f.severity).toLowerCase() !== activeSeverityFilter) return false;
+
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding-top: 40px; font-size: 0.9rem;">該当する指摘事項はありません</div>`;
+                return;
+            }
+
+            filtered.forEach(f => {
+                const card = document.createElement('div');
+                const isLogic = isLogicCategory(f.category);
+                card.className = `finding-card ${isLogic ? 'logic' : 'style'}`;
+                card.id = `finding-card-${f.id}`;
+
+                // Parse line number for interactive link
+                const lineNo = parseLineNumber(f.location);
+
+                // Build Card HTML
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="card-meta">
+                            <span class="badge badge-id">${f.id}</span>
+                            <span class="badge badge-category ${isLogic ? 'logic' : 'style'}">${f.category}</span>
+                            <span class="badge badge-severity ${String(f.severity).toLowerCase()}">${f.severity}</span>
+                        </div>
+                        <div class="toggle-container">
+                            <span class="toggle-label">採用</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" ${f.accepted === 'y' ? 'checked' : ''} onchange="toggleAccept('${f.id}', this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="card-location">場所: ${f.location}</div>
+                    
+                    <div class="card-field">
+                        <div class="field-label">分析</div>
+                        <div class="field-value analysis-text">${f.analysis}</div>
+                    </div>
+
+                    <div class="card-field">
+                        <div class="field-label">対象テキスト</div>
+                        <div class="field-value original-text">「${f.original}」</div>
+                    </div>
+
+                    <div class="card-field">
+                        <div class="field-label">修正提案</div>
+                        <div class="field-value suggestion-text">${f.suggestion}</div>
+                    </div>
+                `;
+
+                // Add click handler to highlight corresponding text line
+                card.addEventListener('click', (e) => {
+                    // Prevent trigger if clicking on toggle switch
+                    if (e.target.closest('.toggle-container') || e.target.closest('.toggle-switch')) {
+                        return;
+                    }
+                    highlightCard(f.id);
+                    if (lineNo) {
+                        const lineEl = document.getElementById(`novel-line-${lineNo}`);
+                        if (lineEl) {
+                            lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            highlightLine(lineNo);
+                        }
+                    }
+                });
+
+                container.appendChild(card);
+            });
+        }
+
+        // Toggle Accepted State
+        async function toggleAccept(id, isChecked) {
+            const finding = findings.find(f => f.id === id);
+            if (finding) {
+                finding.accepted = isChecked ? 'y' : 'n';
+                updateStats();
+                await saveChanges();
+            }
+        }
+
+        // Update Header Stats
+        function updateStats() {
+            const accepted = findings.filter(f => f.accepted === 'y').length;
+            document.getElementById('accepted-count').textContent = accepted;
+            document.getElementById('total-count').textContent = findings.length;
+        }
+
+        // Save Current State to Server YAML
+        async function saveChanges() {
+            try {
+                const response = await fetch('/api/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ findings: findings })
+                });
+                
+                if (response.ok) {
+                    showToast('自動保存しました');
+                } else {
+                    console.error('Failed to save to server');
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // Filter Logic
+        function filterCategory(cat, btn) {
+            // Update active state
+            document.querySelectorAll('.filter-bar button').forEach(b => {
+                if (b.onclick.toString().includes('filterCategory')) b.classList.remove('active');
+            });
+            btn.classList.add('active');
+
+            activeCategoryFilter = cat;
+            renderFindings();
+        }
+
+        function filterSeverity(sev, btn) {
+            // Update active state
+            document.querySelectorAll('.filter-bar button').forEach(b => {
+                if (b.onclick.toString().includes('filterSeverity')) b.classList.remove('active');
+            });
+            btn.classList.add('active');
+
+            activeSeverityFilter = sev;
+            renderFindings();
+        }
+
+        // Modal Controls
+        function showModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function confirmApply() {
+            showModal('apply-modal');
+        }
+
+        function confirmShutdown() {
+            showModal('shutdown-modal');
+        }
+
+        // Actions
+        async function executeApply() {
+            closeModal('apply-modal');
+            showToast('変更を反映中...', 10000);
+            
+            try {
+                const response = await fetch('/api/apply', { method: 'POST' });
+                if (!response.ok) throw new Error('Apply failed');
+                
+                showToast('小説への反映が完了しました。エディタを終了します。', 3000);
+                setTimeout(() => {
+                    window.close();
+                    document.body.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100vh; font-size:1.2rem; color:var(--text-muted)">反映が完了しました。このブラウザタブを閉じてください。</div>`;
+                }, 1500);
+            } catch (err) {
+                alert('反映処理に失敗しました。コンソールログを確認してください。');
+                console.error(err);
+            }
+        }
+
+        async function executeShutdown() {
+            closeModal('shutdown-modal');
+            try {
+                await fetch('/api/shutdown', { method: 'POST' });
+                window.close();
+                document.body.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100vh; font-size:1.2rem; color:var(--text-muted)">サーバーをシャットダウンしました。このブラウザタブを閉じてください。</div>`;
+            } catch (err) {
+                console.error(err);
+                window.close();
+            }
+        }
+
+        // Toast control
+        let toastTimeout;
+        function showToast(message, duration = 1500) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('show');
+            }, duration);
+        }
+
+        // Load initially
+        window.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>

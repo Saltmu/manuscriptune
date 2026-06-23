@@ -238,9 +238,19 @@ def main():
     else:
         print("[WARNING] integrate_findings.py not found. Integration skipped.", file=sys.stderr)
         
+    # Step 5: Start Review Editor Server
+    print("\nStarting Interactive Review Editor UI...")
+    server_script = os.path.join("src", "review_server.py")
+    if os.path.exists(server_script):
+        integrated_yaml = os.path.join(output_dir, "00_integrated_findings.yaml")
+        cmd = ["poetry", "run", "python", server_script, formatted_draft, integrated_yaml]
+        print(f"Running: {' '.join(cmd)}")
+        # Run it and block until the user decides to apply or shutdown
+        subprocess.run(cmd)
+    else:
+        print("[WARNING] review_server.py not found. Interactive UI skipped.", file=sys.stderr)
+        
     print("\n=== Review Pipeline Finished ===")
-    print("To review and apply changes, you can examine:")
-    print(f"Consolidated Findings: {os.path.join(output_dir, '00_integrated_findings.yaml')}")
 
 if __name__ == '__main__':
     main()
