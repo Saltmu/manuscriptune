@@ -1,3 +1,4 @@
+let isRunningProcess = false;
 let novelLines = [];
 let findings = [];
 let activeCategoryFilter = 'all';
@@ -8,6 +9,10 @@ let selectedNovelFile = "";
 
 // Switch Tabs/Views
 function switchView(viewId) {
+    if (isRunningProcess) {
+        showToast('プロセス実行中は画面を切り替えられません。');
+        return;
+    }
     document.querySelectorAll('.view-content').forEach(v => v.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
     
@@ -141,6 +146,9 @@ function startEventStream(url, consoleId, statusId, onComplete = null) {
     statusEl.textContent = 'RUNNING';
     statusEl.style.color = '#fbbf24'; // Amber
 
+    document.body.classList.add('process-running');
+    isRunningProcess = true;
+
     const eventSource = new EventSource(url);
 
     eventSource.onmessage = function(event) {
@@ -150,6 +158,10 @@ function startEventStream(url, consoleId, statusId, onComplete = null) {
             statusEl.textContent = code === '0' ? 'COMPLETED' : 'FAILED';
             statusEl.style.color = code === '0' ? '#34d399' : '#f87171';
             eventSource.close();
+            
+            document.body.classList.remove('process-running');
+            isRunningProcess = false;
+
             if (onComplete) onComplete(code === '0');
             return;
         }
@@ -162,6 +174,11 @@ function startEventStream(url, consoleId, statusId, onComplete = null) {
         statusEl.textContent = 'CONNECTION ERROR';
         statusEl.style.color = '#f87171';
         eventSource.close();
+        
+        document.body.classList.remove('process-running');
+        isRunningProcess = false;
+
+        if (onComplete) onComplete(false);
     };
 }
 
@@ -227,6 +244,42 @@ async function loadSourcesForWrite() {
                 modelSelect.appendChild(opt);
             });
         }
+
+        // Restore values from localStorage and attach event listeners to save changes
+        const fields = [
+            'write-episode',
+            'write-title',
+            'write-model',
+            'write-plot',
+            'write-policy-global',
+            'write-policy-chapter',
+            'write-settings',
+            'write-character'
+        ];
+
+        fields.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            // Restore from localStorage
+            const savedVal = localStorage.getItem(id);
+            if (savedVal !== null) {
+                el.value = savedVal;
+            }
+
+            // Bind change listener for saving
+            if (!el.dataset.listenerRegistered) {
+                el.dataset.listenerRegistered = 'true';
+                const saveHandler = () => {
+                    localStorage.setItem(id, el.value);
+                };
+                el.addEventListener('change', saveHandler);
+                if (el.tagName === 'INPUT') {
+                    el.addEventListener('input', saveHandler);
+                }
+            }
+        });
+
     } catch (err) {
         console.error('Failed to load sources for write:', err);
     }
