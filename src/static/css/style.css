@@ -414,3 +414,42 @@ input:checked + .slider:before { transform: translateX(22px); }
 
 .toast { position: fixed; bottom: 24px; right: 24px; background-color: rgba(30, 41, 59, 0.9); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 20px; color: var(--text-main); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3); z-index: 200; transform: translateY(100px); opacity: 0; transition: all 0.3s; }
 .toast.show { transform: translateY(0); opacity: 1; }
+
+/* Form elements 2-column grid layout */
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 24px;
+}
+
+@media (max-width: 768px) {
+    .form-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+}
+
+/* Process locking styles */
+body.process-running aside {
+    pointer-events: none;
+    opacity: 0.5;
+    transition: opacity 0.3s;
+}
+
+body.process-running #view-write .card,
+body.process-running #view-review .card,
+body.process-running #view-sync .card {
+    pointer-events: none;
+    opacity: 0.5;
+    transition: opacity 0.3s;
+}
+
+body.process-running #view-write .card input,
+body.process-running #view-write .card select,
+body.process-running #view-write .card button,
+body.process-running #view-review .card select,
+body.process-running #view-review .card button,
+body.process-running #view-sync .card button {
+    cursor: not-allowed;
+}
+
