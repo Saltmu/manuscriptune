@@ -66,8 +66,8 @@ def get_skill_prompt(skill_name, target_text, output_dir):
     skill_instruction = read_file(skill_md_path)
     
     context_text = ""
-    def get_latest_file(pattern):
-        return writer_helper.resolve_latest_file(os.path.join("data", "sources", pattern), None)
+    def get_latest_file(pattern_key, default_pattern):
+        return writer_helper.resolve_novel_file_by_pattern(pattern_key, default_pattern, None)
 
     if skill_name == 'logic-consistency-reviewer':
         filtered_context_path = os.path.join(output_dir, "01_filtered_context.txt")
@@ -77,9 +77,9 @@ def get_skill_prompt(skill_name, target_text, output_dir):
         else:
             # Fallback to raw files
             print(f"[{skill_name}] Warning: filtered context not found. Loading raw sources.")
-            setting_file = get_latest_file("*設定資料集*.txt")
-            char_file = get_latest_file("*キャラクター概要*.txt")
-            plot_file = get_latest_file("*プロット*.txt")
+            setting_file = get_latest_file("settings", "*設定資料集*.txt")
+            char_file = get_latest_file("character", "*キャラクター概要*.txt")
+            plot_file = get_latest_file("plot", "*プロット*.txt")
             if setting_file:
                 context_text += f"\n【設定資料集】\n{read_file(setting_file)}\n"
             if char_file:
@@ -88,8 +88,8 @@ def get_skill_prompt(skill_name, target_text, output_dir):
                 context_text += f"\n【プロット】\n{read_file(plot_file)}\n"
             
     elif skill_name == 'style-expression-reviewer':
-        char_file = get_latest_file("*キャラクター概要*.txt")
-        policy_file = get_latest_file("*執筆ポリシー_全体*.txt")
+        char_file = get_latest_file("character", "*キャラクター概要*.txt")
+        policy_file = get_latest_file("policy_global", "*執筆ポリシー_全体*.txt")
         if char_file:
             context_text += f"\n【キャラクター概要】\n{read_file(char_file)}\n"
         if policy_file:

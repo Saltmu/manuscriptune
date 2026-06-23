@@ -3,6 +3,13 @@ import re
 import sys
 import math
 
+# Add skills/novel-writer to path to use writer_helper
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'skills', 'novel-writer')))
+try:
+    import writer_helper
+except ImportError:
+    writer_helper = None
+
 # A set of common Japanese words to ignore as search keywords (Stopwords)
 STOPWORDS = {
     "こと", "もの", "とき", "ため", "これ", "それ", "あれ", "どれ", "ここ", "そこ", "あそこ", "どこ",
@@ -24,8 +31,12 @@ def extract_entities_from_sources(sources_dir):
     if not os.path.exists(sources_dir):
         return entities
 
-    # Add hardcoded main characters for safety
-    entities.update(["アルフ", "ミーナ", "エイラ", "バスィム", "ザルコス", "ナディール", "レフ"])
+    # Add main characters from project config
+    if writer_helper:
+        main_chars = writer_helper.get_novel_setting("main_characters", ["アルフ", "ミーナ", "エイラ", "バスィム", "ザルコス", "ナディール", "レフ"])
+    else:
+        main_chars = ["アルフ", "ミーナ", "エイラ", "バスィム", "ザルコス", "ナディール", "レフ"]
+    entities.update(main_chars)
 
     ruby_pattern = re.compile(r'([一-龠ぁ-んァ-ヴー]{2,15})（([ァ-ヴーa-zA-Z\s・]+)）')
     bracket_pattern = re.compile(r'『([^』]{2,15})』')

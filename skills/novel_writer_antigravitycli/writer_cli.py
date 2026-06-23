@@ -35,21 +35,22 @@ def get_episode_plot(plot_file, episode_title):
     print(f"Error: Episode '{episode_title}' not found in plot.", file=sys.stderr)
     return None, ""
 
-def generate_prompt(chapter_title, episode_title, plot_content):
+def generate_prompt(chapter_title, episode_title, plot_content, novel_title=None, policy_global=None, policy_chapter=None, settings=None, character=None):
     """geminiに渡すプロンプト（指示文とコンテキストの結合）を生成する"""
     
     # 参照ファイルのパス（プロジェクトルートからの相対パスを想定）
-    POLICY_FILE = writer_helper.resolve_latest_file("data/sources/*執筆ポリシー_全体*.txt", "data/sources/00_1_執筆ポリシー_全体_ver.5.0.txt")
-    POLICY_FILE_MACRO = writer_helper.resolve_latest_file("data/sources/*執筆ポリシー_第1幕*.txt", "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt")
-    SETTING_FILE = writer_helper.resolve_latest_file("data/sources/*設定資料集*.txt", "data/sources/09_0_重天の調律師_設定資料集.txt")
-    CHARACTER_FILE = writer_helper.resolve_latest_file("data/sources/*キャラクター概要*.txt", "data/sources/03_1_第1幕キャラクター概要 ver.2.txt")
+    POLICY_FILE = policy_global if policy_global else writer_helper.resolve_novel_file_by_pattern("policy_global", "*執筆ポリシー_全体*.txt", "data/sources/00_1_執筆ポリシー_全体_ver.5.0.txt")
+    POLICY_FILE_MACRO = policy_chapter if policy_chapter else writer_helper.resolve_novel_file_by_pattern("policy_chapter", "*執筆ポリシー_第*.txt", "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt")
+    SETTING_FILE = settings if settings else writer_helper.resolve_novel_file_by_pattern("settings", "*設定資料集*.txt", "data/sources/09_0_重天の調律師_設定資料集.txt")
+    CHARACTER_FILE = character if character else writer_helper.resolve_novel_file_by_pattern("character", "*キャラクター概要*.txt", "data/sources/03_1_第1幕キャラクター概要 ver.2.txt")
     
     policy_text = read_file(POLICY_FILE)
     policy_macro_text = read_file(POLICY_FILE_MACRO)
     setting_text = read_file(SETTING_FILE)
     character_text = read_file(CHARACTER_FILE)
     
-    prompt = f"""あなたは「重天の調律師」シリーズの専属作家です。
+    actual_title = novel_title if novel_title else writer_helper.get_novel_setting("title", "重天の調律師")
+    prompt = f"""あなたは「{actual_title}」シリーズの専属作家です。
 以下の「執筆ポリシー」「設定資料集」「キャラクター概要」を完全に把握し、ポリシーを厳守して物語を綴ってください。
 
 ==============================
@@ -94,9 +95,14 @@ def extract_numbers(text):
 def main():
     parser = argparse.ArgumentParser(description="Use Antigravity CLI (agy) to write a novel episode.")
     parser.add_argument("--episode", required=True, help="Episode title (e.g., '第1話')")
-    default_plot = writer_helper.resolve_latest_file("data/sources/*第1幕プロット*.txt", "data/sources/04_1_第1幕プロットver.3.0.txt")
+    default_plot = writer_helper.resolve_novel_file_by_pattern("plot", "*第1幕プロット*.txt", "data/sources/04_1_第1幕プロットver.3.0.txt")
     parser.add_argument("--plot-file", default=default_plot, help="Path to the plot file.")
     parser.add_argument("--model", default="Gemini 3.5 Flash (High)", help="Model to use with Antigravity CLI (default: Gemini 3.5 Flash (High))")
+    parser.add_argument("--title", help="Novel title")
+    parser.add_argument("--policy-global", help="Path to global policy file")
+    parser.add_argument("--policy-chapter", help="Path to chapter policy file")
+    parser.add_argument("--settings", help="Path to settings file")
+    parser.add_argument("--character", help="Path to character overview file")
     
     args = parser.parse_args()
     
@@ -107,7 +113,16 @@ def main():
         sys.exit(1)
         
     # プロンプトの生成
-    prompt = generate_prompt(chapter_title, args.episode, plot_content)
+    prompt = generate_prompt(
+        chapter_title,
+        args.episode,
+        plot_content,
+        novel_title=args.title,
+        policy_global=args.policy_global,
+        policy_chapter=args.policy_chapter,
+        settings=args.settings,
+        character=args.character
+    )
     
     # 出力ファイル名の決定 (novels/X_Y.txt)
     ch_num = extract_numbers(chapter_title) if chapter_title else "0"

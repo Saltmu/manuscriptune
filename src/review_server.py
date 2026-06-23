@@ -16,6 +16,8 @@ from typing import List, Optional
 
 # Import apply_findings logic from apply_findings.py
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'skills', 'novel-writer')))
+import writer_helper
 
 app = FastAPI(title="Novel Studio - AI Writing & Review Portal")
 
@@ -77,6 +79,36 @@ async def get_index():
         raise HTTPException(status_code=404, detail=f"Template not found at {template}")
     with open(template, 'r', encoding='utf-8') as f:
         return f.read()
+
+@app.get("/api/config")
+async def get_config():
+    novel_title = writer_helper.get_novel_setting("title", "重天の調律師")
+    return {"novel_title": novel_title}
+
+@app.get("/api/models")
+async def list_available_models():
+    try:
+        res = subprocess.run(["agy", "models"], capture_output=True, text=True)
+        if res.returncode != 0:
+            return {"models": ["Gemini 3.5 Flash (High)", "Gemini 3.5 Flash (Medium)", "Gemini 3.5 Flash (Low)"]}
+        
+        lines = res.stdout.strip().split('\n')
+        models = []
+        for line in lines:
+            line_clean = line.replace('⠋', '').replace('⠙', '').replace('⠹', '').replace('⠸', '').replace('⠼', '').replace('⠴', '').replace('⠦', '').replace('⠧', '').replace('⠇', '').replace('⠏', '').strip()
+            if not line_clean:
+                continue
+            if "Fetching available models" in line_clean:
+                continue
+            if line_clean not in models:
+                models.append(line_clean)
+        
+        if not models:
+            models = ["Gemini 3.5 Flash (High)", "Gemini 3.5 Flash (Medium)", "Gemini 3.5 Flash (Low)"]
+        return {"models": models}
+    except Exception as e:
+        print(f"Error fetching models: {e}")
+        return {"models": ["Gemini 3.5 Flash (High)", "Gemini 3.5 Flash (Medium)", "Gemini 3.5 Flash (Low)"]}
 
 @app.get("/api/novels")
 async def list_novels():
@@ -242,8 +274,32 @@ async def stream_review(file: str = Query(..., description="Novel text filename 
     return stream_process_output(cmd)
 
 @app.get("/api/stream/write")
-async def stream_write(episode: str = Query(..., description="Episode title e.g. 第1話")):
+async def stream_write(
+    episode: str = Query(..., description="Episode title e.g. 第1話"),
+    novel_title: Optional[str] = Query(None),
+    policy_global: Optional[str] = Query(None),
+    policy_chapter: Optional[str] = Query(None),
+    settings: Optional[str] = Query(None),
+    character: Optional[str] = Query(None),
+    plot: Optional[str] = Query(None),
+    model: Optional[str] = Query(None)
+):
     cmd = ["poetry", "run", "python", "skills/novel_writer_antigravitycli/writer_cli.py", "--episode", episode]
+    if model:
+        cmd.extend(["--model", model])
+    if novel_title:
+        cmd.extend(["--title", novel_title])
+    if policy_global:
+        cmd.extend(["--policy-global", f"data/sources/{policy_global}"])
+    if policy_chapter:
+        cmd.extend(["--policy-chapter", f"data/sources/{policy_chapter}"])
+    if settings:
+        cmd.extend(["--settings", f"data/sources/{settings}"])
+    if character:
+        cmd.extend(["--character", f"data/sources/{character}"])
+    if plot:
+        cmd.extend(["--plot-file", f"data/sources/{plot}"])
+        
     return stream_process_output(cmd)
 
 

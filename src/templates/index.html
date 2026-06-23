@@ -538,7 +538,7 @@
             <div class="scrollable-view">
                 <div class="view-title-area">
                     <h2>AI小説執筆</h2>
-                    <p>「重天の調律師」のプロットに基づき、指定された話のエピソードをAIに自動執筆させます。</p>
+                    <p>「<span id="novel-title-display">小説</span>」のプロットに基づき、指定された話のエピソードをAIに自動執筆させます。</p>
                 </div>
 
                 <div class="grid-2">
@@ -548,8 +548,48 @@
                             <label for="write-episode">執筆する話 (例: 第1話、第2話)</label>
                             <input type="text" id="write-episode" placeholder="第1話">
                         </div>
-                        <p style="font-size: 0.8rem; color: var(--text-muted);">
-                            ※プロット（04_1_第1幕プロット*.txt）に存在するエピソード名を正確に入力してください。
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label for="write-title">小説タイトル</label>
+                            <input type="text" id="write-title" placeholder="重天の調律師">
+                        </div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label for="write-model">使用するAIモデル</label>
+                            <select id="write-model">
+                                <option value="Gemini 3.5 Flash (High)">Gemini 3.5 Flash (High)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label for="write-plot">プロットファイル</label>
+                            <select id="write-plot">
+                                <option value="">(デフォルト/自動解決)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label for="write-policy-global">全体執筆ポリシー</label>
+                            <select id="write-policy-global">
+                                <option value="">(デフォルト/自動解決)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label for="write-policy-chapter">章執筆ポリシー</label>
+                            <select id="write-policy-chapter">
+                                <option value="">(デフォルト/自動解決)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label for="write-settings">設定資料集</label>
+                            <select id="write-settings">
+                                <option value="">(デフォルト/自動解決)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label for="write-character">キャラクター概要</label>
+                            <select id="write-character">
+                                <option value="">(デフォルト/自動解決)</option>
+                            </select>
+                        </div>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 12px; margin-bottom: 12px;">
+                            ※プロットファイルに存在するエピソード名を正確に入力してください。
                         </p>
                         <div>
                             <button class="btn-primary" id="btn-run-write" onclick="runAiWriting()">
@@ -884,6 +924,57 @@
             });
         }
 
+        async function loadSourcesForWrite() {
+            try {
+                // Load sources
+                const response = await fetch('/api/sync/status');
+                const data = await response.json();
+                
+                const selects = [
+                    'write-plot',
+                    'write-policy-global',
+                    'write-policy-chapter',
+                    'write-settings',
+                    'write-character'
+                ];
+                
+                selects.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    
+                    // Keep the first default option
+                    el.innerHTML = '<option value="">(デフォルト/自動解決)</option>';
+                    
+                    data.sources.forEach(src => {
+                        const opt = document.createElement('option');
+                        opt.value = src.name;
+                        opt.textContent = src.name;
+                        el.appendChild(opt);
+                    });
+                });
+
+                // Load models
+                const modelRes = await fetch('/api/models');
+                const modelData = await modelRes.json();
+                const modelSelect = document.getElementById('write-model');
+                if (modelSelect && modelData.models) {
+                    modelSelect.innerHTML = '';
+                    modelData.models.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m;
+                        opt.textContent = m;
+                        // Select Flash High as default
+                        if (m.includes('High') || m.includes('Flash (High)')) {
+                            opt.selected = true;
+                        }
+                        modelSelect.appendChild(opt);
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to load sources for write:', err);
+            }
+        }
+
         // Trigger AI Novel Writing
         function runAiWriting() {
             const epInput = document.getElementById('write-episode').value.trim();
@@ -892,10 +983,26 @@
                 return;
             }
 
+            const titleVal = document.getElementById('write-title').value.trim();
+            const modelVal = document.getElementById('write-model').value;
+            const plotVal = document.getElementById('write-plot').value;
+            const policyGlobalVal = document.getElementById('write-policy-global').value;
+            const policyChapterVal = document.getElementById('write-policy-chapter').value;
+            const settingsVal = document.getElementById('write-settings').value;
+            const characterVal = document.getElementById('write-character').value;
+
             const btn = document.getElementById('btn-run-write');
             btn.disabled = true;
 
-            const url = `/api/stream/write?episode=${encodeURIComponent(epInput)}`;
+            let url = `/api/stream/write?episode=${encodeURIComponent(epInput)}`;
+            if (modelVal) url += `&model=${encodeURIComponent(modelVal)}`;
+            if (titleVal) url += `&novel_title=${encodeURIComponent(titleVal)}`;
+            if (plotVal) url += `&plot=${encodeURIComponent(plotVal)}`;
+            if (policyGlobalVal) url += `&policy_global=${encodeURIComponent(policyGlobalVal)}`;
+            if (policyChapterVal) url += `&policy_chapter=${encodeURIComponent(policyChapterVal)}`;
+            if (settingsVal) url += `&settings=${encodeURIComponent(settingsVal)}`;
+            if (characterVal) url += `&character=${encodeURIComponent(characterVal)}`;
+
             startEventStream(url, 'write-console-log', 'write-console-status', (success) => {
                 btn.disabled = false;
                 if (success) {
@@ -1214,8 +1321,23 @@
             setTimeout(() => { toast.classList.remove('show'); }, duration);
         }
 
+        async function loadProjectConfig() {
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+                if (data.novel_title) {
+                    const titleEl = document.getElementById('novel-title-display');
+                    if (titleEl) titleEl.textContent = data.novel_title;
+                }
+            } catch (err) {
+                console.error('Failed to load project config:', err);
+            }
+        }
+
         // Init Load
         window.addEventListener('DOMContentLoaded', () => {
+            loadProjectConfig();
+            loadSourcesForWrite();
             loadDashboardData();
         });
     </script>

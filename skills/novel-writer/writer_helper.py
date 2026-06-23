@@ -2,6 +2,33 @@ import re
 import argparse
 import os
 import glob
+import yaml
+
+def load_project_config():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    config_path = os.path.join(project_root, 'antigravity.yaml')
+    if not os.path.exists(config_path):
+        config_path = 'antigravity.yaml'
+        if not os.path.exists(config_path):
+            return {}
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+def get_novel_setting(key, default=None):
+    config = load_project_config()
+    novel_config = config.get('project', {}).get('novel', {})
+    return novel_config.get(key, default)
+
+def resolve_novel_file_by_pattern(pattern_key, default_pattern, default_fallback=None):
+    file_patterns = get_novel_setting('file_patterns', {})
+    pattern = file_patterns.get(pattern_key, default_pattern)
+    if not pattern.startswith('data/sources/'):
+        pattern = os.path.join('data', 'sources', pattern)
+    return resolve_latest_file(pattern, default_fallback)
 
 def resolve_latest_file(pattern, default=None):
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -97,7 +124,7 @@ def get_chapter_episodes(chapters, chapter_title):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse novel plot files.")
-    default_plot = resolve_latest_file("data/sources/*第1幕プロット*.txt", "data/sources/04_1_第1幕プロットver.3.0.txt")
+    default_plot = resolve_novel_file_by_pattern("plot", "*第1幕プロット*.txt", "data/sources/04_1_第1幕プロットver.3.0.txt")
     parser.add_argument("--file", default=default_plot, help="Path to the plot file.")
     parser.add_argument("--list", action="store_true", help="List all chapters and episodes.")
     parser.add_argument("--get-chapter", type=str, help="Get episodes for a specific chapter (e.g., '第1章').")
