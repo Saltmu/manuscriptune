@@ -160,6 +160,7 @@ def main():
     parser.add_argument("--model", default="Gemini 3.5 Flash (High)", help="AI Model to use for review skills.")
     parser.add_argument("--dir", help="Output directory path (defaults to novel_check_results/[basename])")
     parser.add_argument("--workers", type=int, default=2, help="Number of parallel worker threads.")
+    parser.add_argument("--no-server", action="store_true", help="Skip launching the web server editor at the end.")
     args = parser.parse_args()
     
     if not os.path.exists(args.target_file):
@@ -238,9 +239,18 @@ def main():
     else:
         print("[WARNING] integrate_findings.py not found. Integration skipped.", file=sys.stderr)
         
+    # Step 5: Start Review Editor Server
+    if not args.no_server:
+        print("\nStarting Interactive Review Editor UI...")
+        server_script = os.path.join("src", "review_server.py")
+        if os.path.exists(server_script):
+            cmd = ["poetry", "run", "python", server_script, formatted_draft, os.path.join(output_dir, "00_integrated_findings.yaml")]
+            print(f"Running: {' '.join(cmd)}")
+            subprocess.run(cmd)
+        else:
+            print("[WARNING] review_server.py not found. Interactive UI skipped.", file=sys.stderr)
+            
     print("\n=== Review Pipeline Finished ===")
-    print("To review and apply changes, you can examine:")
-    print(f"Consolidated Findings: {os.path.join(output_dir, '00_integrated_findings.yaml')}")
 
 if __name__ == '__main__':
     main()
