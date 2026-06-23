@@ -1,19 +1,23 @@
+import argparse
 import os
 import re
-import sys
-import argparse
 import subprocess
+import sys
+
 import yaml
+
 
 def read_file(filepath):
     if not filepath or not os.path.exists(filepath):
         return ""
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, encoding="utf-8") as f:
         return f.read()
 
+
 def write_file(filepath, content):
-    with open(filepath, 'w', encoding='utf-8') as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
+
 
 def parse_line_number(location_str):
     """
@@ -22,10 +26,11 @@ def parse_line_number(location_str):
     """
     if not location_str:
         return None
-    match = re.search(r'(\d+)', str(location_str))
+    match = re.search(r"(\d+)", str(location_str))
     if match:
         return int(match.group(1))
     return None
+
 
 def query_llm_for_replacement(original, suggestion, model):
     """
@@ -48,24 +53,36 @@ def query_llm_for_replacement(original, suggestion, model):
 
     cmd = ["agy", "-p", "", "--model", model]
     try:
-        process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         stdout, stderr = process.communicate(input=prompt)
-        
+
         if process.returncode != 0:
-            print(f"Warning: agy CLI failed with error: {stderr.strip()}", file=sys.stderr)
+            print(
+                f"Warning: agy CLI failed with error: {stderr.strip()}", file=sys.stderr
+            )
             return None
-            
+
         result = stdout.strip()
         # Clean up any accidental markdown formatting the LLM might have returned
-        result = re.sub(r'^```[a-zA-Z]*\n', '', result)
-        result = re.sub(r'\n```$', '', result).strip()
+        result = re.sub(r"^```[a-zA-Z]*\n", "", result)
+        result = re.sub(r"\n```$", "", result).strip()
         return result
     except FileNotFoundError:
-        print("Warning: 'agy' CLI not found. Cannot use LLM for replacement.", file=sys.stderr)
+        print(
+            "Warning: 'agy' CLI not found. Cannot use LLM for replacement.",
+            file=sys.stderr,
+        )
         return None
     except Exception as e:
         print(f"Warning: Unexpected error calling agy: {e}", file=sys.stderr)
         return None
+
 
 def extract_suggestion_candidate(suggestion):
     """
@@ -73,12 +90,13 @@ def extract_suggestion_candidate(suggestion):
     e.g., 「修正後のテキスト」 or （例：「〜」）
     """
     # Look for text inside Japanese quotes 「...」
-    matches = re.findall(r'「([^」]+)」', suggestion)
+    matches = re.findall(r"「([^」]+)」", suggestion)
     if matches:
         # If there are multiple, prefer the longer one or the last one if it looks like a full sentence.
         # But generally, if there is at least one, we can return it as a candidate.
-        return matches[-1] # Usually the example is at the end
+        return matches[-1]  # Usually the example is at the end
     return None
+
 
 def apply_finding_to_text(text_lines, finding, model, use_llm=True):
     """
@@ -86,15 +104,15 @@ def apply_finding_to_text(text_lines, finding, model, use_llm=True):
     Modifies text_lines in place if match is found.
     Returns (success, applied_text, method)
     """
-    original = finding.get('original', '').strip()
-    suggestion = finding.get('suggestion', '').strip()
-    location_str = finding.get('location', '')
-    
+    original = finding.get("original", "").strip()
+    suggestion = finding.get("suggestion", "").strip()
+    location_str = finding.get("location", "")
+
     if not original:
         return False, "Original text is empty", None
 
     line_no = parse_line_number(location_str)
-    
+
     # Define a helper to replace within a range of lines
     def try_replace_in_range(start_idx, end_idx):
         for idx in range(start_idx, end_idx):
@@ -140,13 +158,18 @@ def apply_finding_to_text(text_lines, finding, model, use_llm=True):
 
     # Absolute fallback: if no candidate could be extracted, we cannot perform automatic replacement
     if not replacement:
-        return False, "Could not extract replacement text from suggestion. Manual intervention required.", None
+        return (
+            False,
+            "Could not extract replacement text from suggestion. Manual intervention required.",
+            None,
+        )
 
     # Execute the replacement in the line
     new_line = matched_line.replace(original, replacement)
     text_lines[match_idx] = new_line
-    
+
     return True, replacement, method
+
 
 def print_finding_diff(finding):
     """
@@ -155,20 +178,48 @@ def print_finding_diff(finding):
     print("-" * 60)
     print(f"ID      : {finding.get('id', 'N/A')}")
     print(f"場所    : {finding.get('location', 'N/A')}")
-    print(f"カテゴリ: {finding.get('category', 'N/A')} (重要度: {finding.get('severity', 'N/A')})")
+    print(
+        f"カテゴリ: {finding.get('category', 'N/A')} (重要度: {finding.get('severity', 'N/A')})"
+    )
     print(f"分析    : {finding.get('analysis', 'N/A')}")
     print(f"原文    : \033[31m{finding.get('original', 'N/A')}\033[0m")
     print(f"修正案  : \033[32m{finding.get('suggestion', 'N/A')}\033[0m")
     print("-" * 60)
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Apply integrated findings to formatted novel draft.")
-    parser.add_argument("--dir", required=True, help="Directory containing 01_formatted.txt and 00_integrated_findings.yaml")
-    parser.add_argument("--interactive", action="store_true", help="Prompt user for each finding in the terminal.")
-    parser.add_argument("--auto", action="store_true", help="Automatically apply all findings marked as accepted: 'y'.")
-    parser.add_argument("--accept-ids", help="Comma-separated list of finding IDs to accept and apply (e.g. INT-001,INT-003).")
-    parser.add_argument("--model", default="Gemini 3.5 Flash (High)", help="LLM model for generating replacements.")
-    parser.add_argument("--no-llm", action="store_true", help="Disable LLM replacement, use local extraction rules instead.")
+    parser = argparse.ArgumentParser(
+        description="Apply integrated findings to formatted novel draft."
+    )
+    parser.add_argument(
+        "--dir",
+        required=True,
+        help="Directory containing 01_formatted.txt and 00_integrated_findings.yaml",
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Prompt user for each finding in the terminal.",
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Automatically apply all findings marked as accepted: 'y'.",
+    )
+    parser.add_argument(
+        "--accept-ids",
+        help="Comma-separated list of finding IDs to accept and apply (e.g. INT-001,INT-003).",
+    )
+    parser.add_argument(
+        "--model",
+        default="Gemini 3.5 Flash (High)",
+        help="LLM model for generating replacements.",
+    )
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Disable LLM replacement, use local extraction rules instead.",
+    )
     args = parser.parse_args()
 
     output_dir = args.dir
@@ -192,9 +243,9 @@ def main():
 
     # Load findings YAML
     try:
-        with open(findings_yaml_path, 'r', encoding='utf-8') as f:
+        with open(findings_yaml_path, encoding="utf-8") as f:
             yaml_data = yaml.safe_load(f)
-        findings = yaml_data.get('findings', []) if isinstance(yaml_data, dict) else []
+        findings = yaml_data.get("findings", []) if isinstance(yaml_data, dict) else []
     except Exception as e:
         print(f"Error parsing YAML '{findings_yaml_path}': {e}", file=sys.stderr)
         sys.exit(1)
@@ -206,12 +257,12 @@ def main():
     # Filter/Select findings to apply
     accepted_ids = set()
     if args.accept_ids:
-        accepted_ids = {x.strip() for x in args.accept_ids.split(',')}
+        accepted_ids = {x.strip() for x in args.accept_ids.split(",")}
 
     # Sort findings by line number in descending order (reverse application)
     # This prevents line number shifts from affecting upper lines.
     def get_sort_key(f):
-        ln = parse_line_number(f.get('location', ''))
+        ln = parse_line_number(f.get("location", ""))
         return ln if ln is not None else 0
 
     findings_sorted = sorted(findings, key=get_sort_key, reverse=True)
@@ -220,41 +271,49 @@ def main():
     skipped_count = 0
     failed_count = 0
 
-    findings_map = {f.get('id'): f for f in findings}
+    findings_map = {f.get("id"): f for f in findings}
 
     for finding in findings_sorted:
-        fid = finding.get('id')
-        
+        fid = finding.get("id")
+
         # Determine if we should apply this finding
         should_apply = False
-        
+
         if args.interactive:
             print_finding_diff(finding)
             # Suggest extracted replacement if LLM disabled or for review
-            candidate = extract_suggestion_candidate(finding.get('suggestion', ''))
+            candidate = extract_suggestion_candidate(finding.get("suggestion", ""))
             if candidate:
                 print(f"(抽出された簡易修正案候補: 「{candidate}」)")
-                
-            choice = input("この指摘を適用しますか？ [y:はい / n:いいえ / e:手動入力 / a:以降すべて適用 / q:終了して保存]: ").strip().lower()
-            if choice == 'y':
+
+            choice = (
+                input(
+                    "この指摘を適用しますか？ [y:はい / n:いいえ / e:手動入力 / a:以降すべて適用 / q:終了して保存]: "
+                )
+                .strip()
+                .lower()
+            )
+            if choice == "y":
                 should_apply = True
-            elif choice == 'e':
-                custom_replacement = input("適用する修正後のテキストを入力してください: ").strip()
+            elif choice == "e":
+                custom_replacement = input(
+                    "適用する修正後のテキストを入力してください: "
+                ).strip()
                 # Override suggestion for this run
-                finding['suggestion'] = f"「{custom_replacement}」に修正してください。"
+                finding["suggestion"] = f"「{custom_replacement}」に修正してください。"
                 should_apply = True
-            elif choice == 'a':
+            elif choice == "a":
                 args.interactive = False
                 args.auto = True
                 # Also mark current and subsequent accepted ones
                 should_apply = True
-            elif choice == 'q':
+            elif choice == "q":
                 print("適用処理を終了し、これまでの変更を保存します。")
                 break
             else:
                 # 'n' or anything else
                 skipped_count += 1
-                finding['accepted'] = 'n'
+                finding["accepted"] = "n"
                 continue
         elif args.accept_ids:
             if fid in accepted_ids:
@@ -263,7 +322,7 @@ def main():
                 skipped_count += 1
                 continue
         elif args.auto:
-            if finding.get('accepted') == 'y':
+            if finding.get("accepted") == "y":
                 should_apply = True
             else:
                 skipped_count += 1
@@ -275,38 +334,44 @@ def main():
             # Re-run loop for this finding
             print_finding_diff(finding)
             choice = input("この指摘を適用しますか？ [y/n/e/a/q]: ").strip().lower()
-            if choice == 'y':
+            if choice == "y":
                 should_apply = True
-            elif choice == 'e':
-                custom_replacement = input("修正後のテキストを入力してください: ").strip()
-                finding['suggestion'] = f"「{custom_replacement}」に修正してください。"
+            elif choice == "e":
+                custom_replacement = input(
+                    "修正後のテキストを入力してください: "
+                ).strip()
+                finding["suggestion"] = f"「{custom_replacement}」に修正してください。"
                 should_apply = True
-            elif choice == 'a':
+            elif choice == "a":
                 args.interactive = False
                 args.auto = True
                 should_apply = True
-            elif choice == 'q':
+            elif choice == "q":
                 break
             else:
                 skipped_count += 1
-                finding['accepted'] = 'n'
+                finding["accepted"] = "n"
                 continue
 
         if should_apply:
             # Apply the finding
-            success, result_text, method = apply_finding_to_text(text_lines, finding, args.model, not args.no_llm)
+            success, result_text, method = apply_finding_to_text(
+                text_lines, finding, args.model, not args.no_llm
+            )
             if success:
                 print(f"[SUCCESS] {fid} を適用しました ({method}方式)。")
                 print(f"  -> 置換後: '{result_text}'")
                 applied_count += 1
                 # Update status in original list
                 if fid in findings_map:
-                    findings_map[fid]['accepted'] = 'y'
+                    findings_map[fid]["accepted"] = "y"
             else:
-                print(f"[FAIL] {fid} の適用に失敗しました: {result_text}", file=sys.stderr)
+                print(
+                    f"[FAIL] {fid} の適用に失敗しました: {result_text}", file=sys.stderr
+                )
                 failed_count += 1
                 if fid in findings_map:
-                    findings_map[fid]['accepted'] = 'n'
+                    findings_map[fid]["accepted"] = "n"
 
     # Save modified text
     write_file(formatted_txt_path, "".join(text_lines))
@@ -314,16 +379,21 @@ def main():
 
     # Save updated findings YAML
     # Keep original order when saving YAML
-    updated_yaml_data = {'findings': findings}
+    updated_yaml_data = {"findings": findings}
     try:
-        with open(findings_yaml_path, 'w', encoding='utf-8') as f:
-            yaml.dump(updated_yaml_data, f, allow_unicode=True, default_flow_style=False)
+        with open(findings_yaml_path, "w", encoding="utf-8") as f:
+            yaml.dump(
+                updated_yaml_data, f, allow_unicode=True, default_flow_style=False
+            )
         print(f"指摘YAMLを更新しました: {findings_yaml_path}")
     except Exception as e:
         print(f"Error saving updated YAML '{findings_yaml_path}': {e}", file=sys.stderr)
 
-    print(f"\n=== 反映処理完了 ===")
-    print(f"適用: {applied_count} 件, スキップ: {skipped_count} 件, 失敗: {failed_count} 件")
+    print("\n=== 反映処理完了 ===")
+    print(
+        f"適用: {applied_count} 件, スキップ: {skipped_count} 件, 失敗: {failed_count} 件"
+    )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
