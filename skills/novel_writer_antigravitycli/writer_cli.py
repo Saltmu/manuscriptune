@@ -50,7 +50,14 @@ def generate_prompt(chapter_title, episode_title, plot_content, novel_title=None
     character_text = read_file(CHARACTER_FILE)
     
     actual_title = novel_title if novel_title else writer_helper.get_novel_setting("title", "重天の調律師")
-    prompt = f"""あなたは「{actual_title}」シリーズの専属作家です。
+    prompt = f"""【超重要指示：ツールの使用禁止】
+あなたは一切のツール（ファイルの読み書き、ディレクトリの確認、コマンドの実行など）を使用してはなりません。
+プロジェクトの調査や他のスクリプト（writer_cli.pyなど）の実行を決して試みないでください。
+思考プロセスや挨拶、指示の確認などのメタなテキストは一切出力せず、ただちに小説の本文のみをテキスト出力してください。
+あなたの唯一のタスクは、提示された以下の設定資料とプロットに基づき、小説の本文のみをただちに出力することです。
+本文の最初の1文字目から出力を開始してください。
+
+あなたは「{actual_title}」シリーズの専属作家です。
 以下の「執筆ポリシー」「設定資料集」「キャラクター概要」を完全に把握し、ポリシーを厳守して物語を綴ってください。
 
 ==============================
