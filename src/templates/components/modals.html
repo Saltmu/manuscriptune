@@ -1,0 +1,25 @@
+<!-- Confirm Apply Modal -->
+<div class="modal-overlay" id="apply-modal">
+    <div class="modal">
+        <h3>変更を小説に反映しますか？</h3>
+        <p>採用マークした指摘事項を小説テキストに適用し、この編集サーバーを終了します。適用前にバックアップファイルが自動的に作成されます。</p>
+        <div class="modal-buttons">
+            <button class="btn-secondary" onclick="closeModal('apply-modal')">キャンセル</button>
+            <button class="btn-primary" onclick="executeApply()">反映を実行</button>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Global Shutdown Modal -->
+<div class="modal-overlay" id="shutdown-global-modal">
+    <div class="modal">
+        <h3>Novel Studio を終了しますか？</h3>
+        <p>サーバーをシャットダウンし、ブラウザセッションを終了します。保存された採用マーク情報はYAMLファイルに残ります。</p>
+        <div class="modal-buttons">
+            <button class="btn-secondary" onclick="closeModal('shutdown-global-modal')">キャンセル</button>
+            <button class="btn-primary" style="background-color: var(--severity-high);" onclick="executeGlobalShutdown()">終了する</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast">保存しました</div>

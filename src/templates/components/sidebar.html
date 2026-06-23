@@ -1,0 +1,18 @@
+<!-- Sidebar Navigation -->
+<aside>
+    <div class="brand">
+        <h1>Novel Studio</h1>
+        <p>AI Writing & Review Platform</p>
+    </div>
+    <ul class="nav-links">
+        <li><a class="nav-item active" onclick="switchView('dashboard')">📊 ダッシュボード</a></li>
+        <li><a class="nav-item" onclick="switchView('sync')">🔄 設定資料同期</a></li>
+        <li><a class="nav-item" onclick="switchView('write')">✍️ AI小説執筆</a></li>
+        <li><a class="nav-item" onclick="switchView('review')">🔍 レビュー実行</a></li>
+        <li><a class="nav-item" id="nav-editor-link" onclick="switchView('editor')">📝 校閲・反映</a></li>
+    </ul>
+    <div class="sidebar-footer">
+        <span>Editor-AI v1.1</span>
+        <button class="btn-secondary btn-sm" onclick="shutdownServerGlobal()">終了</button>
+    </div>
+</aside>

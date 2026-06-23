@@ -9,8 +9,10 @@ import webbrowser
 import datetime
 import subprocess
 from pathlib import Path
+import re
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -20,6 +22,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 's
 import writer_helper
 
 app = FastAPI(title="Novel Studio - AI Writing & Review Portal")
+
+# Mount static directory for CSS/JS
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 # Global variables to store paths
 NOVEL_PATH = ""
@@ -41,10 +46,23 @@ class SaveFindingsRequest(BaseModel):
 class SelectFileRequest(BaseModel):
     novel_name: str
 
-def get_template_path():
-    """Locates the templates/index.html file."""
-    template_path = Path(__file__).parent / "templates" / "index.html"
-    return template_path
+def render_html_template(template_name: str) -> str:
+    """Recursively resolves <!--#include file="filename.html"--> placeholders."""
+    template_dir = Path(__file__).parent / "templates"
+    template_path = template_dir / template_name
+    
+    if not template_path.exists():
+        raise HTTPException(status_code=404, detail=f"Template {template_name} not found")
+        
+    with open(template_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+        
+    def replace_match(match):
+        include_file = match.group(1)
+        return render_html_template(include_file)
+        
+    # Pattern to match: <!--#include file="some/path.html"-->
+    return re.sub(r'<!--#include file="([^"]+)"-->', replace_match, content)
 
 # Helper to run a command and stream its output via SSE (Server-Sent Events)
 def stream_process_output(cmd):
@@ -74,11 +92,10 @@ def stream_process_output(cmd):
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
-    template = get_template_path()
-    if not template.exists():
-        raise HTTPException(status_code=404, detail=f"Template not found at {template}")
-    with open(template, 'r', encoding='utf-8') as f:
-        return f.read()
+    try:
+        return render_html_template("index.html")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Template rendering error: {str(e)}")
 
 @app.get("/api/config")
 async def get_config():

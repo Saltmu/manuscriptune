@@ -1,0 +1,29 @@
+<!-- VIEW 2: Google Drive Sync -->
+<div class="view-content" id="view-sync">
+    <div class="scrollable-view">
+        <div class="view-title-area">
+            <h2>設定資料同期</h2>
+            <p>Google Driveに保管された最新の設定資料集、キャラクター概要、プロットをローカルへ同期します。</p>
+        </div>
+
+        <div class="card">
+            <h3>同期の実行</h3>
+            <p style="font-size: 0.9rem; color: var(--text-muted)">
+                スキル実行前の自動同期は無効化されています。設定資料を更新した場合は、ここから明示的に同期を実行してください。
+            </p>
+            <div>
+                <button class="btn-primary" id="btn-run-sync" onclick="runDriveSync()">
+                    🔄 同期処理を開始する
+                </button>
+            </div>
+        </div>
+
+        <div class="console-container">
+            <div class="console-header">
+                <span>Terminal Log Stream</span>
+                <span id="sync-console-status">READY</span>
+            </div>
+            <div class="console-log" id="sync-console-log">--- 待機中 ---</div>
+        </div>
+    </div>
+</div>
