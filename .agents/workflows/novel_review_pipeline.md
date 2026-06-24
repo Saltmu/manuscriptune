@@ -59,16 +59,16 @@ echo "Agent: Read 02_logic_consistency.yaml and 03_style_expression.yaml, resolv
    
    Alternatively, the user can run the interactive CLI script directly in their terminal to review and apply them step-by-step:
    ```bash
-   poetry run python src/apply_findings.py --dir novel_check_results/[TARGET_FILE_BASENAME] --interactive
+   poetry run apply-findings --dir novel_check_results/[TARGET_FILE_BASENAME] --interactive
    ```
 
 5. **Apply Selection (Automated via Script):**
    Once the user specifies which findings to apply in the chat (or decides to apply all), the agent runs the `apply_findings.py` script with the corresponding mode to modify the text accurately and update the YAML status.
    - To apply specific IDs selected by the user:
      ```bash
-     poetry run python src/apply_findings.py --dir novel_check_results/[TARGET_FILE_BASENAME] --accept-ids INT-001,INT-003
+     poetry run apply-findings --dir novel_check_results/[TARGET_FILE_BASENAME] --accept-ids INT-001,INT-003
      ```
    - To apply all findings marked as `accepted: "y"` (if the user edited the YAML file manually):
      ```bash
-     poetry run python src/apply_findings.py --dir novel_check_results/[TARGET_FILE_BASENAME] --auto
+     poetry run apply-findings --dir novel_check_results/[TARGET_FILE_BASENAME] --auto
      ```

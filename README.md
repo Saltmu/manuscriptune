@@ -74,7 +74,7 @@ novel_tools/
 #### 1. WebUIサーバー単体の起動
 小説の選択、新規執筆、Google Driveとの同期、既存のレビュー結果の確認や適用を行う場合は、以下のコマンドでWebUIサーバーを起動します。
 ```bash
-poetry run python src/review_server.py
+poetry run review-server
 ```
 起動後、自動的にブラウザ（デフォルト: `http://localhost:8000`）が開きます。
 
@@ -82,13 +82,13 @@ poetry run python src/review_server.py
 特定の小説ファイルのレビュー（フォーマット整形、コンテキスト抽出、並列レビュー、LLM統合）を一括で実行し、完了後に自動的にWebUIを起動して結果を表示したい場合は、以下のコマンドを実行します。
 ```bash
 # 特定の章をレビューして、完了後に自動的にWebUIを起動する場合
-poetry run python src/run_review_pipeline.py novels/1_12.txt
+poetry run run-review novels/1_12.txt
 
 # 使用するモデルを指定する場合 (デフォルト: Gemini 3.5 Flash (High))
-poetry run python src/run_review_pipeline.py novels/1_12.txt --model "Gemini 3.5 Flash (High)"
+poetry run run-review novels/1_12.txt --model "Gemini 3.5 Flash (High)"
 
 # WebUIサーバーの自動起動をスキップし、CUIでのレビュー実行のみで完了させたい場合
-poetry run python src/run_review_pipeline.py novels/1_12.txt --no-server
+poetry run run-review novels/1_12.txt --no-server
 ```
 
 ---
@@ -131,16 +131,16 @@ WebUIを使わずに、コマンドラインから直接反映を実行したい
 
 ```bash
 # ターミナル上で1件ずつ確認しながら反映する（手動修正入力も可能）
-poetry run python src/apply_findings.py --dir novel_check_results/1_12 --interactive
+poetry run apply-findings --dir novel_check_results/1_12 --interactive
 
 # 手動でYAMLを編集して accepted: "y" にしたものを一括自動反映する
-poetry run python src/apply_findings.py --dir novel_check_results/1_12 --auto
+poetry run apply-findings --dir novel_check_results/1_12 --auto
 
 # 特定の指摘ID（カンマ区切り）だけを指定して反映する
-poetry run python src/apply_findings.py --dir novel_check_results/1_12 --accept-ids INT-001,INT-003
+poetry run apply-findings --dir novel_check_results/1_12 --accept-ids INT-001,INT-003
 
 # LLMを使用せず、指摘内容の「suggestion」から修正文字列を抽出して単純置換する
-poetry run python src/apply_findings.py --dir novel_check_results/1_12 --auto --no-llm
+poetry run apply-findings --dir novel_check_results/1_12 --auto --no-llm
 ```
 
 #### レビュー結果のYAML構造

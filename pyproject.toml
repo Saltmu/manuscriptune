@@ -3,8 +3,8 @@ name = "novel-tools-system"
 version = "0.1.0"
 description = "小説の整合性と世界観をチェックするエージェント環境"
 authors = ["sshioyama"]
-package-mode = false
 readme = "README.md"
+packages = [{include = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -33,6 +33,12 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
+
+[tool.poetry.scripts]
+run-review = "src.run_review_pipeline:main"
+review-server = "src.review_server:main"
+apply-findings = "src.apply_findings:main"
+sync-gdrive = "src.sync_gdrive:main"
 
 [build-system]
 requires = ["poetry-core"]
