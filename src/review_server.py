@@ -92,6 +92,7 @@ def stream_process_output(cmd):
             text=True,
             bufsize=1,
             universal_newlines=True,
+            encoding="utf-8",
         )
 
         while True:
@@ -329,7 +330,17 @@ async def stream_apply():
     try:
         parent_dir = os.path.dirname(NOVEL_PATH)
         script_path = os.path.join(os.path.dirname(__file__), "apply_findings.py")
-        cmd = ["poetry", "run", "python", script_path, "--dir", parent_dir, "--auto"]
+        cmd = [
+            "poetry",
+            "run",
+            "python",
+            "-u",
+            script_path,
+            "--dir",
+            parent_dir,
+            "--auto",
+        ]
+
         return stream_process_output(cmd)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error applying changes: {str(e)}")
@@ -346,7 +357,8 @@ async def shutdown(background_tasks: BackgroundTasks):
 
 @app.get("/api/stream/sync")
 async def stream_sync():
-    cmd = ["poetry", "run", "python", "src/sync_gdrive.py"]
+    cmd = ["poetry", "run", "python", "-u", "src/sync_gdrive.py"]
+
     return stream_process_output(cmd)
 
 
@@ -364,10 +376,12 @@ async def stream_review(
         "poetry",
         "run",
         "python",
+        "-u",
         "src/run_review_pipeline.py",
         novel_path,
         "--no-server",
     ]
+
     return stream_process_output(cmd)
 
 
@@ -385,10 +399,12 @@ async def stream_write(
         "poetry",
         "run",
         "python",
+        "-u",
         "skills/novel_writer_antigravitycli/writer_cli.py",
         "--episode",
         episode,
     ]
+
     if model:
         cmd.extend(["--model", model])
     if novel_title:

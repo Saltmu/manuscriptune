@@ -1,27 +1,42 @@
 <!-- VIEW 4: Review Pipeline -->
-<div class="view-content" id="view-review">
-    <div class="scrollable-view">
-        <div class="view-title-area">
-            <h2>並列レビュー実行</h2>
-            <p>設定監査と文芸表現の並列チェック、および編集長AIによる競合解消パイプラインを実行します。</p>
+<div class="view-content split-view-content" id="view-review">
+    <div class="split-container">
+        <!-- 左ペイン: 設定 -->
+        <div class="left-panel">
+            <div class="left-panel-content">
+                <div class="view-title-area">
+                    <h2>並列レビュー実行</h2>
+                    <p>設定監査と文芸表現の並列チェック、および編集長AIによる競合解消パイプラインを実行します。</p>
+                </div>
+
+                <div class="card">
+                    <h3>レビューの実行設定</h3>
+                    <div class="form-group">
+                        <label for="review-file-select">校閲対象のドラフトファイル</label>
+                        <select id="review-file-select">
+                            <!-- Populated via API -->
+                        </select>
+                    </div>
+                    <div style="margin-top: 8px; display: flex; gap: 12px; align-items: center;">
+                        <button class="btn-primary" id="btn-run-review" onclick="runReviewPipeline()">
+                            🔍 レビューパイプラインを実行
+                        </button>
+                        <button class="console-toggle-btn" id="review-console-toggle" onclick="toggleConsole('view-review')">
+                            🖥️ コンソール表示
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="review-complete-actions" style="display:none; text-align:center;">
+                    <button class="btn-primary" style="background-color: #10b981;" onclick="goToEditorFromReview()">
+                        📝 レビュー完了！校閲・反映画面へ進む
+                    </button>
+                </div>
+            </div>
         </div>
 
-        <div class="card">
-            <h3>レビューの実行設定</h3>
-            <div class="form-group">
-                <label for="review-file-select">校閲対象のドラフトファイル</label>
-                <select id="review-file-select">
-                    <!-- Populated via API -->
-                </select>
-            </div>
-            <div>
-                <button class="btn-primary" id="btn-run-review" onclick="runReviewPipeline()">
-                    🔍 レビューパイプラインを実行
-                </button>
-            </div>
-        </div>
-
-        <div class="console-container">
+        <!-- 右ペイン: リアルタイムコンソール -->
+        <div class="right-panel" id="review-right-panel">
             <div class="console-header">
                 <span>Review Pipeline Console</span>
                 <span id="review-console-status">READY</span>
@@ -29,10 +44,8 @@
             <div class="console-log" id="review-console-log">--- 待機中 ---</div>
         </div>
         
-        <div id="review-complete-actions" style="display:none; text-align:center;">
-            <button class="btn-primary" style="background-color: #10b981;" onclick="goToEditorFromReview()">
-                📝 レビュー完了！校閲・反映画面へ進む
-            </button>
-        </div>
+        <!-- ドラッグリサイザー -->
+        <div class="resizer-bar" id="review-resizer"></div>
     </div>
 </div>
+

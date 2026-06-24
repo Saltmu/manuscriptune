@@ -1,29 +1,42 @@
 <!-- VIEW 2: Google Drive Sync -->
-<div class="view-content" id="view-sync">
-    <div class="scrollable-view">
-        <div class="view-title-area">
-            <h2>設定資料同期</h2>
-            <p>Google Driveに保管された最新の設定資料集、キャラクター概要、プロットをローカルへ同期します。</p>
-        </div>
+<div class="view-content split-view-content" id="view-sync">
+    <div class="split-container">
+        <!-- 左ペイン: 設定 -->
+        <div class="left-panel">
+            <div class="left-panel-content">
+                <div class="view-title-area">
+                    <h2>設定資料同期</h2>
+                    <p>Google Driveに保管された最新の設定資料集、キャラクター概要、プロットをローカルへ同期します。</p>
+                </div>
 
-        <div class="card">
-            <h3>同期の実行</h3>
-            <p style="font-size: 0.9rem; color: var(--text-muted)">
-                スキル実行前の自動同期は無効化されています。設定資料を更新した場合は、ここから明示的に同期を実行してください。
-            </p>
-            <div>
-                <button class="btn-primary" id="btn-run-sync" onclick="runDriveSync()">
-                    🔄 同期処理を開始する
-                </button>
+                <div class="card">
+                    <h3>同期の実行</h3>
+                    <p style="font-size: 0.9rem; color: var(--text-muted)">
+                        スキル実行前の自動同期は無効化されています。設定資料を更新した場合は、ここから明示的に同期を実行してください。
+                    </p>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <button class="btn-primary" id="btn-run-sync" onclick="runDriveSync()">
+                            🔄 同期処理を開始する
+                        </button>
+                        <button class="console-toggle-btn" id="sync-console-toggle" onclick="toggleConsole('view-sync')">
+                            🖥️ コンソール表示
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="console-container">
+        <!-- 右ペイン: リアルタイムコンソール -->
+        <div class="right-panel" id="sync-right-panel">
             <div class="console-header">
                 <span>Terminal Log Stream</span>
                 <span id="sync-console-status">READY</span>
             </div>
             <div class="console-log" id="sync-console-log">--- 待機中 ---</div>
         </div>
+        
+        <!-- ドラッグリサイザー -->
+        <div class="resizer-bar" id="sync-resizer"></div>
     </div>
 </div>
+

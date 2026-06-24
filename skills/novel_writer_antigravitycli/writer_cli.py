@@ -3,6 +3,7 @@ import argparse
 import subprocess
 import json
 import re
+import threading
 
 # 既存のヘルパーからプロット情報を取得するため、パスを追加してインポート
 import sys
@@ -141,9 +142,42 @@ def main():
     cmd = ["agy", "-p", "", "--model", args.model]
     
     try:
-        # subprocess.run を使って、標準入力を経由してプロンプトを渡す
-        process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = process.communicate(input=prompt)
+        # subprocess.Popen を使って、標準入力を経由してプロンプトを渡す
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding='utf-8'
+        )
+        
+        # stdinへの書き込みを別スレッドで行い、デッドロックを防ぐ
+        def write_stdin():
+            try:
+                process.stdin.write(prompt)
+                process.stdin.close()
+            except Exception as e:
+                print(f"Error writing to stdin: {e}", file=sys.stderr)
+
+        stdin_thread = threading.Thread(target=write_stdin)
+        stdin_thread.start()
+
+        # stdout をリアルタイムに読み取り、標準出力に流しつつ保存する
+        full_output = []
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                full_output.append(line)
+
+        stdin_thread.join()
+        
+        # 残りのエラー出力を取得
+        stderr = process.stderr.read()
         
         if process.returncode != 0:
             print(f"Error calling Antigravity CLI (agy):", file=sys.stderr)
@@ -151,10 +185,12 @@ def main():
             sys.exit(process.returncode)
             
         # 結果をファイルに保存
+        novel_content = "".join(full_output)
         with open(output_filename, 'w', encoding='utf-8') as f:
-            f.write(stdout.strip() + "\n")
+            f.write(novel_content.strip() + "\n")
             
         print(f"Success! Novel saved to {output_filename}")
+
         
     except FileNotFoundError:
         print("Error: 'agy' CLI not found. Please ensure it is installed and in your PATH.", file=sys.stderr)

@@ -146,8 +146,19 @@ function startEventStream(url, consoleId, statusId, onComplete = null) {
     statusEl.textContent = 'RUNNING';
     statusEl.style.color = '#fbbf24'; // Amber
 
+    // 自動的に右側コンソールパネルを開く
+    const rightPanel = consoleEl.closest('.right-panel');
+    if (rightPanel) {
+        rightPanel.classList.add('show');
+        const viewEl = consoleEl.closest('.view-content');
+        if (viewEl) {
+            updateToggleButtonText(viewEl.id, true);
+        }
+    }
+
     document.body.classList.add('process-running');
     isRunningProcess = true;
+
 
     const eventSource = new EventSource(url);
 
@@ -181,6 +192,61 @@ function startEventStream(url, consoleId, statusId, onComplete = null) {
         if (onComplete) onComplete(false);
     };
 }
+
+// Helper to update console toggle button text
+function updateToggleButtonText(viewId, isShow) {
+    const prefix = viewId.replace('view-', '');
+    const toggleBtn = document.getElementById(`${prefix}-console-toggle`);
+    if (toggleBtn) {
+        toggleBtn.textContent = isShow ? '🖥️ コンソール非表示' : '🖥️ コンソール表示';
+    }
+}
+
+// Manual Toggle for Consoles
+function toggleConsole(viewId) {
+    const prefix = viewId.replace('view-', '');
+    const rightPanel = document.getElementById(`${prefix}-right-panel`);
+    if (rightPanel) {
+        const isShow = rightPanel.classList.toggle('show');
+        updateToggleButtonText(viewId, isShow);
+    }
+}
+
+// Initialize mouse resizing for sliding panels
+function initPanelResizer(resizerId, rightPanelId) {
+    const resizer = document.getElementById(resizerId);
+    const rightPanel = document.getElementById(rightPanelId);
+    if (!resizer || !rightPanel) return;
+
+    resizer.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        resizer.classList.add('dragging');
+        document.addEventListener('mousemove', resize);
+        document.addEventListener('mouseup', stopResize);
+    });
+
+    function resize(e) {
+        const container = resizer.parentElement;
+        const containerWidth = container.clientWidth;
+        const containerLeft = container.getBoundingClientRect().left;
+        
+        // Calculate width from the right edge
+        const rightWidth = containerWidth - (e.clientX - containerLeft);
+        
+        // Constrain width between 300px and 70% of the viewport width
+        if (rightWidth >= 300 && rightWidth <= containerWidth * 0.7) {
+            rightPanel.style.width = rightWidth + 'px';
+            rightPanel.style.flex = 'none'; // Override flex properties
+        }
+    }
+
+    function stopResize() {
+        resizer.classList.remove('dragging');
+        document.removeEventListener('mousemove', resize);
+        document.removeEventListener('mouseup', stopResize);
+    }
+}
+
 
 // Trigger Google Drive Sync
 function runDriveSync() {
@@ -677,4 +743,10 @@ window.addEventListener('DOMContentLoaded', () => {
     loadProjectConfig();
     loadSourcesForWrite();
     loadDashboardData();
+    
+    // Initialize resizers
+    initPanelResizer('write-resizer', 'write-right-panel');
+    initPanelResizer('review-resizer', 'review-right-panel');
+    initPanelResizer('sync-resizer', 'sync-right-panel');
 });
+

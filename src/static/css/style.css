@@ -522,4 +522,141 @@ body.process-running #view-sync .card button {
     line-height: 1.4;
 }
 
+/* Split Layout for View Contents */
+.split-view-content {
+    padding: 0 !important;
+}
+
+.split-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    height: 100%;
+    position: relative;
+    width: 100%;
+}
+
+.left-panel {
+    flex: 1.2;
+    min-width: 300px;
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--bg-color);
+}
+
+.left-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.right-panel {
+    width: 0;
+    flex: none;
+    background-color: #05070c;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+.right-panel.show {
+    width: 450px; /* default opening width */
+}
+
+.right-panel .console-header {
+    background-color: #0b0f19;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.right-panel .console-header span:first-child {
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--text-main);
+}
+
+.right-panel .console-log {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #10b981;
+    line-height: 1.6;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.85rem;
+}
+
+/* Resizer Bar */
+.resizer-bar {
+    width: 6px;
+    cursor: col-resize;
+    background-color: transparent;
+    transition: background-color 0.2s;
+    z-index: 10;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.resizer-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 2px;
+    background-color: var(--border-color);
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+/* Hide resizer when left panel sibling is not visible or right panel is not shown */
+.right-panel:not(.show) ~ .resizer-bar {
+    display: none;
+}
+
+.resizer-bar:hover, .resizer-bar.dragging {
+    background-color: rgba(99, 102, 241, 0.2);
+}
+
+.resizer-bar:hover::after, .resizer-bar.dragging::after {
+    background-color: var(--accent-color);
+    opacity: 1;
+}
+
+/* Console Toggle Button */
+.console-toggle-btn {
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.console-toggle-btn:hover {
+    color: var(--text-main);
+    background-color: rgba(99, 102, 241, 0.1);
+    border-color: var(--accent-color);
+}
+
+
 
