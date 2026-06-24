@@ -393,7 +393,6 @@ async def stream_write(
     novel_title: str | None = Query(None),
     policy_global: str | None = Query(None),
     policy_chapter: str | None = Query(None),
-    settings: str | None = Query(None),
     character: str | None = Query(None),
     plot: str | None = Query(None),
     model: str | None = Query(None),
@@ -414,8 +413,6 @@ async def stream_write(
         cmd.extend(["--policy-global", f"data/sources/{policy_global}"])
     if policy_chapter:
         cmd.extend(["--policy-chapter", f"data/sources/{policy_chapter}"])
-    if settings:
-        cmd.extend(["--settings", f"data/sources/{settings}"])
     if character:
         cmd.extend(["--character", f"data/sources/{character}"])
     if plot:

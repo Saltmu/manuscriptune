@@ -212,7 +212,6 @@ async function loadSourcesForWrite() {
             'write-plot',
             'write-policy-global',
             'write-policy-chapter',
-            'write-settings',
             'write-character'
         ];
         
@@ -257,7 +256,6 @@ async function loadSourcesForWrite() {
             'write-plot',
             'write-policy-global',
             'write-policy-chapter',
-            'write-settings',
             'write-character'
         ];
 
@@ -307,7 +305,6 @@ function runAiWriting() {
     const plotVal = document.getElementById('write-plot').value;
     const policyGlobalVal = document.getElementById('write-policy-global').value;
     const policyChapterVal = document.getElementById('write-policy-chapter').value;
-    const settingsVal = document.getElementById('write-settings').value;
     const characterVal = document.getElementById('write-character').value;
 
     const btn = document.getElementById('btn-run-write');
@@ -319,7 +316,6 @@ function runAiWriting() {
     if (plotVal) url += `&plot=${encodeURIComponent(plotVal)}`;
     if (policyGlobalVal) url += `&policy_global=${encodeURIComponent(policyGlobalVal)}`;
     if (policyChapterVal) url += `&policy_chapter=${encodeURIComponent(policyChapterVal)}`;
-    if (settingsVal) url += `&settings=${encodeURIComponent(settingsVal)}`;
     if (characterVal) url += `&character=${encodeURIComponent(characterVal)}`;
 
     startEventStream(url, 'write-console-log', 'write-console-status', (success) => {
