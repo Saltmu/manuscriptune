@@ -342,6 +342,7 @@ function runReviewPipeline() {
     const btn = document.getElementById('btn-run-review');
     const actionsArea = document.getElementById('review-complete-actions');
     btn.disabled = true;
+    btn.innerHTML = '🔍 レビュー実行中...';
     actionsArea.style.display = 'none';
 
     lastReviewedFile = fileName;
@@ -349,6 +350,7 @@ function runReviewPipeline() {
     const url = `/api/stream/review?file=${encodeURIComponent(fileName)}`;
     startEventStream(url, 'review-console-log', 'review-console-status', (success) => {
         btn.disabled = false;
+        btn.innerHTML = '🔍 レビューパイプラインを実行';
         if (success) {
             showToast('レビューパイプラインが正常に完了しました');
             actionsArea.style.display = 'block';
@@ -498,12 +500,26 @@ function renderFindings() {
 
         const lineNo = parseLineNumber(f.location);
 
+        let statusBadgeHtml = '';
+        let errorMsgHtml = '';
+        if (f.apply_status === 'success') {
+            statusBadgeHtml = `<span class="badge badge-apply-success">反映成功</span>`;
+        } else if (f.apply_status === 'failed') {
+            statusBadgeHtml = `<span class="badge badge-apply-failed">反映失敗</span>`;
+            errorMsgHtml = `
+                <div class="apply-error-msg">
+                    <strong>反映失敗:</strong> ${f.apply_result || '原因不明のエラー'}
+                </div>
+            `;
+        }
+
         card.innerHTML = `
             <div class="card-header">
                 <div class="card-meta">
                     <span class="badge badge-id">${f.id}</span>
                     <span class="badge badge-category ${isLogic ? 'logic' : 'style'}">${f.category}</span>
                     <span class="badge badge-severity ${String(f.severity).toLowerCase()}">${f.severity}</span>
+                    ${statusBadgeHtml}
                 </div>
                 <div class="toggle-container">
                     <span class="toggle-label">採用</span>
@@ -526,6 +542,7 @@ function renderFindings() {
                 <div class="field-label">修正提案</div>
                 <div class="field-value suggestion-text">${f.suggestion}</div>
             </div>
+            ${errorMsgHtml}
         `;
 
         card.addEventListener('click', (e) => {
@@ -599,19 +616,24 @@ function confirmGlobalShutdown() { showModal('shutdown-global-modal'); }
 
 async function executeApply() {
     closeModal('apply-modal');
-    showToast('変更を小説に反映中...', 10000);
-    try {
-        const response = await fetch('/api/apply', { method: 'POST' });
-        if (!response.ok) throw new Error('Apply failed');
-        showToast('反映が完了しました。シャットダウンします。');
-        setTimeout(() => {
-            window.close();
-            document.body.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100vh; font-size:1.2rem; color:var(--text-muted)">反映が完了しました。ブラウザタブを閉じてください。</div>`;
-        }, 1500);
-    } catch (err) {
-        alert('反映に失敗しました。');
-        console.error(err);
-    }
+    showModal('apply-progress-modal');
+
+    const closeBtn = document.getElementById('btn-close-apply-progress');
+    if (closeBtn) closeBtn.disabled = true;
+
+    startEventStream('/api/stream/apply', 'apply-console-log', 'apply-console-status', (success) => {
+        if (closeBtn) closeBtn.disabled = false;
+        if (success) {
+            showToast('反映処理が完了しました');
+        } else {
+            showToast('反映処理中にエラーが発生しました');
+        }
+    });
+}
+
+function closeApplyProgressModal() {
+    closeModal('apply-progress-modal');
+    loadEditorData();
 }
 
 function shutdownServerGlobal() {
