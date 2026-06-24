@@ -62,3 +62,34 @@ WebUI（「Novel Studio」等）のフロントエンド・バックエンドの
 
 - **UI/UXの最適化とコンパクト設計**:
   - 画面のスクロール量を抑え、主要な操作やパラメータ設定が1つの画面内で直感的に行えるレイアウト（複数カラム化、アコーディオンの活用など）を意識してください。
+
+### WebUIのアーキテクチャとファイル構成
+
+#### 設計方針
+- **バックエンド**: Flask ([review_server.py](file:///home/sshioyama/workspace/novel_tools/src/review_server.py)) によるAPI提供およびテンプレートのレンダリング。
+- **フロントエンド**: Vanilla HTML/JS/CSS を使用。[index.html](file:///home/sshioyama/workspace/novel_tools/src/templates/index.html) をベースとし、[app.js](file:///home/sshioyama/workspace/novel_tools/src/static/js/app.js) が画面（[views/*.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/)）やコンポーネント（[components/*.html](file:///home/sshioyama/workspace/novel_tools/src/templates/components/)）を動的に読み込んで制御するSPA（シングルページアプリケーション）ライクな構成。
+- **状態管理と通信**: APIとのやり取りは `fetch` による非同期通信で行い、画面状態や設定パラメータは `localStorage` に保存・復元する。
+
+#### ディレクトリ構造と各ファイルの役割
+
+- **バックエンドスクリプト**:
+  - [review_server.py](file:///home/sshioyama/workspace/novel_tools/src/review_server.py): WebUI全体のバックエンド。APIエンドポイント（レビュー結果一覧取得、レビュー適用、ログストリーミング等）の定義、各種HTML/コンポーネントテンプレートの配信を行う。
+- **ベースレイアウト**:
+  - [index.html](file:///home/sshioyama/workspace/novel_tools/src/templates/index.html): メインレイアウト。サイドバーと、動的ビューがロードされるメインコンテンツエリアを定義する。
+- **コンポーネント**:
+  - [sidebar.html](file:///home/sshioyama/workspace/novel_tools/src/templates/components/sidebar.html): ナビゲーションメニュー。
+  - [modals.html](file:///home/sshioyama/workspace/novel_tools/src/templates/components/modals.html): 全画面で共有されるモーダルダイアログ（エラー、警告、設定等の表示用）。
+- **ビュー（各機能画面）**:
+  - [dashboard.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/dashboard.html): システム全体のステータスや概要を表示。
+  - [editor.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/editor.html): 小説の編集・推敲およびレビュー適用のメイン画面。
+  - [review.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/review.html): レビュー指摘結果の確認、変更内容の適用・個別差分確認画面。
+  - [sync.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/sync.html): Google Driveや外部リポジトリとの同期設定画面。
+  - [write.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/write.html): AI（Claude等）を活用した小説執筆（生成）設定・実行画面。
+- **アセット**:
+  - [style.css](file:///home/sshioyama/workspace/novel_tools/src/static/css/style.css): UI全体のスタイル定義。カラーパレット、レスポンシブレイアウト、ローディングアニメーション等の共通スタイル。
+  - [app.js](file:///home/sshioyama/workspace/novel_tools/src/static/js/app.js): フロントエンドの全ロジック。画面遷移（ルーティング）、非同期API呼び出し、ローディングUI制御、エラーハンドリング、パラメータの永続化および復元。
+
+#### 開発・修正時の注意点
+- 新しい画面を追加する場合は、[views/](file:///home/sshioyama/workspace/novel_tools/src/templates/views/) 配下にHTMLテンプレートを作成し、[app.js](file:///home/sshioyama/workspace/novel_tools/src/static/js/app.js) のルーティング（`routes`）および初期化処理に組み込んでください。
+- バックエンドへの非同期リクエスト中は、必ず画面全体または対象エリアにローディング表示（スピナー等）を表示し、送信ボタン等のインタラクティブ要素を `disabled` にして重複操作を防止してください。
+
