@@ -39,10 +39,14 @@ jobs:
         run: poetry install --no-interaction --no-root
 
       - name: Run Ruff Linter
-        run: poetry run ruff check src
+        run: poetry run ruff check src tests
 
       - name: Run Ruff Formatter Check
-        run: poetry run ruff format --check src
+        run: poetry run ruff format --check src tests
 
       - name: Run Mypy Type Checker
-        run: poetry run mypy src
+        run: poetry run mypy src tests
+
+      - name: Run Unit Tests
+        run: poetry run pytest
+
