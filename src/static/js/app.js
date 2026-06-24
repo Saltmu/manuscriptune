@@ -47,41 +47,77 @@ async function loadDashboardData() {
         const response = await fetch('/api/novels');
         const data = await response.json();
         
-        const tableBody = document.querySelector('#novels-table tbody');
-        tableBody.innerHTML = '';
+        const reviewCardsContainer = document.getElementById('review-draft-cards-container');
+        if (reviewCardsContainer) {
+            reviewCardsContainer.innerHTML = '';
+        }
         
-        const reviewSelect = document.getElementById('review-file-select');
-        reviewSelect.innerHTML = '';
+        const hiddenInput = document.getElementById('review-file-select');
+        const currentSelected = hiddenInput ? hiddenInput.value : "";
+        let selectedFound = false;
 
         if (data.novels.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted)">小説が見つかりません。novels/ フォルダを確認してください。</td></tr>`;
+            if (reviewCardsContainer) {
+                reviewCardsContainer.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 20px;">小説が見つかりません。novels/ フォルダを確認してください。</div>`;
+            }
         } else {
             data.novels.forEach(n => {
-                const tr = document.createElement('tr');
-                
-                const badgeHtml = n.has_findings 
-                    ? `<span class="badge badge-success">指摘あり</span>` 
-                    : `<span class="badge badge-warning" style="background-color:rgba(255,255,255,0.03); color:var(--text-muted)">未校閲</span>`;
-                
-                const actionsHtml = n.has_findings
-                    ? `<button class="btn-primary btn-sm btn-sm" onclick="selectAndEditNovel('${n.name}')">📝 校閲する</button>`
-                    : `<button class="btn-secondary btn-sm" onclick="selectAndReviewNovel('${n.name}')">🔍 レビュー実行</button>`;
+                if (reviewCardsContainer) {
+                    const card = document.createElement('div');
+                    card.className = 'draft-selection-card';
+                    card.dataset.filename = n.name;
+                    card.dataset.hasfindings = n.has_findings ? "true" : "false";
+                    
+                    const badgeHtml = n.has_findings 
+                        ? `<span class="badge badge-success">指摘あり</span>` 
+                        : `<span class="badge badge-warning" style="background-color:rgba(255,255,255,0.03); color:var(--text-muted)">未校閲</span>`;
 
-                tr.innerHTML = `
-                    <td style="font-weight: 500;">${n.name}</td>
-                    <td>${(n.size / 1024).toFixed(1)} KB</td>
-                    <td style="color:var(--text-muted); font-size:0.8rem;">${n.last_modified}</td>
-                    <td>${badgeHtml}</td>
-                    <td>${actionsHtml}</td>
-                `;
-                tableBody.appendChild(tr);
+                    let actionBtnHtml = '';
+                    if (n.has_findings) {
+                        actionBtnHtml = `<button class="draft-card-action-btn" onclick="event.stopPropagation(); selectAndEditNovel('${n.name}');">📝 校閲する</button>`;
+                    }
 
-                // Populate select in review view
-                const opt = document.createElement('option');
-                opt.value = n.name;
-                opt.textContent = n.name;
-                reviewSelect.appendChild(opt);
+                    card.innerHTML = `
+                        <div class="draft-card-info">
+                            <div class="draft-card-name">${n.name}</div>
+                            <div class="draft-card-meta">
+                                <span>${(n.size / 1024).toFixed(1)} KB</span>
+                                <span>•</span>
+                                <span>${n.last_modified}</span>
+                            </div>
+                        </div>
+                        <div class="draft-card-status">
+                            ${badgeHtml}
+                        </div>
+                        ${actionBtnHtml}
+                    `;
+
+                    card.addEventListener('click', () => {
+                        selectDraftCard(n.name, n.has_findings);
+                    });
+
+                    reviewCardsContainer.appendChild(card);
+
+                    if (currentSelected === n.name) {
+                        card.classList.add('active');
+                        selectedFound = true;
+                    }
+                }
             });
+
+            // 以前の選択肢がリスト内で見つからない、あるいは未選択の場合は最初の要素を選択状態にする
+            if (reviewCardsContainer && reviewCardsContainer.children.length > 0) {
+                if (!selectedFound) {
+                    const firstCard = reviewCardsContainer.children[0];
+                    selectDraftCard(firstCard.dataset.filename, firstCard.dataset.hasfindings === "true");
+                } else {
+                    // すでに選択されている場合もプレビューをロード
+                    const activeCard = Array.from(reviewCardsContainer.children).find(c => c.dataset.filename === currentSelected);
+                    if (activeCard) {
+                        loadPreview(currentSelected);
+                    }
+                }
+            }
         }
 
         // Load Sync Status
@@ -110,6 +146,68 @@ async function loadDashboardData() {
     }
 }
 
+// Select draft card in Review View
+function selectDraftCard(novelName, hasFindings) {
+    const container = document.getElementById('review-draft-cards-container');
+    if (!container) return;
+
+    Array.from(container.children).forEach(card => {
+        if (card.dataset.filename === novelName) {
+            card.classList.add('active');
+        } else {
+            card.classList.remove('active');
+        }
+    });
+
+    const hiddenInput = document.getElementById('review-file-select');
+    if (hiddenInput) {
+        hiddenInput.value = novelName;
+    }
+
+    loadPreview(novelName);
+}
+
+// Load novel text preview into the right panel
+async function loadPreview(novelName) {
+    const header = document.getElementById('review-preview-header');
+    const consoleHeader = document.getElementById('review-console-header');
+    const previewBody = document.getElementById('review-preview-body');
+    const consoleLog = document.getElementById('review-console-log');
+    const filenameDisplay = document.getElementById('preview-filename-display');
+    
+    if (!previewBody) return;
+    
+    // 表示モードの切り替え
+    if (header) header.style.display = 'flex';
+    if (consoleHeader) consoleHeader.style.display = 'none';
+    previewBody.style.display = 'block';
+    if (consoleLog) consoleLog.style.display = 'none';
+    
+    if (filenameDisplay) filenameDisplay.textContent = novelName;
+    previewBody.textContent = 'プレビューを読み込み中...';
+    
+    // スライドイン表示
+    const rightPanel = document.getElementById('review-right-panel');
+    if (rightPanel && !rightPanel.classList.contains('show')) {
+        rightPanel.classList.add('show');
+        updateToggleButtonText('view-review', true);
+    }
+    
+    try {
+        const res = await fetch(`/api/preview?file=${encodeURIComponent(novelName)}`);
+        if (res.ok) {
+            const data = await res.json();
+            previewBody.textContent = data.content;
+            previewBody.scrollTop = 0; // スクロールを一番上に
+        } else {
+            previewBody.textContent = 'プレビューの読み込みに失敗しました。';
+        }
+    } catch (err) {
+        console.error(err);
+        previewBody.textContent = 'プレビューのロード中にエラーが発生しました。';
+    }
+}
+
 // Action: Select novel and switch to editor
 async function selectAndEditNovel(novelName) {
     try {
@@ -134,7 +232,23 @@ async function selectAndEditNovel(novelName) {
 // Action: Select novel and switch to review view
 function selectAndReviewNovel(novelName) {
     switchView('review');
-    document.getElementById('review-file-select').value = novelName;
+    
+    // カードリストから該当ファイルを探して選択
+    const container = document.getElementById('review-draft-cards-container');
+    if (container) {
+        const card = Array.from(container.children).find(c => c.dataset.filename === novelName);
+        if (card) {
+            const hasFindings = card.dataset.hasfindings === "true";
+            selectDraftCard(novelName, hasFindings);
+            return;
+        }
+    }
+    
+    // 見つからない場合のフォールバック
+    const hiddenInput = document.getElementById('review-file-select');
+    if (hiddenInput) {
+        hiddenInput.value = novelName;
+    }
 }
 
 // Streaming Execution Log Helper using EventSource
@@ -405,11 +519,20 @@ function runReviewPipeline() {
         return;
     }
 
+    // 表示をコンソールログ表示モードに切り替える
+    const header = document.getElementById('review-preview-header');
+    const consoleHeader = document.getElementById('review-console-header');
+    const previewBody = document.getElementById('review-preview-body');
+    const consoleLog = document.getElementById('review-console-log');
+    
+    if (header) header.style.display = 'none';
+    if (consoleHeader) consoleHeader.style.display = 'flex';
+    if (previewBody) previewBody.style.display = 'none';
+    if (consoleLog) consoleLog.style.display = 'block';
+
     const btn = document.getElementById('btn-run-review');
-    const actionsArea = document.getElementById('review-complete-actions');
     btn.disabled = true;
     btn.innerHTML = '🔍 レビュー実行中...';
-    actionsArea.style.display = 'none';
 
     lastReviewedFile = fileName;
 
@@ -419,19 +542,11 @@ function runReviewPipeline() {
         btn.innerHTML = '🔍 レビューパイプラインを実行';
         if (success) {
             showToast('レビューパイプラインが正常に完了しました');
-            actionsArea.style.display = 'block';
             loadDashboardData();
         } else {
             showToast('レビュー中にエラーが発生しました');
         }
     });
-}
-
-// Move to editor from review completed screen
-function goToEditorFromReview() {
-    if (lastReviewedFile) {
-        selectAndEditNovel(lastReviewedFile);
-    }
 }
 
 // ================= EDITOR VIEW LOGIC (Merged) =================

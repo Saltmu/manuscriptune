@@ -165,6 +165,18 @@ main {
     gap: 24px;
 }
 
+.grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+}
+
+@media (max-width: 1024px) {
+    .grid-3 {
+        grid-template-columns: 1fr;
+    }
+}
+
 .card {
     background-color: var(--panel-bg);
     border: 1px solid var(--border-color);
@@ -537,8 +549,8 @@ body.process-running #view-sync .card button {
 }
 
 .left-panel {
-    flex: 1.2;
-    min-width: 300px;
+    flex: 2;
+    min-width: 600px;
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -656,7 +668,113 @@ body.process-running #view-sync .card button {
     color: var(--text-main);
     background-color: rgba(99, 102, 241, 0.1);
     border-color: var(--accent-color);
+}/* Draft Cards Selection UI for Review execution */
+.draft-cards-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+    max-height: calc(100vh - 280px);
+    overflow-y: auto;
+    padding-right: 4px;
+    padding-bottom: 20px;
 }
 
+.draft-selection-card {
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+    position: relative;
+    overflow: hidden;
+    min-height: 160px;
+}
 
+.draft-selection-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 3px;
+    background-color: transparent;
+    transition: background-color 0.2s;
+}
+
+.draft-selection-card:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(99, 102, 241, 0.4);
+}
+
+.draft-selection-card.active {
+    background-color: rgba(99, 102, 241, 0.08);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
+}
+
+.draft-selection-card.active::before {
+    background-color: var(--accent-color);
+}
+
+.draft-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.draft-card-name {
+    font-weight: 600;
+    color: var(--text-main);
+    font-size: 0.95rem;
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+.draft-card-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin-top: 4px;
+}
+
+.draft-card-status {
+    display: flex;
+    align-items: center;
+    margin-top: auto;
+}
+
+.draft-card-action-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    border-radius: 6px;
+    background-color: var(--accent-color);
+    color: #ffffff;
+    transition: all 0.2s;
+    border: none;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.draft-selection-card.active .draft-card-action-btn {
+    background-color: var(--accent-hover);
+    box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3);
+}
+
+.draft-card-action-btn:hover {
+    background-color: var(--accent-hover);
+    transform: translateY(-1px);
+}
 
