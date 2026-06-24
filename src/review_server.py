@@ -48,6 +48,8 @@ class FindingItem(BaseModel):
     analysis: str
     suggestion: str
     accepted: str
+    apply_status: str | None = None
+    apply_result: str | None = None
 
 
 class SaveFindingsRequest(BaseModel):
@@ -319,34 +321,16 @@ def shutdown_server():
     os.kill(os.getpid(), signal.SIGINT)
 
 
-@app.post("/api/apply")
-async def apply_changes_and_shutdown(background_tasks: BackgroundTasks):
+@app.get("/api/stream/apply")
+async def stream_apply():
     global NOVEL_PATH, YAML_PATH
     if not NOVEL_PATH or not YAML_PATH:
         raise HTTPException(status_code=400, detail="No active file selected.")
     try:
-        # Apply accepted changes using the existing apply_findings.py script
         parent_dir = os.path.dirname(NOVEL_PATH)
         script_path = os.path.join(os.path.dirname(__file__), "apply_findings.py")
         cmd = ["poetry", "run", "python", script_path, "--dir", parent_dir, "--auto"]
-
-        print(f"[INFO] Running apply process: {' '.join(cmd)}")
-        res = subprocess.run(cmd, capture_output=True, text=True)
-
-        if res.returncode != 0:
-            print(f"[ERROR] apply_findings.py failed: {res.stderr}")
-            raise HTTPException(
-                status_code=500, detail=f"Failed to apply findings: {res.stderr}"
-            )
-
-        print(f"[INFO] Apply output:\n{res.stdout}")
-
-        # Trigger server shutdown
-        background_tasks.add_task(shutdown_server)
-        return {
-            "status": "success",
-            "message": "Applied successfully. Shutting down server...",
-        }
+        return stream_process_output(cmd)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error applying changes: {str(e)}")
 

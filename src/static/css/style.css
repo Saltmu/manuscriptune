@@ -500,4 +500,26 @@ body.process-running #view-sync .card button {
     font-weight: 500;
 }
 
+/* Apply Status Badges */
+.badge-apply-success {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.badge-apply-failed {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.apply-error-msg {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background-color: rgba(239, 68, 68, 0.05);
+    border-left: 3px solid #ef4444;
+    color: #f87171;
+    font-size: 0.8rem;
+    border-radius: 0 4px 4px 0;
+    line-height: 1.4;
+}
+
 

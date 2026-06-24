@@ -314,18 +314,27 @@ def main():
                 # 'n' or anything else
                 skipped_count += 1
                 finding["accepted"] = "n"
+                if fid in findings_map:
+                    findings_map[fid]["apply_status"] = None
+                    findings_map[fid]["apply_result"] = None
                 continue
         elif args.accept_ids:
             if fid in accepted_ids:
                 should_apply = True
             else:
                 skipped_count += 1
+                if fid in findings_map:
+                    findings_map[fid]["apply_status"] = None
+                    findings_map[fid]["apply_result"] = None
                 continue
         elif args.auto:
             if finding.get("accepted") == "y":
                 should_apply = True
             else:
                 skipped_count += 1
+                if fid in findings_map:
+                    findings_map[fid]["apply_status"] = None
+                    findings_map[fid]["apply_result"] = None
                 continue
         else:
             # If no mode selected, default to interactive
@@ -351,6 +360,9 @@ def main():
             else:
                 skipped_count += 1
                 finding["accepted"] = "n"
+                if fid in findings_map:
+                    findings_map[fid]["apply_status"] = None
+                    findings_map[fid]["apply_result"] = None
                 continue
 
         if should_apply:
@@ -365,13 +377,17 @@ def main():
                 # Update status in original list
                 if fid in findings_map:
                     findings_map[fid]["accepted"] = "y"
+                    findings_map[fid]["apply_status"] = "success"
+                    findings_map[fid]["apply_result"] = f"{method}方式: {result_text}"
             else:
                 print(
                     f"[FAIL] {fid} の適用に失敗しました: {result_text}", file=sys.stderr
                 )
                 failed_count += 1
                 if fid in findings_map:
-                    findings_map[fid]["accepted"] = "n"
+                    findings_map[fid]["accepted"] = "y"
+                    findings_map[fid]["apply_status"] = "failed"
+                    findings_map[fid]["apply_result"] = result_text
 
     # Save modified text
     write_file(formatted_txt_path, "".join(text_lines))
