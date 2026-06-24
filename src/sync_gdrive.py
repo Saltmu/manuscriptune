@@ -32,7 +32,7 @@ def main():
 
     CACHE_FILE = os.path.join(root_dir, ".sync_cache")
     LOCK_FILE = os.path.join(root_dir, ".sync.lock")
-    CACHE_DURATION = 3000  # 30 minutes in seconds
+    CACHE_DURATION = 1800  # 30 minutes in seconds
 
     # Check if another process is already syncing
     if os.path.exists(LOCK_FILE):

@@ -83,27 +83,23 @@ def render_html_template(template_name: str) -> str:
 
 # Helper to run a command and stream its output via SSE (Server-Sent Events)
 def stream_process_output(cmd):
-    def event_generator():
+    async def event_generator():
         print(f"[INFO] Running process stream: {' '.join(cmd)}")
-        process = subprocess.Popen(
-            cmd,
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
-            encoding="utf-8",
         )
 
         while True:
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
+            line_bytes = await process.stdout.readline()
+            if not line_bytes:
                 break
-            if line:
-                # Format as Server-Sent Event (SSE)
-                yield f"data: {line.rstrip()}\n\n"
+            line = line_bytes.decode("utf-8")
+            # Format as Server-Sent Event (SSE)
+            yield f"data: {line.rstrip()}\n\n"
 
-        rc = process.poll()
+        rc = await process.wait()
         yield f"data: [PROCESS_EXITED] code={rc}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
