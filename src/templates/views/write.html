@@ -24,6 +24,14 @@
 
                 <div class="card" style="margin-top: 8px;">
                     <h3>執筆パラメーター設定</h3>
+                    <div style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center;">
+                        <button class="btn-primary" id="btn-run-write" onclick="runAiWriting()">
+                            ✍️ 執筆を開始する
+                        </button>
+                        <button class="console-toggle-btn" id="write-console-toggle" onclick="toggleConsole('view-write')">
+                            🖥️ コンソール表示
+                        </button>
+                    </div>
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="write-episode">執筆する話 (例: 第1話、第2話)</label>
@@ -67,14 +75,6 @@
                     <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 4px;">
                         ※プロットファイルに存在するエピソード名を正確に入力してください。
                     </p>
-                    <div style="margin-top: 8px; display: flex; gap: 12px; align-items: center;">
-                        <button class="btn-primary" id="btn-run-write" onclick="runAiWriting()">
-                            ✍️ 執筆を開始する
-                        </button>
-                        <button class="console-toggle-btn" id="write-console-toggle" onclick="toggleConsole('view-write')">
-                            🖥️ コンソール表示
-                        </button>
-                    </div>
                 </div>
             </div>
         </div>

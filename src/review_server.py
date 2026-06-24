@@ -224,6 +224,29 @@ async def sync_status():
     return {"sources": sources_list}
 
 
+@app.get("/api/preview")
+async def preview_novel(
+    file: str = Query(..., description="Novel text filename in novels/"),
+):
+    safe_file = os.path.basename(file)
+    novel_path = os.path.abspath(os.path.join("novels", safe_file))
+    print(
+        f"[DEBUG] preview_novel: file={repr(file)}, safe_file={repr(safe_file)}, novel_path={repr(novel_path)}, exists={os.path.exists(novel_path)}, cwd={os.getcwd()}"
+    )
+    if not os.path.exists(novel_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Novel file not found: {novel_path} (CWD: {os.getcwd()})",
+        )
+
+    try:
+        with open(novel_path, encoding="utf-8") as f:
+            content = f.read()
+        return {"content": content, "filename": safe_file}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read novel: {str(e)}")
+
+
 @app.post("/api/select")
 async def select_file(payload: SelectFileRequest):
     global NOVEL_PATH, YAML_PATH
