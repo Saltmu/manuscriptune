@@ -35,41 +35,34 @@ def get_episode_plot(plot_file, episode_title):
     print(f"Error: Episode '{episode_title}' not found in plot.", file=sys.stderr)
     return None, ""
 
-def generate_prompt(chapter_title, episode_title, plot_content, novel_title=None, policy_global=None, policy_chapter=None, settings=None, character=None):
+def generate_prompt(chapter_title, episode_title, plot_content, novel_title=None, policy_global=None, policy_chapter=None, character=None):
     """geminiに渡すプロンプト（指示文とコンテキストの結合）を生成する"""
     
     # 参照ファイルのパス（プロジェクトルートからの相対パスを想定）
-    POLICY_FILE = policy_global if policy_global else writer_helper.resolve_novel_file_by_pattern("policy_global", "*執筆ポリシー_全体*.txt", "data/sources/00_1_執筆ポリシー_全体_ver.5.0.txt")
+    POLICY_FILE = policy_global if policy_global else writer_helper.resolve_novel_file_by_pattern("policy_global", "*執筆ポリシー_全体*.txt", "data/sources/00_1_執筆ポリシー_全体_ver.6.0.txt")
     POLICY_FILE_MACRO = policy_chapter if policy_chapter else writer_helper.resolve_novel_file_by_pattern("policy_chapter", "*執筆ポリシー_第*.txt", "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt")
-    SETTING_FILE = settings if settings else writer_helper.resolve_novel_file_by_pattern("settings", "*設定資料集*.txt", "data/sources/09_0_重天の調律師_設定資料集.txt")
     CHARACTER_FILE = character if character else writer_helper.resolve_novel_file_by_pattern("character", "*キャラクター概要*.txt", "data/sources/03_1_第1幕キャラクター概要 ver.2.txt")
     
     policy_text = read_file(POLICY_FILE)
     policy_macro_text = read_file(POLICY_FILE_MACRO)
-    setting_text = read_file(SETTING_FILE)
     character_text = read_file(CHARACTER_FILE)
     
     actual_title = novel_title if novel_title else writer_helper.get_novel_setting("title", "重天の調律師")
     prompt = f"""【超重要指示：ツールの使用禁止】
-あなたは一切のツール（ファイルの読み書き、ディレクトリの確認、コマンドの実行など）を使用してはなりません。
-プロジェクトの調査や他のスクリプト（writer_cli.pyなど）の実行を決して試みないでください。
-思考プロセスや挨拶、指示の確認などのメタなテキストは一切出力せず、ただちに小説の本文のみをテキスト出力してください。
-あなたの唯一のタスクは、提示された以下の設定資料とプロットに基づき、小説の本文のみをただちに出力することです。
-本文の最初の1文字目から出力を開始してください。
+    あなたは一切のツール（ファイルの読み書き、ディレクトリの確認、コマンドの実行など）を使用してはなりません。
+    プロジェクトの調査や他のスクリプト（writer_cli.pyなど）の実行を決して試みないでください。
+    思考プロセスや挨拶、指示の確認などのメタなテキストは一切出力せず、ただちに小説の本文のみをテキスト出力してください。
+    あなたの唯一のタスクは、提示された以下の執筆ポリシー、キャラクター概要、およびプロットに基づき、小説の本文のみをただちに出力することです。
+    本文の最初の1文字目から出力を開始してください。
 
 あなたは「{actual_title}」シリーズの専属作家です。
-以下の「執筆ポリシー」「設定資料集」「キャラクター概要」を完全に把握し、ポリシーを厳守して物語を綴ってください。
+以下の「執筆ポリシー」「キャラクター概要」を完全に把握し、ポリシーを厳守して物語を綴ってください。
 
 ==============================
 【執筆ポリシー】
 {policy_text}
 
 {policy_macro_text}
-==============================
-
-==============================
-【設定資料集】
-{setting_text}
 ==============================
 
 ==============================
@@ -108,7 +101,7 @@ def main():
     parser.add_argument("--title", help="Novel title")
     parser.add_argument("--policy-global", help="Path to global policy file")
     parser.add_argument("--policy-chapter", help="Path to chapter policy file")
-    parser.add_argument("--settings", help="Path to settings file")
+
     parser.add_argument("--character", help="Path to character overview file")
     
     args = parser.parse_args()
@@ -127,7 +120,6 @@ def main():
         novel_title=args.title,
         policy_global=args.policy_global,
         policy_chapter=args.policy_chapter,
-        settings=args.settings,
         character=args.character
     )
     
