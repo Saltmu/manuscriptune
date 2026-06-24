@@ -182,10 +182,41 @@ poetry install
 
 ### 2. 設定ファイルの準備
 
-1. `antigravity.yaml.example` を `antigravity.yaml` にコピーします。
+1. [antigravity.yaml.example](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml.example) を [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) にコピーします。
    ```bash
    cp antigravity.yaml.example antigravity.yaml
    ```
-2. `antigravity.yaml` を編集し、`folder_id` や `auth_file` のパスを自身の環境に合わせて設定してください。
+2. [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) を編集し、`folder_id` や `auth_file` のパスを自身の環境に合わせて設定してください。
    > [!IMPORTANT]
-   > `antigravity.yaml` には機密情報が含まれるため、Gitにはコミットしないよう `.gitignore` で設定されています。
+   > [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) には機密情報が含まれるため、Gitにはコミットしないよう `.gitignore` で設定されています。
+
+### 3. Antigravity CLI (agy) のセットアップ
+
+本プロジェクトの校閲（レビュー）および執筆プロセスでは、内部的に **Antigravity CLI (agy)** を使用して LLM（Geminiモデル等）の呼び出しを行っています。実行前に以下のセットアップを完了させてください。
+
+#### 1. インストール
+お使いの環境に合わせて `agy` をインストールします。
+
+- **macOS / Linux:**
+  ```bash
+  curl -fsSL https://antigravity.google/cli/install.sh | bash
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  irm https://antigravity.google/cli/install.ps1 | iex
+  ```
+
+#### 2. ログイン（認証）
+インストール完了後、ターミナルで `agy` を起動してログイン（認証）処理を行います。
+```bash
+agy
+```
+初回起動時にインタラクティブなセットアップと Google 認証（ブラウザ起動による Google OAuth または Google Cloud プロジェクト連携）が開始されますので、画面の指示に従ってログインを完了させてください。
+
+> [!NOTE]
+> ヘッドレス環境や WSL2 (Windows Subsystem for Linux) などで認証状態が保持されない（毎回ログインを求められる）場合は、OSのキーリングサービス（`gnome-keyring` や `dbus-x11`）が不足している可能性があります。詳細は下記の参考文献を参照してください。
+
+#### 参考文献
+- [Antigravity CLI 概要（公式）](https://antigravity.google/docs/cli-overview)
+- [Antigravity CLI 製品紹介](https://antigravity.google/product/antigravity-cli)
+- [GitHub - google-antigravity/antigravity-cli](https://github.com/google-antigravity/antigravity-cli)
