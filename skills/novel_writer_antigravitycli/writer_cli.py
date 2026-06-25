@@ -1,13 +1,12 @@
 import argparse
 import os
 import re
-import subprocess
 
 # 既存のヘルパーからプロット情報を取得するため、パスを追加してインポート
 import sys
-import threading
 
 from src.utils import plot_parser, project_config
+from src.utils.ai_client import AgyClient, AgyClientError
 
 
 class WriterHelperMock:
@@ -268,23 +267,10 @@ violations: []
 ```
 """
 
-    # agyの呼び出し
-    cmd = ["agy", "-p", "", "--model", model]
+    # AgyClientの呼び出し
+    client = AgyClient(model=model)
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-        )
-        stdout, stderr = process.communicate(input=check_prompt)
-        if process.returncode != 0:
-            print(f"Warning: Self-check execution failed: {stderr}", file=sys.stderr)
-            return novel_content
-
-        result_text = stdout.strip()
+        result_text = client.generate(check_prompt).strip()
         yaml_match = re.search(r"```yaml\s*([\s\S]*?)```", result_text)
         yaml_content = yaml_match.group(1).strip() if yaml_match else result_text
 
@@ -321,23 +307,12 @@ violations: []
 """
 
         # リライト実行
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-        )
-        stdout, stderr = process.communicate(input=rewrite_prompt)
-        if process.returncode == 0:
-            rewritten_text = stdout.strip()
-            rewritten_text = re.sub(r"^```[a-zA-Z]*\n", "", rewritten_text)
-            rewritten_text = re.sub(r"\n```$", "", rewritten_text).strip()
-            print("[Self-Check] Rewrite completed successfully.")
-            return rewritten_text
-        else:
-            print(f"Warning: Rewrite failed: {stderr}", file=sys.stderr)
+        stdout = client.generate(rewrite_prompt)
+        rewritten_text = stdout.strip()
+        rewritten_text = re.sub(r"^```[a-zA-Z]*\n", "", rewritten_text)
+        rewritten_text = re.sub(r"\n```$", "", rewritten_text).strip()
+        print("[Self-Check] Rewrite completed successfully.")
+        return rewritten_text
 
     except Exception as e:
         print(f"Warning: Error during self-check or rewrite: {e}", file=sys.stderr)
@@ -353,46 +328,17 @@ def extract_numbers(text):
 
 def generate_all_at_once(prompt, model):
     """従来の1回の呼び出しで全本文を生成するロジック"""
-    cmd = ["agy", "-p", "", "--model", model]
-    process = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-    )
+    client = AgyClient(model=model)
 
-    # stdinへの書き込みを別スレッドで行い、デッドロックを防ぐ
-    def write_stdin():
-        try:
-            process.stdin.write(prompt)
-            process.stdin.close()
-        except Exception as e:
-            print(f"Error writing to stdin: {e}", file=sys.stderr)
+    def callback(line):
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
-    stdin_thread = threading.Thread(target=write_stdin)
-    stdin_thread.start()
-
-    full_output = []
-    while True:
-        line = process.stdout.readline()
-        if not line and process.poll() is not None:
-            break
-        if line:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            full_output.append(line)
-
-    stdin_thread.join()
-    stderr = process.stderr.read()
-
-    if process.returncode != 0:
-        print("Error calling Antigravity CLI (agy):", file=sys.stderr)
-        print(stderr, file=sys.stderr)
-        sys.exit(process.returncode)
-
-    return "".join(full_output)
+    try:
+        return client.generate(prompt, callback=callback)
+    except AgyClientError as e:
+        print(f"Error calling Antigravity CLI (agy): {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _resolve_policy_paths(args) -> tuple[str, str, str]:
@@ -443,7 +389,6 @@ def _write_single_scene(
     """
     Writes a single scene using agy and returns the generated content.
     """
-    import threading
 
     policy_global, policy_chapter, character = policy_paths
 
@@ -488,47 +433,18 @@ def _write_single_scene(
 ・前の文脈を繰り返さないでください。今回指定されたプロット部分のみを新しく書き足してください。
 """
 
-    cmd = ["agy", "-p", "", "--model", model]
-    process = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-    )
+    client = AgyClient(model=model)
 
-    def write_scene_stdin(proc=process, prompt=scene_prompt):
-        try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except Exception as e:
-            print(f"Error writing scene stdin: {e}", file=sys.stderr)
+    def callback(line):
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
-    stdin_thread = threading.Thread(target=write_scene_stdin)
-    stdin_thread.start()
+    try:
+        scene_content = client.generate(scene_prompt, callback=callback).strip()
+    except AgyClientError as e:
+        print(f"Error generating scene: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    scene_output = []
-    while True:
-        line = process.stdout.readline()
-        if not line and process.poll() is not None:
-            break
-        if line:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            scene_output.append(line)
-
-    stdin_thread.join()
-
-    if process.returncode != 0:
-        stderr_msg = process.stderr.read()
-        print(
-            f"Error generating scene: {stderr_msg}",
-            file=sys.stderr,
-        )
-        sys.exit(process.returncode)
-
-    scene_content = "".join(scene_output).strip()
     scene_content = re.sub(r"^```[a-zA-Z]*\n", "", scene_content)
     scene_content = re.sub(r"\n```$", "", scene_content).strip()
 

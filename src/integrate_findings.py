@@ -1,10 +1,11 @@
 import argparse
 import os
 import re
-import subprocess
 import sys
 
 import yaml
+
+from src.utils.ai_client import AgyClient, AgyClientError
 
 
 def read_file(filepath):
@@ -123,33 +124,20 @@ findings: []
 ```
 """
 
-    print(f"Sending consolidation request to agy CLI ({model})...")
-    cmd = ["agy", "-p", "", "--model", model]
+    print(f"Sending consolidation request to AgyClient ({model})...")
+    client = AgyClient(model=model)
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        stdout, stderr = process.communicate(input=prompt)
-
-        if process.returncode != 0:
-            print(f"Error calling agy: {stderr}", file=sys.stderr)
-            return None
-
-        result_text = stdout.strip()
+        result_text = client.generate(prompt).strip()
         yaml_match = re.search(r"```yaml\s*([\s\S]*?)```", result_text)
         if yaml_match:
             return yaml_match.group(1).strip()
         return result_text
-    except FileNotFoundError:
-        print("Error: 'agy' CLI is not installed or not in PATH.", file=sys.stderr)
+    except AgyClientError as e:
+        print(f"Error calling AgyClient: {e}", file=sys.stderr)
         return None
     except Exception as e:
-        print(f"Unexpected error calling agy: {e}", file=sys.stderr)
+        print(f"Unexpected error calling AgyClient: {e}", file=sys.stderr)
         return None
 
 

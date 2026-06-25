@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src.utils import project_config as writer_helper
+from src.utils.ai_client import AgyClient, AgyClientError
 
 
 def archive_previous_review(output_dir, basename):
@@ -191,30 +192,18 @@ findings: []
 
 def run_single_review_skill(skill_name, target_text, output_file, model, output_dir):
     """
-    Executes a single review skill via agy CLI.
+    Executes a single review skill via AgyClient.
     """
     print(f"[{skill_name}] Preparing review prompt...")
     prompt = get_skill_prompt(skill_name, target_text, output_dir)
     if not prompt:
         return skill_name, False, "Failed to generate prompt"
 
-    print(f"[{skill_name}] Running agy CLI ({model})...")
-    cmd = ["agy", "-p", "", "--model", model]
+    print(f"[{skill_name}] Running AgyClient ({model})...")
+    client = AgyClient(model=model)
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        stdout, stderr = process.communicate(input=prompt)
-
-        if process.returncode != 0:
-            return skill_name, False, f"agy error: {stderr}"
-
-        result_text = stdout.strip()
+        result_text = client.generate(prompt).strip()
         yaml_match = re.search(r"```yaml\s*([\s\S]*?)```", result_text)
         if yaml_match:
             yaml_content = yaml_match.group(1).strip()
@@ -226,8 +215,8 @@ def run_single_review_skill(skill_name, target_text, output_file, model, output_
 
         return skill_name, True, f"Saved to {output_file}"
 
-    except FileNotFoundError:
-        return skill_name, False, "'agy' CLI not found"
+    except AgyClientError as e:
+        return skill_name, False, str(e)
     except Exception as e:
         return skill_name, False, f"Unexpected error: {str(e)}"
 
