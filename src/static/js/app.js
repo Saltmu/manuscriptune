@@ -486,6 +486,8 @@ function runAiWriting() {
     const policyGlobalVal = document.getElementById('write-policy-global').value;
     const policyChapterVal = document.getElementById('write-policy-chapter').value;
     const characterVal = document.getElementById('write-character').value;
+    const stepByStepVal = document.getElementById('write-step-by-step').checked;
+    const selfCheckVal = document.getElementById('write-self-check').checked;
 
     const btn = document.getElementById('btn-run-write');
     btn.disabled = true;
@@ -497,6 +499,8 @@ function runAiWriting() {
     if (policyGlobalVal) url += `&policy_global=${encodeURIComponent(policyGlobalVal)}`;
     if (policyChapterVal) url += `&policy_chapter=${encodeURIComponent(policyChapterVal)}`;
     if (characterVal) url += `&character=${encodeURIComponent(characterVal)}`;
+    if (stepByStepVal) url += `&step_by_step=true`;
+    if (selfCheckVal) url += `&self_check=true`;
 
     startEventStream(url, 'write-console-log', 'write-console-status', (success) => {
         btn.disabled = false;

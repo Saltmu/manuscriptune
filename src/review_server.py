@@ -413,6 +413,8 @@ async def stream_write(
     character: str | None = Query(None),
     plot: str | None = Query(None),
     model: str | None = Query(None),
+    step_by_step: bool = Query(False),
+    self_check: bool = Query(False),
 ):
     cmd = [
         "poetry",
@@ -436,6 +438,10 @@ async def stream_write(
         cmd.extend(["--character", f"data/sources/{character}"])
     if plot:
         cmd.extend(["--plot-file", f"data/sources/{plot}"])
+    if step_by_step:
+        cmd.append("--step-by-step")
+    if self_check:
+        cmd.append("--self-check")
 
     return stream_process_output(cmd)
 
