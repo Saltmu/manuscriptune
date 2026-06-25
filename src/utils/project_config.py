@@ -1,7 +1,20 @@
 import glob
 import os
+import re
 
 import yaml
+
+
+def natural_sort_key(s):
+    """
+    自然順（Natural Sort）用のソートキー。
+    文字列中の数字を数値オブジェクトとして抽出し、正しく比較できるようにします。
+    """
+    s_str = str(s)
+    return [
+        int(text) if text.isdigit() else text.lower()
+        for text in re.split(r"(\d+)", s_str)
+    ]
 
 
 def load_project_config():
@@ -42,5 +55,5 @@ def resolve_latest_file(pattern, default=None):
         files = glob.glob(pattern)
         if not files:
             return default
-    files.sort()
+    files.sort(key=natural_sort_key)
     return files[-1]
