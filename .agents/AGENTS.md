@@ -6,94 +6,24 @@
 - **日本語でのコミュニケーションの徹底**:
   ユーザーとの対話、作業報告、質問、および提案は、特別な指示がない限りすべて日本語で行ってください。
 
-## 2. PowerShellコマンドの実行と文字コード
-- **コンソール出力のUTF-8化**:
-  PowerShellコマンドを実行する（`run_command`を使用する）際は、出力の文字化けを防ぐため、コマンドの先頭に必ず `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8;` をプレフィックスとして付加してください。
-  （※注意: 各コマンドの実行ツールは毎回独立した新しいPowerShellプロセスで起動されるため、セッションは共有されず、実行ごとに毎回このプレフィックスを付加する必要があります）
-  *例*: `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; <実際のコマンド>`
-
-- **ファイル入出力時のエンコーディング指定**:
-  PowerShellコマンドを使用してファイルの読み書き（`Get-Content`、`Out-File`、`Set-Content`、リダイレクト `>` など）を行う際は、Windowsのデフォルトエンコーディング（Shift_JISやUTF-16）による文字化けを防ぐため、必ず明示的に `-Encoding utf8` などを指定してUTF-8で処理してください。
-
-- **Windows環境でのGitおよびGitHub CLIのパスと認証設定**:
-  Windows環境において `git` または `gh` コマンドを使用する際は、コマンドが見つからないエラーや、`git push` 等が資格情報の入力プロンプトで応答待ち（ハング）になるのを防ぐため、以下の対応を必ず行ってください。
-  1. コマンド実行前に、セッションの一時的な環境変数 `PATH` に Git および GitHub CLI の標準インストールパスを追加してください。
-     *追加コード*: `$env:PATH += ";C:\Program Files\Git\cmd;C:\Program Files\GitHub CLI"`
-  2. Git操作（特にプッシュ等）を行う前には、資格情報エラーを防ぐために `gh auth setup-git` を実行してください。
-  
-  *例（Gitプッシュ時のワンライナー）*:
-  `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; $env:PATH += ";C:\Program Files\Git\cmd;C:\Program Files\GitHub CLI"; gh auth setup-git; git push origin <branch_name>`
-
-## 3. Pythonの実行環境について
+## 2. Pythonの実行環境について
 - **Poetry環境の利用**:
   Pythonスクリプトを実行する際は、依存関係の不整合を防ぐため、グローバル環境ではなくPoetryを使用し、`poetry run python <script.py>` の形式で実行するか、あるいはプロジェクト内の仮想環境（`venv`）をアクティベートして実行してください。
 
-## 4. 小説の執筆・レビュー時の設定資料参照
+## 3. 小説の執筆・レビュー時の設定資料参照
 - **参照資料（`data/sources/`）への準拠**:
   小説の執筆、レビュー、修正適用などのすべての作業において、`data/sources/` 配下にある設定資料・プロット・キャラクター概要を最優先のソース（真実の基準）として参照してください。推測や独自の判断で世界観設定、歴史、キャラクターの口調・設定を捏造または逸脱させてはなりません。
 
-## 5. YAMLレビューレポートの形式遵守
-- **レビュー結果のスキーマと反映ルール**:
-  `/novel_review_pipeline` などのレビュー結果を格納するYAMLファイルを生成・更新する際は、プロジェクト規定のスキーマ（`findings` 配下の `id`, `location`, `original`, `category`, `severity`, `analysis`, `suggestion`, `accepted` 等）を厳格に維持してください。
-  指摘を小説テキストに自動反映する際は、ユーザーが `accepted: "y"` とマークした指摘のみを正確に反映し、`accepted: "n"` またはその他の項目は変更しないようにしてください。また、反映時は文脈の自然さや執筆ポリシーに留意してください。
-- **レビュー結果の確認・適用（WEBUI優先ルール）**:
+## 4. レビュー結果の確認と適用（WebUI優先ルール）
+- **WebUI優先での確認・適用**:
   ユーザーから「レビュー結果を反映して」「レビュー結果を見せて」「推敲内容を確認したい」などの指示を受けた場合は、チャット上で指摘リストを展開して対話的に適用するのではなく、WebUIである **「Novel Studio (WebUI)」** を通じてブラウザ上で確認・適用することを案内してください。
   WebUIサーバーがまだ起動していない場合は、`poetry run review-server` を実行して起動し、ユーザーにブラウザを開くよう促してください。
-  （※例外的に、ユーザーがCUIやチャット上での直接反映を明示的に望む場合は、`poetry run apply-findings` スクリプトを使用して反映を行ってください。エージェントがテキストを手動で直接編集して置換することは避けてください）
-
+- **反映時のセーフガードとCUI適用**:
+  指摘を小説テキストに反映する際は、ユーザーが `accepted: "y"` とマークした指摘のみを正確に反映し、`accepted: "n"` またはその他の項目は変更しないでください。
+  また、チャット上でユーザーが直接反映を望む場合は、エージェントがテキストを手動で直接編集して置換することは避け、`poetry run apply-findings` スクリプトを使用して自動反映を行ってください。
 - **レビューパイプライン実行とWebUI連携**:
-  ユーザーから特定の小説（例: `novels/1_12.txt`）のレビューを求められた場合は、`poetry run run-review novels/<filename>` を実行してください。このコマンドは、並列レビューとLLM統合を行った後、自動的にWebUIサーバーを起動し、ブラウザを開きます。完了後はWebUI上で指摘の確認と適用を行うようユーザーに案内してください。
+  特定の小説のレビューを求められた場合は、`poetry run run-review novels/<filename>` を実行してください。このコマンドは、並列レビュー実行後に自動的にWebUIサーバーを起動し、ブラウザを開きます。完了後はWebUI上で確認と適用を行うようユーザーに案内してください。
 
-## 6. WebUIの実装および修正方針
-WebUI（「Novel Studio」等）のフロントエンド・バックエンドの新規実装や機能修正を行う際は、以下のUXおよび安全性のガイドラインを厳格に遵守してください。
-
-- **非同期処理時のローディング制御と操作ブロック**:
-  - API呼び出し（小説生成やレビュー実行など）の非同期処理中は、画面全体または対象エリアにローディング表示（スピナーやスケルトン等）を表示し、ユーザーによる重複操作を防止してください。
-  - 送信ボタン等のインタラクティブ要素は適切に `disabled` 制御を行ってください。
-  - 初期ロード時（モデル一覧の取得や設定の復元時など）も、処理が完了するまで操作をブロックし、不完全な状態でのインタラクションを防いでください。
-
-- **エラーハンドリングとリカバリーの徹底**:
-  - API呼び出しに失敗またはタイムアウトした場合は、フリーズを避けるために必ず例外をキャッチし、ユーザーに対してトースト通知やダイアログで分かりやすくエラー内容を通知してください。
-  - エラー発生後はローディング状態を安全に解除し、ユーザーが再試行できる状態に戻してください。
-
-- **状態（ステート）の永続化と復元**:
-  - 執筆パラメータ（モデル選択、温度、最大文字数など）や最後に開いていたファイル等の画面状態は、ページ再読み込み時やブラウザを閉じた後も保持されるよう、`localStorage` 等を活用して自動保存・復元してください。
-  - 復元処理は、初期ロードのローディング表示中に完了させてください。
-
-- **UI/UXの最適化とコンパクト設計**:
-  - 画面のスクロール量を抑え、主要な操作やパラメータ設定が1つの画面内で直感的に行えるレイアウト（複数カラム化、アコーディオンの活用など）を意識してください。
-  - **リアルタイムログ表示とコンソール領域の設計思想**:
-    - `agy`（エージェント）等の外部ツールやバックエンドスクリプトを呼び出す非同期処理においては、実行中の進捗メッセージや出力ログがリアルタイムに確認できるよう設計してください。
-    - バックエンド側では、Pythonの標準出力バッファリングを無効化するオプション（`python -u`）を設定し、SSE（Server-Sent Events）等を通じて遅延なくストリーミング転送してください。
-    - フロントエンド（WebUI）側では、これらの出力を流し込むためのコンソール表示領域（`console-container` 等）を各機能画面（執筆、レビュー、同期、反映など）に必ず設けて、進行状況やエラーを視覚的に追跡できるようにしてください。また、画面スクロールを抑制しレイアウトの統一性を保つため、コンソール領域は「初期状態で非表示、実行時にスライドインアニメーションで出現、かつマウスドラッグで幅を変更可能な右側ペイン（専用領域）」として実装することを基本的な設計思想とします。
-
-### WebUIのアーキテクチャとファイル構成
-
-#### 設計方針
-- **バックエンド**: Flask ([review_server.py](file:///home/sshioyama/workspace/novel_tools/src/review_server.py)) によるAPI提供およびテンプレートのレンダリング。
-- **フロントエンド**: Vanilla HTML/JS/CSS を使用。[index.html](file:///home/sshioyama/workspace/novel_tools/src/templates/index.html) をベースとし、[app.js](file:///home/sshioyama/workspace/novel_tools/src/static/js/app.js) が画面（[views/*.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/)）やコンポーネント（[components/*.html](file:///home/sshioyama/workspace/novel_tools/src/templates/components/)）を動的に読み込んで制御するSPA（シングルページアプリケーション）ライクな構成。
-- **状態管理と通信**: APIとのやり取りは `fetch` による非同期通信で行い、画面状態や設定パラメータは `localStorage` に保存・復元する。
-
-#### ディレクトリ構造と各ファイルの役割
-
-- **バックエンドスクリプト**:
-  - [review_server.py](file:///home/sshioyama/workspace/novel_tools/src/review_server.py): WebUI全体のバックエンド。APIエンドポイント（レビュー結果一覧取得、レビュー適用、ログストリーミング等）の定義、各種HTML/コンポーネントテンプレートの配信を行う。
-- **ベースレイアウト**:
-  - [index.html](file:///home/sshioyama/workspace/novel_tools/src/templates/index.html): メインレイアウト。サイドバーと、動的ビューがロードされるメインコンテンツエリアを定義する。
-- **コンポーネント**:
-  - [sidebar.html](file:///home/sshioyama/workspace/novel_tools/src/templates/components/sidebar.html): ナビゲーションメニュー。
-  - [modals.html](file:///home/sshioyama/workspace/novel_tools/src/templates/components/modals.html): 全画面で共有されるモーダルダイアログ（エラー、警告、設定等の表示用）。
-- **ビュー（各機能画面）**:
-  - [dashboard.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/dashboard.html): システム全体のステータスや概要を表示。
-  - [editor.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/editor.html): 小説の編集・推敲およびレビュー適用のメイン画面。
-  - [review.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/review.html): レビュー指摘結果の確認、変更内容の適用・個別差分確認画面。
-  - [sync.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/sync.html): Google Driveや外部リポジトリとの同期設定画面。
-  - [write.html](file:///home/sshioyama/workspace/novel_tools/src/templates/views/write.html): AI（Claude等）を活用した小説執筆（生成）設定・実行画面。
-- **アセット**:
-  - [style.css](file:///home/sshioyama/workspace/novel_tools/src/static/css/style.css): UI全体のスタイル定義。カラーパレット、レスポンシブレイアウト、ローディングアニメーション等の共通スタイル。
-  - [app.js](file:///home/sshioyama/workspace/novel_tools/src/static/js/app.js): フロントエンドの全ロジック。画面遷移（ルーティング）、非同期API呼び出し、ローディングUI制御、エラーハンドリング、パラメータの永続化および復元。
-
-#### 開発・修正時の注意点
-- 新しい画面を追加する場合は、[views/](file:///home/sshioyama/workspace/novel_tools/src/templates/views/) 配下にHTMLテンプレートを作成し、[app.js](file:///home/sshioyama/workspace/novel_tools/src/static/js/app.js) のルーティング（`routes`）および初期化処理に組み込んでください。
-- バックエンドへの非同期リクエスト中は、必ず画面全体または対象エリアにローディング表示（スピナー等）を表示し、送信ボタン等のインタラクティブ要素を `disabled` にして重複操作を防止してください。
-
+## 5. WebUIの実装および修正方針
+- **WebUI（Novel Studioなど）の開発・修正**:
+  WebUIのフロントエンド・バックエンドの新規実装や機能修正を行う際は、専用の [WebUI-Developer スキル](../skills/webui-developer/SKILL.md) を参照し、その設計思想およびガイドライン（非同期処理制御、エラーハンドリング、永続化、リアルタイムログコンソール等）を厳格に遵守してください。
