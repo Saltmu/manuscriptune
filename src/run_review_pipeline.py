@@ -7,7 +7,8 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# Add skills/novel-writer to path to use writer_helper
+# Add src and skills/novel-writer to path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(
     os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "skills", "novel-writer")
@@ -359,21 +360,14 @@ def main():
 
     # Step 4: Run integration report
     print("\nIntegrating review results...")
-    integration_script = os.path.join("src", "integrate_findings.py")
-    if os.path.exists(integration_script):
-        cmd = [
-            "poetry",
-            "run",
-            "python",
-            integration_script,
-            "--dir",
-            output_dir,
-            "--model",
-            args.model,
-        ]
-        print(f"Running: {' '.join(cmd)}")
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        if res.returncode == 0:
+    try:
+        import integrate_findings
+
+        print(
+            f"Calling: integrate_findings.integrate_findings_in_dir(output_dir='{output_dir}', model='{args.model}')"
+        )
+        success = integrate_findings.integrate_findings_in_dir(output_dir, args.model)
+        if success:
             print("[OK] Reports integrated successfully.")
             print(
                 f"Consolidated Report: {os.path.join(output_dir, f'{basename}_report.md')}"
@@ -383,12 +377,12 @@ def main():
             )
         else:
             print(
-                f"[ERROR] Failed to run integrate_findings.py: {res.stderr}",
+                "[ERROR] Failed to integrate findings.",
                 file=sys.stderr,
             )
-    else:
+    except Exception as e:
         print(
-            "[WARNING] integrate_findings.py not found. Integration skipped.",
+            f"[ERROR] Unexpected error while calling integrate_findings: {e}",
             file=sys.stderr,
         )
 

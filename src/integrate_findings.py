@@ -153,26 +153,14 @@ findings: []
         return None
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Integrate and resolve conflicts in parallel review findings."
-    )
-    parser.add_argument(
-        "--dir",
-        required=True,
-        help="Directory containing the review output YAML files.",
-    )
-    parser.add_argument(
-        "--model",
-        default="Gemini 3.5 Flash (High)",
-        help="AI Model to use for the merging process.",
-    )
-    args = parser.parse_args()
-
-    output_dir = args.dir
+def integrate_findings_in_dir(output_dir, model):
+    """
+    Integrates and resolves conflicts in parallel review findings.
+    Returns True on success, False on failure.
+    """
     if not os.path.exists(output_dir):
         print(f"Error: Directory '{output_dir}' does not exist.", file=sys.stderr)
-        sys.exit(1)
+        return False
 
     basename = os.path.basename(os.path.abspath(output_dir))
     formatted_txt_path = os.path.join(output_dir, f"{basename}_formatted.txt")
@@ -186,7 +174,7 @@ def main():
                 f"Error: '{basename}_formatted.txt' not found in {output_dir}.",
                 file=sys.stderr,
             )
-            sys.exit(1)
+            return False
 
     target_text = read_file(formatted_txt_path)
 
@@ -217,7 +205,7 @@ def main():
 
     if not yaml_files:
         print("No finding YAML files found to integrate.", file=sys.stderr)
-        sys.exit(1)
+        return False
 
     print(f"Found {len(yaml_files)} YAML files to integrate.")
 
@@ -238,7 +226,7 @@ def main():
             f.write("findings: []\n")
         generate_markdown_report([], os.path.join(output_dir, f"{basename}_report.md"))
         print("Done.")
-        sys.exit(0)
+        return True
 
     # Serialize all findings into a structured format for LLM input
     raw_findings_text = yaml.dump(
@@ -247,7 +235,7 @@ def main():
 
     # Run integration via LLM
     merged_yaml_content = run_integration_llm(
-        output_dir, target_text, raw_findings_text, args.model
+        output_dir, target_text, raw_findings_text, model
     )
 
     if not merged_yaml_content:
@@ -286,6 +274,29 @@ def main():
     report_md_path = os.path.join(output_dir, f"{basename}_report.md")
     generate_markdown_report(merged_findings_list, report_md_path)
     print(f"Saved Markdown report to {report_md_path}")
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Integrate and resolve conflicts in parallel review findings."
+    )
+    parser.add_argument(
+        "--dir",
+        required=True,
+        help="Directory containing the review output YAML files.",
+    )
+    parser.add_argument(
+        "--model",
+        default="Gemini 3.5 Flash (High)",
+        help="AI Model to use for the merging process.",
+    )
+    args = parser.parse_args()
+
+    success = integrate_findings_in_dir(args.dir, args.model)
+    if not success:
+        sys.exit(1)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

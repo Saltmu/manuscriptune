@@ -139,22 +139,15 @@ async def list_available_models():
                 ]
             }
 
-        lines = res.stdout.strip().split("\n")
+        # Clean up output: remove ANSI escape codes, braille characters (spinners), etc.
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", res.stdout)
+        lines = clean_stdout.strip().split("\n")
         models = []
         for line in lines:
-            line_clean = (
-                line.replace("⠋", "")
-                .replace("⠙", "")
-                .replace("⠹", "")
-                .replace("⠸", "")
-                .replace("⠼", "")
-                .replace("⠴", "")
-                .replace("⠦", "")
-                .replace("⠧", "")
-                .replace("⠇", "")
-                .replace("⠏", "")
-                .strip()
-            )
+            # Remove braille symbols (U+2800 - U+28FF)
+            line_clean = re.sub(r"[\u2800-\u28ff]", "", line)
+            # Remove carriage returns and strip whitespace
+            line_clean = line_clean.replace("\r", "").strip()
             if not line_clean:
                 continue
             if "Fetching available models" in line_clean:
