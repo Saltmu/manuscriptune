@@ -98,6 +98,149 @@ def extract_suggestion_candidate(suggestion):
     return None
 
 
+def find_target_line(text_lines, finding):
+    """
+    Finds the 1-based line number in text_lines where finding's original text exists.
+    Looks near specified location first, then falls back to full scan.
+    Returns 1-based index or None.
+    """
+    original = finding.get("original", "").strip()
+    if not original:
+        return None
+
+    location_str = finding.get("location", "")
+    line_no = parse_line_number(location_str)
+
+    if line_no is not None:
+        target_idx = line_no - 1
+        for idx in range(target_idx - 5, target_idx + 6):
+            if 0 <= idx < len(text_lines):
+                if original in text_lines[idx]:
+                    return idx + 1
+
+    for idx, line in enumerate(text_lines):
+        if original in line:
+            return idx + 1
+
+    return None
+
+
+def apply_fallback_to_block(context_lines, findings_in_block):
+    """
+    Fallback replacement logic when LLM is unavailable.
+    Replaces originals with extracted suggestions inside context_lines.
+    Returns (modified_block_text, success_findings, failed_findings)
+    """
+    modified_block_text = "".join(context_lines)
+    success_findings = []
+    failed_findings = []
+
+    for f in findings_in_block:
+        original = f.get("original", "").strip()
+        suggestion = f.get("suggestion", "").strip()
+        replacement = extract_suggestion_candidate(suggestion)
+
+        if not replacement:
+            failed_findings.append((
+                f,
+                "Could not extract replacement text from suggestion. Manual intervention required."
+            ))
+            continue
+
+        if original in modified_block_text:
+            # We replace only the first occurrence to avoid messing up other parts of the block
+            modified_block_text = modified_block_text.replace(original, replacement, 1)
+            success_findings.append((f, replacement, "extracted"))
+        else:
+            failed_findings.append((f, f"Could not find original text: '{original}'"))
+
+    return modified_block_text, success_findings, failed_findings
+
+
+def query_llm_for_block_replacement(context_lines, findings_in_block, model):
+    """
+    Uses the agy CLI to generate the rewritten block based on context and multiple findings.
+    """
+    context_text_with_line_numbers = ""
+    for idx, line in enumerate(context_lines):
+        context_text_with_line_numbers += f"{idx + 1}: {line}"
+
+    findings_str = ""
+    for f_idx, f in enumerate(findings_in_block):
+        findings_str += f"■ 指摘 {f_idx + 1}\n"
+        findings_str += f"・対象原文: {f.get('original')}\n"
+        findings_str += f"・指摘内容: {f.get('suggestion')}\n\n"
+
+    prompt = f"""あなたは小説の優秀な編集者です。
+以下の【元のテキストブロック】に対して、提示された【修正指示】をすべて反映した、修正後のテキストブロックを生成してください。
+
+【元のテキストブロック】
+{context_text_with_line_numbers}
+
+【修正指示】
+{findings_str}
+
+【指示・ルール】
+・【元のテキストブロック】の各行の先頭には「行番号: 」が付いています。これを参考に、指定された「対象原文」の箇所を修正してください。
+・修正する際は、周囲の文脈やキャラクターの口調、文章のリズムに自然に馴染むように書き換えてください。不自然な繋ぎ目にならないように配慮してください。
+・出力は、修正・書き換えを行った「テキストブロック全体」としてください。
+・出力するテキストブロックには、行番号（「1: 」など）や、解説、挨拶、マークダウンのコードブロック（```）などは一切含めないでください。純粋な小説の本文のみを出力してください。
+・行数は元のテキストブロックとおおむね同程度とし、修正指示に関係のない部分は元の文章をそのまま維持してください。
+"""
+
+    cmd = ["agy", "-p", "", "--model", model]
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, stderr = process.communicate(input=prompt)
+
+        if process.returncode != 0:
+            print(
+                f"Warning: agy CLI failed with error: {stderr.strip()}", file=sys.stderr
+            )
+            return None
+
+        result = stdout.strip()
+        # Clean up markdown formatting
+        result = re.sub(r"^```[a-zA-Z]*\n", "", result)
+        result = re.sub(r"\n```$", "", result).strip()
+
+        # Guard: if LLM output is too short (e.g. LLM failed and returned generic message or empty)
+        original_length = sum(len(line) for line in context_lines)
+        if len(result) < original_length * 0.3:
+            print(
+                f"Warning: LLM output is too short ({len(result)} vs original {original_length}). Rejecting output.",
+                file=sys.stderr
+            )
+            return None
+
+        # Strip line numbers if the LLM output includes them
+        lines = result.splitlines()
+        has_line_numbers = all(re.match(r"^\d+\s*:\s*", line) for line in lines if line.strip())
+        if has_line_numbers and len(lines) > 0:
+            cleaned_lines = []
+            for line in lines:
+                cleaned_line = re.sub(r"^\d+\s*:\s*", "", line)
+                cleaned_lines.append(cleaned_line)
+            result = "\n".join(cleaned_lines)
+
+        return result
+    except FileNotFoundError:
+        print(
+            "Warning: 'agy' CLI not found. Cannot use LLM for replacement.",
+            file=sys.stderr,
+        )
+        return None
+    except Exception as e:
+        print(f"Warning: Unexpected error calling agy: {e}", file=sys.stderr)
+        return None
+
+
 def apply_finding_to_text(text_lines, finding, model, use_llm=True):
     """
     Applies a single finding to the list of text lines.
@@ -105,70 +248,50 @@ def apply_finding_to_text(text_lines, finding, model, use_llm=True):
     Returns (success, applied_text, method)
     """
     original = finding.get("original", "").strip()
-    suggestion = finding.get("suggestion", "").strip()
-    location_str = finding.get("location", "")
-
     if not original:
         return False, "Original text is empty", None
 
-    line_no = parse_line_number(location_str)
-
-    # Define a helper to replace within a range of lines
-    def try_replace_in_range(start_idx, end_idx):
-        for idx in range(start_idx, end_idx):
-            if idx < 0 or idx >= len(text_lines):
-                continue
-            line = text_lines[idx]
-            if original in line:
-                return idx, line
-        return None, None
-
-    match_idx = None
-    matched_line = None
-
-    if line_no is not None:
-        # Try near the specified line (1-based index converted to 0-based index)
-        target_idx = line_no - 1
-        # Look in range [target_idx - 5, target_idx + 5]
-        match_idx, matched_line = try_replace_in_range(target_idx - 5, target_idx + 6)
-
-    if match_idx is None:
-        # Fallback: scan the entire file
-        match_idx, matched_line = try_replace_in_range(0, len(text_lines))
-
-    if match_idx is None:
+    line_no = find_target_line(text_lines, finding)
+    if line_no is None:
         return False, f"Could not find original text: '{original}'", None
 
-    # Determine replacement content
-    replacement = None
-    method = "direct"
+    L_min = line_no
+    L_max = line_no
+    C = 4
+    start_idx = max(0, L_min - 1 - C)
+    end_idx = min(len(text_lines), L_max + C)
+    context_lines = text_lines[start_idx:end_idx]
 
-    # Try LLM first if enabled
+    success = False
+    result_block_text = None
+    method = None
+
     if use_llm:
-        replacement = query_llm_for_replacement(original, suggestion, model)
-        if replacement:
+        result_block_text = query_llm_for_block_replacement(context_lines, [finding], model)
+        if result_block_text:
+            success = True
             method = "llm"
 
-    # Fallback to extraction from suggestion if LLM failed or disabled
-    if not replacement:
-        extracted = extract_suggestion_candidate(suggestion)
-        if extracted:
-            replacement = extracted
-            method = "extracted"
+    if not success:
+        result_block_text, success_findings, failed_findings = apply_fallback_to_block(context_lines, [finding])
+        if success_findings:
+            _, replacement, method = success_findings[0]
+            if not result_block_text.endswith("\n") and len(result_block_text) > 0:
+                result_block_text += "\n"
+            text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
+            return True, replacement, method
+        else:
+            error_msg = failed_findings[0][1] if failed_findings else "Replacement failed"
+            return False, error_msg, None
+    else:
+        if not result_block_text.endswith("\n") and len(result_block_text) > 0:
+            result_block_text += "\n"
+        text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
 
-    # Absolute fallback: if no candidate could be extracted, we cannot perform automatic replacement
-    if not replacement:
-        return (
-            False,
-            "Could not extract replacement text from suggestion. Manual intervention required.",
-            None,
-        )
-
-    # Execute the replacement in the line
-    new_line = matched_line.replace(original, replacement)
-    text_lines[match_idx] = new_line
-
-    return True, replacement, method
+        replacement = extract_suggestion_candidate(finding.get("suggestion", ""))
+        if not replacement:
+            replacement = result_block_text.strip()
+        return True, replacement, method
 
 
 def print_finding_diff(finding):
@@ -254,147 +377,181 @@ def main():
         print("No findings to apply.")
         sys.exit(0)
 
+    # Default to interactive mode if no mode is specified
+    if not args.interactive and not args.accept_ids and not args.auto:
+        print("Warning: No mode specified. Defaulting to interactive mode.")
+        args.interactive = True
+
     # Filter/Select findings to apply
     accepted_ids = set()
     if args.accept_ids:
         accepted_ids = {x.strip() for x in args.accept_ids.split(",")}
 
-    # Sort findings by line number in descending order (reverse application)
-    # This prevents line number shifts from affecting upper lines.
-    def get_sort_key(f):
-        ln = parse_line_number(f.get("location", ""))
-        return ln if ln is not None else 0
-
-    findings_sorted = sorted(findings, key=get_sort_key, reverse=True)
-
-    applied_count = 0
-    skipped_count = 0
-    failed_count = 0
-
     findings_map = {f.get("id"): f for f in findings}
 
-    for finding in findings_sorted:
+    # Initialize/normalize accepted status in YAML findings
+    for f in findings:
+        if "accepted" not in f:
+            f["accepted"] = None
+
+    # Phase 1: Determine which findings to apply (User input / CLI parameters)
+    for i, finding in enumerate(findings):
         fid = finding.get("id")
 
-        # Determine if we should apply this finding
-        should_apply = False
-
-        if args.interactive:
-            print_finding_diff(finding)
-            # Suggest extracted replacement if LLM disabled or for review
-            candidate = extract_suggestion_candidate(finding.get("suggestion", ""))
-            if candidate:
-                print(f"(抽出された簡易修正案候補: 「{candidate}」)")
-
-            choice = (
-                input(
-                    "この指摘を適用しますか？ [y:はい / n:いいえ / e:手動入力 / a:以降すべて適用 / q:終了して保存]: "
-                )
-                .strip()
-                .lower()
-            )
-            if choice == "y":
-                should_apply = True
-            elif choice == "e":
-                custom_replacement = input(
-                    "適用する修正後のテキストを入力してください: "
-                ).strip()
-                # Override suggestion for this run
-                finding["suggestion"] = f"「{custom_replacement}」に修正してください。"
-                should_apply = True
-            elif choice == "a":
-                args.interactive = False
-                args.auto = True
-                # Also mark current and subsequent accepted ones
-                should_apply = True
-            elif choice == "q":
-                print("適用処理を終了し、これまでの変更を保存します。")
-                break
-            else:
-                # 'n' or anything else
-                skipped_count += 1
-                finding["accepted"] = "n"
-                if fid in findings_map:
-                    findings_map[fid]["apply_status"] = None
-                    findings_map[fid]["apply_result"] = None
-                continue
-        elif args.accept_ids:
+        if args.accept_ids:
             if fid in accepted_ids:
-                should_apply = True
+                finding["accepted"] = "y"
             else:
-                skipped_count += 1
-                if fid in findings_map:
-                    findings_map[fid]["apply_status"] = None
-                    findings_map[fid]["apply_result"] = None
-                continue
-        elif args.auto:
-            if finding.get("accepted") == "y":
-                should_apply = True
-            else:
-                skipped_count += 1
-                if fid in findings_map:
-                    findings_map[fid]["apply_status"] = None
-                    findings_map[fid]["apply_result"] = None
-                continue
-        else:
-            # If no mode selected, default to interactive
-            print("Warning: No mode specified. Defaulting to interactive mode.")
-            args.interactive = True
-            # Re-run loop for this finding
-            print_finding_diff(finding)
-            choice = input("この指摘を適用しますか？ [y/n/e/a/q]: ").strip().lower()
-            if choice == "y":
-                should_apply = True
-            elif choice == "e":
-                custom_replacement = input(
-                    "修正後のテキストを入力してください: "
-                ).strip()
-                finding["suggestion"] = f"「{custom_replacement}」に修正してください。"
-                should_apply = True
-            elif choice == "a":
-                args.interactive = False
-                args.auto = True
-                should_apply = True
-            elif choice == "q":
-                break
-            else:
-                skipped_count += 1
                 finding["accepted"] = "n"
-                if fid in findings_map:
-                    findings_map[fid]["apply_status"] = None
-                    findings_map[fid]["apply_result"] = None
-                continue
+            continue
 
-        if should_apply:
-            # Apply the finding
-            success, result_text, method = apply_finding_to_text(
-                text_lines, finding, args.model, not args.no_llm
+        if args.auto:
+            if finding.get("accepted") != "y":
+                finding["accepted"] = "n"
+            continue
+
+        # Interactive Mode
+        print_finding_diff(finding)
+        candidate = extract_suggestion_candidate(finding.get("suggestion", ""))
+        if candidate:
+            print(f"(抽出された簡易修正案候補: 「{candidate}」)")
+
+        choice = (
+            input(
+                "この指摘を適用しますか？ [y:はい / n:いいえ / e:手動入力 / a:以降すべて適用 / q:終了して適用開始]: "
             )
-            if success:
-                print(f"[SUCCESS] {fid} を適用しました ({method}方式)。")
-                print(f"  -> 置換後: '{result_text}'")
-                applied_count += 1
-                # Update status in original list
-                if fid in findings_map:
-                    findings_map[fid]["accepted"] = "y"
-                    findings_map[fid]["apply_status"] = "success"
-                    findings_map[fid]["apply_result"] = f"{method}方式: {result_text}"
+            .strip()
+            .lower()
+        )
+
+        if choice == "y":
+            finding["accepted"] = "y"
+        elif choice == "e":
+            custom_replacement = input(
+                "適用する修正後のテキストを入力してください: "
+            ).strip()
+            finding["suggestion"] = f"「{custom_replacement}」に修正してください。"
+            finding["accepted"] = "y"
+        elif choice == "a":
+            finding["accepted"] = "y"
+            for remain_f in findings[i+1:]:
+                remain_fid = remain_f.get("id")
+                if args.accept_ids:
+                    if remain_fid in accepted_ids:
+                        remain_f["accepted"] = "y"
+                    else:
+                        remain_f["accepted"] = "n"
+                else:
+                    remain_f["accepted"] = "y"
+            args.interactive = False
+            args.auto = True
+            break
+        elif choice == "q":
+            print("適用処理を終了し、これまでに確定した変更を適用します。")
+            break
+        else:
+            finding["accepted"] = "n"
+
+    # Phase 2: Grouping and Application
+    active_findings = []
+    skipped_count = 0
+
+    for f in findings:
+        fid = f.get("id")
+        if f.get("accepted") == "y":
+            line_no = find_target_line(text_lines, f)
+            if line_no is not None:
+                active_findings.append((line_no, f))
             else:
-                print(
-                    f"[FAIL] {fid} の適用に失敗しました: {result_text}", file=sys.stderr
-                )
+                print(f"[FAIL] {fid} の適用に失敗しました: 原文が見つかりません。", file=sys.stderr)
+                f["apply_status"] = "failed"
+                f["apply_result"] = "原文が見つかりませんでした。"
+        else:
+            skipped_count += 1
+            f["apply_status"] = None
+            f["apply_result"] = None
+
+    # Group close findings (within 5 lines of each other)
+    active_findings.sort(key=lambda x: x[0])
+    groups = []
+    if active_findings:
+        current_group = [active_findings[0]]
+        for item in active_findings[1:]:
+            last_line_no = current_group[-1][0]
+            curr_line_no = item[0]
+            if curr_line_no - last_line_no <= 5:
+                current_group.append(item)
+            else:
+                groups.append(current_group)
+                current_group = [item]
+        groups.append(current_group)
+
+    # Sort groups in descending order of line numbers to apply from bottom to top
+    groups.sort(key=lambda g: g[0][0], reverse=True)
+
+    applied_count = 0
+    failed_count = 0
+
+    for group in groups:
+        findings_in_block = [item[1] for item in group]
+        line_nos = [item[0] for item in group]
+        L_min = min(line_nos)
+        L_max = max(line_nos)
+
+        C = 4  # Context size
+        start_idx = max(0, L_min - 1 - C)
+        end_idx = min(len(text_lines), L_max + C)
+        context_lines = text_lines[start_idx:end_idx]
+
+        success = False
+        result_block_text = None
+        method = "llm"
+
+        if not args.no_llm:
+            result_block_text = query_llm_for_block_replacement(context_lines, findings_in_block, args.model)
+            if result_block_text:
+                success = True
+
+        if success and result_block_text:
+            if not result_block_text.endswith("\n") and len(result_block_text) > 0:
+                result_block_text += "\n"
+
+            text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
+
+            for f in findings_in_block:
+                fid = f.get("id")
+                print(f"[SUCCESS] {fid} を適用しました (LLMコンテキスト一括方式)。")
+                applied_count += 1
+                f["apply_status"] = "success"
+                f["apply_result"] = "LLMコンテキスト一括方式"
+        else:
+            # Fallback
+            result_block_text, success_findings, failed_findings = apply_fallback_to_block(context_lines, findings_in_block)
+            if not result_block_text.endswith("\n") and len(result_block_text) > 0:
+                result_block_text += "\n"
+
+            text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
+
+            for f, replacement, m in success_findings:
+                fid = f.get("id")
+                print(f"[SUCCESS] {fid} を適用しました (フォールバック・{m}方式)。")
+                print(f"  -> 置換後: '{replacement}'")
+                applied_count += 1
+                f["apply_status"] = "success"
+                f["apply_result"] = f"フォールバック({m}方式): {replacement}"
+
+            for f, error_msg in failed_findings:
+                fid = f.get("id")
+                print(f"[FAIL] {fid} の適用に失敗しました: {error_msg}", file=sys.stderr)
                 failed_count += 1
-                if fid in findings_map:
-                    findings_map[fid]["accepted"] = "y"
-                    findings_map[fid]["apply_status"] = "failed"
-                    findings_map[fid]["apply_result"] = result_text
+                f["apply_status"] = "failed"
+                f["apply_result"] = error_msg
 
     # Save modified text
     write_file(formatted_txt_path, "".join(text_lines))
     print(f"\n小説テキストを更新しました: {formatted_txt_path}")
 
     # Save updated findings YAML
-    # Keep original order when saving YAML
     updated_yaml_data = {"findings": findings}
     try:
         with open(findings_yaml_path, "w", encoding="utf-8") as f:
