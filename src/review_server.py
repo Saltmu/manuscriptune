@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.utils import project_config as writer_helper
+from src.utils.ai_client import AgyClient
 
 app = FastAPI(title="Novel Studio - AI Writing & Review Portal")
 
@@ -160,49 +161,26 @@ async def get_config():
 
 @app.get("/api/models")
 async def list_available_models():
+    default_models = [
+        "Gemini 3.5 Flash (High)",
+        "Gemini 3.5 Flash (Medium)",
+        "Gemini 3.5 Flash (Low)",
+    ]
     try:
-        res = subprocess.run(["agy", "models"], capture_output=True, text=True)
-        if res.returncode != 0:
-            return {
-                "models": [
-                    "Gemini 3.5 Flash (High)",
-                    "Gemini 3.5 Flash (Medium)",
-                    "Gemini 3.5 Flash (Low)",
-                ]
-            }
-
-        # Clean up output: remove ANSI escape codes, braille characters (spinners), etc.
-        clean_stdout = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", res.stdout)
-        lines = clean_stdout.strip().split("\n")
+        raw_models = AgyClient.list_models()
         models = []
-        for line in lines:
-            # Remove braille symbols (U+2800 - U+28FF)
-            line_clean = re.sub(r"[\u2800-\u28ff]", "", line)
-            # Remove carriage returns and strip whitespace
-            line_clean = line_clean.replace("\r", "").strip()
-            if not line_clean:
+        for m in raw_models:
+            if "Fetching available models" in m:
                 continue
-            if "Fetching available models" in line_clean:
-                continue
-            if line_clean not in models:
-                models.append(line_clean)
+            if m not in models:
+                models.append(m)
 
         if not models:
-            models = [
-                "Gemini 3.5 Flash (High)",
-                "Gemini 3.5 Flash (Medium)",
-                "Gemini 3.5 Flash (Low)",
-            ]
+            models = default_models
         return {"models": models}
     except Exception as e:
         print(f"Error fetching models: {e}")
-        return {
-            "models": [
-                "Gemini 3.5 Flash (High)",
-                "Gemini 3.5 Flash (Medium)",
-                "Gemini 3.5 Flash (Low)",
-            ]
-        }
+        return {"models": default_models}
 
 
 @app.get("/api/novels")

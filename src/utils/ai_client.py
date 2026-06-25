@@ -1,3 +1,4 @@
+import re
 import subprocess
 import threading
 import time
@@ -138,3 +139,37 @@ class AgyClient:
             )
 
         return "".join(output_chunks)
+
+    @classmethod
+    def list_models(cls) -> list[str]:
+        """Runs `agy models` to fetch a list of available models."""
+        cmd = ["agy", "models"]
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            stdout, stderr = process.communicate()
+        except FileNotFoundError as e:
+            raise AgyNotFoundError("Antigravity CLI (agy) not found.") from e
+        except Exception as e:
+            raise AgyClientError(
+                f"Unexpected error when listing models: {str(e)}"
+            ) from e
+
+        if process.returncode != 0:
+            raise AgyClientError(f"Failed to list models: {stderr}")
+
+        # Clean up output: remove ANSI escape codes, braille characters (spinners), etc.
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", stdout)
+        lines = clean_stdout.strip().split("\n")
+        models = []
+        for line in lines:
+            # Remove braille symbols (U+2800 - U+28FF)
+            line_clean = re.sub(r"[\u2800-\u28ff]", "", line).strip()
+            if line_clean:
+                models.append(line_clean)
+        return models

@@ -89,3 +89,40 @@ def test_agy_client_stream(mock_popen):
     assert collected == ["Line 1\n", "Line 2\n"]
     mock_process.stdin.write.assert_called_once_with("Input prompt")
     mock_process.stdin.close.assert_called_once()
+
+
+@patch("subprocess.Popen")
+def test_agy_client_list_models_success(mock_popen):
+    # Mock subprocess models output with escape codes and braille
+    mock_process = MagicMock()
+    mock_process.returncode = 0
+    mock_process.communicate.return_value = (
+        "\x1b[32m⣾\x1b[0m Gemini 3.5 Flash (High)\n⣽ Gemini 3.5 Flash (Medium)\n",
+        "",
+    )
+    mock_popen.return_value = mock_process
+
+    models = AgyClient.list_models()
+
+    assert models == ["Gemini 3.5 Flash (High)", "Gemini 3.5 Flash (Medium)"]
+    mock_popen.assert_called_once_with(
+        ["agy", "models"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+@patch("subprocess.Popen")
+def test_agy_client_list_models_failure(mock_popen):
+    # Mock subprocess models command failure
+    mock_process = MagicMock()
+    mock_process.returncode = 1
+    mock_process.communicate.return_value = ("", "Command error")
+    mock_popen.return_value = mock_process
+
+    with pytest.raises(AgyClientError) as exc_info:
+        AgyClient.list_models()
+
+    assert "Failed to list models" in str(exc_info.value)

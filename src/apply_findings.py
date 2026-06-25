@@ -1,10 +1,11 @@
 import argparse
 import os
 import re
-import subprocess
 import sys
 
 import yaml
+
+from src.utils.ai_client import AgyClient, AgyClientError
 
 
 def read_file(filepath):
@@ -138,23 +139,9 @@ def query_llm_for_block_replacement(context_lines, findings_in_block, model):
 ・行数は元のテキストブロックとおおむね同程度とし、修正指示に関係のない部分は元の文章をそのまま維持してください。
 """
 
-    cmd = ["agy", "-p", "", "--model", model]
+    client = AgyClient(model=model)
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        stdout, stderr = process.communicate(input=prompt)
-
-        if process.returncode != 0:
-            print(
-                f"Warning: agy CLI failed with error: {stderr.strip()}", file=sys.stderr
-            )
-            return None
-
+        stdout = client.generate(prompt)
         result = stdout.strip()
         # Clean up markdown formatting
         result = re.sub(r"^```[a-zA-Z]*\n", "", result)
@@ -182,14 +169,11 @@ def query_llm_for_block_replacement(context_lines, findings_in_block, model):
             result = "\n".join(cleaned_lines)
 
         return result
-    except FileNotFoundError:
-        print(
-            "Warning: 'agy' CLI not found. Cannot use LLM for replacement.",
-            file=sys.stderr,
-        )
+    except AgyClientError as e:
+        print(f"Warning: AgyClient failed with error: {e}", file=sys.stderr)
         return None
     except Exception as e:
-        print(f"Warning: Unexpected error calling agy: {e}", file=sys.stderr)
+        print(f"Warning: Unexpected error calling AgyClient: {e}", file=sys.stderr)
         return None
 
 
