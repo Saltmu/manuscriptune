@@ -7,29 +7,111 @@ let activeHighlightLine = null;
 
 let selectedNovelFile = localStorage.getItem('selectedNovelFile') || "";
 
+// Parse URL hash to view and file resources
+function parseHash() {
+    const hash = window.location.hash || '#/dashboard';
+    const cleanHash = hash.startsWith('#/') ? hash.substring(2) : (hash.startsWith('#') ? hash.substring(1) : hash);
+    const parts = cleanHash.split('/');
+    const view = parts[0] || 'dashboard';
+    const file = parts[1] ? decodeURIComponent(parts[1]) : null;
+    return { view, file };
+}
+
+let lastHash = window.location.hash || '#/dashboard';
+
+// Handle routing based on hash
+async function handleRouting() {
+    if (isRunningProcess) {
+        showToast('プロセス実行中は画面を切り替えられません。');
+        // Prevent hash change by rolling back to lastHash
+        window.removeEventListener('hashchange', handleRouting);
+        window.location.hash = lastHash;
+        setTimeout(() => {
+            window.addEventListener('hashchange', handleRouting);
+        }, 0);
+        return;
+    }
+
+    const { view, file } = parseHash();
+    lastHash = window.location.hash || '#/dashboard';
+
+    const validViews = ['dashboard', 'sync', 'write', 'review', 'editor'];
+    if (!validViews.includes(view)) {
+        window.location.hash = '#/dashboard';
+        return;
+    }
+
+    // Toggle view visibility
+    document.querySelectorAll('.view-content').forEach(v => v.classList.remove('active'));
+    const targetViewEl = document.getElementById(`view-${view}`);
+    if (targetViewEl) {
+        targetViewEl.classList.add('active');
+    }
+
+    // Toggle navigation item active states
+    document.querySelectorAll('.nav-item').forEach(i => {
+        i.classList.remove('active');
+        const href = i.getAttribute('href');
+        const onclick = i.getAttribute('onclick');
+        if ((href && href.includes(`#/${view}`)) || (onclick && onclick.includes(`'${view}'`))) {
+            i.classList.add('active');
+        }
+    });
+
+    // View-specific data loading
+    if (view === 'dashboard') {
+        loadDashboardData();
+    } else if (view === 'editor') {
+        if (file) {
+            selectedNovelFile = file;
+            localStorage.setItem('selectedNovelFile', selectedNovelFile);
+        }
+        if (selectedNovelFile) {
+            // Sync URL with state if the file parameter is missing in URL
+            if (!file) {
+                window.location.hash = `#/editor/${encodeURIComponent(selectedNovelFile)}`;
+                return;
+            }
+            await loadEditorData();
+        } else {
+            const container = document.getElementById('novel-content');
+            if (container) {
+                container.innerHTML = `
+                    <div style="text-align: center; color: var(--text-muted); padding-top: 60px;">
+                        ダッシュボードで小説を選択し、「校閲」を押してください。
+                    </div>
+                `;
+            }
+            const filenameDisplay = document.getElementById('filename-display');
+            if (filenameDisplay) filenameDisplay.textContent = '-';
+            const rollbackBtn = document.getElementById('btn-rollback');
+            if (rollbackBtn) rollbackBtn.style.display = 'none';
+        }
+    } else if (view === 'review') {
+        if (file) {
+            selectedNovelFile = file;
+            localStorage.setItem('selectedNovelFile', selectedNovelFile);
+        }
+        if (selectedNovelFile && !file) {
+            window.location.hash = `#/review/${encodeURIComponent(selectedNovelFile)}`;
+            return;
+        }
+        await loadDashboardData();
+    }
+}
+
 // Switch Tabs/Views
 function switchView(viewId) {
     if (isRunningProcess) {
         showToast('プロセス実行中は画面を切り替えられません。');
         return;
     }
-    document.querySelectorAll('.view-content').forEach(v => v.classList.remove('active'));
-    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-    
-    document.getElementById(`view-${viewId}`).classList.add('active');
-    
-    // Highlight nav link
-    const navLink = Array.from(document.querySelectorAll('.nav-item')).find(item => item.textContent.includes(
-        viewId === 'dashboard' ? 'ダッシュボード' :
-        viewId === 'sync' ? '設定資料同期' :
-        viewId === 'write' ? 'AI小説執筆' :
-        viewId === 'review' ? 'レビュー実行' : '校閲'
-    ));
-    if (navLink) navLink.classList.add('active');
-
-    // Hook for loading dashboards
-    if (viewId === 'dashboard') {
-        loadDashboardData();
+    if (viewId === 'editor' && selectedNovelFile) {
+        window.location.hash = `#/editor/${encodeURIComponent(selectedNovelFile)}`;
+    } else if (viewId === 'review' && selectedNovelFile) {
+        window.location.hash = `#/review/${encodeURIComponent(selectedNovelFile)}`;
+    } else {
+        window.location.hash = `#/${viewId}`;
     }
 }
 
@@ -167,6 +249,14 @@ function selectDraftCard(novelName, hasFindings) {
     selectedNovelFile = novelName;
     localStorage.setItem('selectedNovelFile', selectedNovelFile);
 
+    // Sync URL hash with selection
+    const currentHashObj = parseHash();
+    if (currentHashObj.view === 'review' && currentHashObj.file !== novelName) {
+        if (!isRunningProcess) {
+            window.location.hash = `#/review/${encodeURIComponent(novelName)}`;
+        }
+    }
+
     loadPreview(novelName);
 }
 
@@ -213,38 +303,24 @@ async function loadPreview(novelName) {
 
 // Action: Select novel and switch to editor
 async function selectAndEditNovel(novelName) {
-    try {
-        selectedNovelFile = novelName;
-        localStorage.setItem('selectedNovelFile', selectedNovelFile);
-        // Load Editor Data
-        await loadEditorData();
-        switchView('editor');
-    } catch (err) {
-        console.error(err);
-        alert('ファイルの選択に失敗しました。');
+    if (isRunningProcess) {
+        showToast('プロセス実行中は画面を切り替えられません。');
+        return;
     }
+    selectedNovelFile = novelName;
+    localStorage.setItem('selectedNovelFile', selectedNovelFile);
+    window.location.hash = `#/editor/${encodeURIComponent(novelName)}`;
 }
 
 // Action: Select novel and switch to review view
 function selectAndReviewNovel(novelName) {
-    switchView('review');
-    
-    // カードリストから該当ファイルを探して選択
-    const container = document.getElementById('review-draft-cards-container');
-    if (container) {
-        const card = Array.from(container.children).find(c => c.dataset.filename === novelName);
-        if (card) {
-            const hasFindings = card.dataset.hasfindings === "true";
-            selectDraftCard(novelName, hasFindings);
-            return;
-        }
+    if (isRunningProcess) {
+        showToast('プロセス実行中は画面を切り替えられません。');
+        return;
     }
-    
-    // 見つからない場合のフォールバック
-    const hiddenInput = document.getElementById('review-file-select');
-    if (hiddenInput) {
-        hiddenInput.value = novelName;
-    }
+    selectedNovelFile = novelName;
+    localStorage.setItem('selectedNovelFile', selectedNovelFile);
+    window.location.hash = `#/review/${encodeURIComponent(novelName)}`;
 }
 
 // Streaming Execution Log Helper using EventSource
@@ -1024,7 +1100,12 @@ async function loadProjectConfig() {
         if (data.initial_novel && !selectedNovelFile) {
             selectedNovelFile = data.initial_novel;
             localStorage.setItem('selectedNovelFile', selectedNovelFile);
-            loadEditorData();
+            
+            // Sync URL with initial novel if currently on editor/review view without a specified file
+            const { view, file } = parseHash();
+            if ((view === 'editor' || view === 'review') && !file) {
+                window.location.hash = `#/${view}/${encodeURIComponent(selectedNovelFile)}`;
+            }
         }
     } catch (err) {
         console.error('Failed to load project config:', err);
@@ -1033,9 +1114,21 @@ async function loadProjectConfig() {
 
 // Init Load
 window.addEventListener('DOMContentLoaded', () => {
+    // Listen for hash changes
+    window.addEventListener('hashchange', handleRouting);
+
+    // Initial parsing of URL to determine selectedNovelFile early
+    const { file } = parseHash();
+    if (file) {
+        selectedNovelFile = file;
+        localStorage.setItem('selectedNovelFile', selectedNovelFile);
+    }
+
     loadProjectConfig();
     loadSourcesForWrite();
-    loadDashboardData();
+    
+    // Execute routing for initial page load
+    handleRouting();
     
     // Initialize resizers
     initPanelResizer('write-resizer', 'write-right-panel');
