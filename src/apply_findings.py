@@ -141,10 +141,12 @@ def apply_fallback_to_block(context_lines, findings_in_block):
         replacement = extract_suggestion_candidate(suggestion)
 
         if not replacement:
-            failed_findings.append((
-                f,
-                "Could not extract replacement text from suggestion. Manual intervention required."
-            ))
+            failed_findings.append(
+                (
+                    f,
+                    "Could not extract replacement text from suggestion. Manual intervention required.",
+                )
+            )
             continue
 
         if original in modified_block_text:
@@ -215,13 +217,15 @@ def query_llm_for_block_replacement(context_lines, findings_in_block, model):
         if len(result) < original_length * 0.3:
             print(
                 f"Warning: LLM output is too short ({len(result)} vs original {original_length}). Rejecting output.",
-                file=sys.stderr
+                file=sys.stderr,
             )
             return None
 
         # Strip line numbers if the LLM output includes them
         lines = result.splitlines()
-        has_line_numbers = all(re.match(r"^\d+\s*:\s*", line) for line in lines if line.strip())
+        has_line_numbers = all(
+            re.match(r"^\d+\s*:\s*", line) for line in lines if line.strip()
+        )
         if has_line_numbers and len(lines) > 0:
             cleaned_lines = []
             for line in lines:
@@ -267,13 +271,17 @@ def apply_finding_to_text(text_lines, finding, model, use_llm=True):
     method = None
 
     if use_llm:
-        result_block_text = query_llm_for_block_replacement(context_lines, [finding], model)
+        result_block_text = query_llm_for_block_replacement(
+            context_lines, [finding], model
+        )
         if result_block_text:
             success = True
             method = "llm"
 
     if not success:
-        result_block_text, success_findings, failed_findings = apply_fallback_to_block(context_lines, [finding])
+        result_block_text, success_findings, failed_findings = apply_fallback_to_block(
+            context_lines, [finding]
+        )
         if success_findings:
             _, replacement, method = success_findings[0]
             if not result_block_text.endswith("\n") and len(result_block_text) > 0:
@@ -281,7 +289,9 @@ def apply_finding_to_text(text_lines, finding, model, use_llm=True):
             text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
             return True, replacement, method
         else:
-            error_msg = failed_findings[0][1] if failed_findings else "Replacement failed"
+            error_msg = (
+                failed_findings[0][1] if failed_findings else "Replacement failed"
+            )
             return False, error_msg, None
     else:
         if not result_block_text.endswith("\n") and len(result_block_text) > 0:
@@ -387,8 +397,6 @@ def main():
     if args.accept_ids:
         accepted_ids = {x.strip() for x in args.accept_ids.split(",")}
 
-
-
     # Initialize/normalize accepted status in YAML findings
     for f in findings:
         if "accepted" not in f:
@@ -434,7 +442,7 @@ def main():
             finding["accepted"] = "y"
         elif choice == "a":
             finding["accepted"] = "y"
-            for remain_f in findings[i+1:]:
+            for remain_f in findings[i + 1 :]:
                 remain_fid = remain_f.get("id")
                 if args.accept_ids:
                     if remain_fid in accepted_ids:
@@ -463,7 +471,10 @@ def main():
             if line_no is not None:
                 active_findings.append((line_no, f))
             else:
-                print(f"[FAIL] {fid} の適用に失敗しました: 原文が見つかりません。", file=sys.stderr)
+                print(
+                    f"[FAIL] {fid} の適用に失敗しました: 原文が見つかりません。",
+                    file=sys.stderr,
+                )
                 f["apply_status"] = "failed"
                 f["apply_result"] = "原文が見つかりませんでした。"
         else:
@@ -506,9 +517,10 @@ def main():
         success = False
         result_block_text = None
 
-
         if not args.no_llm:
-            result_block_text = query_llm_for_block_replacement(context_lines, findings_in_block, args.model)
+            result_block_text = query_llm_for_block_replacement(
+                context_lines, findings_in_block, args.model
+            )
             if result_block_text:
                 success = True
 
@@ -526,7 +538,9 @@ def main():
                 f["apply_result"] = "LLMコンテキスト一括方式"
         else:
             # Fallback
-            result_block_text, success_findings, failed_findings = apply_fallback_to_block(context_lines, findings_in_block)
+            result_block_text, success_findings, failed_findings = (
+                apply_fallback_to_block(context_lines, findings_in_block)
+            )
             if not result_block_text.endswith("\n") and len(result_block_text) > 0:
                 result_block_text += "\n"
 
@@ -542,7 +556,9 @@ def main():
 
             for f, error_msg in failed_findings:
                 fid = f.get("id")
-                print(f"[FAIL] {fid} の適用に失敗しました: {error_msg}", file=sys.stderr)
+                print(
+                    f"[FAIL] {fid} の適用に失敗しました: {error_msg}", file=sys.stderr
+                )
                 failed_count += 1
                 f["apply_status"] = "failed"
                 f["apply_result"] = error_msg

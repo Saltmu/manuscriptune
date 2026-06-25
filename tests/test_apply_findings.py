@@ -122,7 +122,7 @@ def test_main_block_merging_auto_fallback(tmp_path):
                 "original": "悲しげな顔",
                 "suggestion": "「憂いを帯びた表情」に修正してください。",
                 "accepted": "y",
-            }
+            },
         ]
     }
     findings_yaml_path = tmp_path / "00_integrated_findings.yaml"
@@ -143,7 +143,7 @@ def test_main_block_merging_auto_fallback(tmp_path):
     # 指摘YAMLが正しく更新されたか検証
     with open(findings_yaml_path, encoding="utf-8") as f:
         updated_yaml = yaml.safe_load(f)
-    
+
     findings_result = {f["id"]: f for f in updated_yaml["findings"]}
     assert findings_result["INT-001"]["apply_status"] == "success"
     assert "extracted" in findings_result["INT-001"]["apply_result"]
@@ -175,7 +175,7 @@ def test_main_block_merging_auto_llm(tmp_path):
                 "original": "悲しげな顔",
                 "suggestion": "「憂いを帯びた表情」に修正してください。",
                 "accepted": "y",
-            }
+            },
         ]
     }
     findings_yaml_path = tmp_path / "00_integrated_findings.yaml"
@@ -189,8 +189,10 @@ def test_main_block_merging_auto_llm(tmp_path):
         "少年は憂いを帯びた表情をして佇んでいた。\n"
         "その手には古い楽器が握られている。\n"
     )
-    
-    with patch("src.apply_findings.query_llm_for_block_replacement", return_value=llm_output) as mock_llm:
+
+    with patch(
+        "src.apply_findings.query_llm_for_block_replacement", return_value=llm_output
+    ) as mock_llm:
         test_args = ["apply_findings.py", "--dir", str(tmp_path), "--auto"]
         with patch("sys.argv", test_args):
             main()
@@ -210,7 +212,7 @@ def test_main_block_merging_auto_llm(tmp_path):
     # 指摘YAMLが正しく更新されたか検証
     with open(findings_yaml_path, encoding="utf-8") as f:
         updated_yaml = yaml.safe_load(f)
-    
+
     findings_result = {f["id"]: f for f in updated_yaml["findings"]}
     assert findings_result["INT-001"]["apply_status"] == "success"
     assert "LLM" in findings_result["INT-001"]["apply_result"]
