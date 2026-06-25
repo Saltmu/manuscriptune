@@ -37,15 +37,16 @@ def test_save_novel():
     import os
     import tempfile
 
-    import src.review_server as rs
-
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:
         tmp.write(b"Original Content")
         tmp_name = tmp.name
+        tmp_basename = os.path.basename(tmp_name)
 
-    rs.NOVEL_PATH = tmp_name
     try:
-        response = client.post("/api/save_novel", json={"content": "Updated Content"})
+        response = client.post(
+            "/api/save_novel",
+            json={"novel_name": tmp_basename, "content": "Updated Content"},
+        )
         assert response.status_code == 200
         assert response.json()["status"] == "success"
 
@@ -60,18 +61,14 @@ def test_backup_and_rollback():
     import os
     import tempfile
 
-    import src.review_server as rs
-
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:
         tmp.write(b"Original content for backup")
         tmp_name = tmp.name
-
-    rs.NOVEL_PATH = tmp_name
-    rs.YAML_PATH = ""
+        tmp_basename = os.path.basename(tmp_name)
 
     try:
         # Create backup
-        response = client.post("/api/backup")
+        response = client.post(f"/api/backup?file={tmp_basename}")
         assert response.status_code == 200
         assert response.json()["status"] == "success"
 
@@ -86,7 +83,7 @@ def test_backup_and_rollback():
             f.write("Modified content")
 
         # Rollback
-        response = client.post("/api/rollback")
+        response = client.post(f"/api/rollback?file={tmp_basename}")
         assert response.status_code == 200
         assert response.json()["status"] == "success"
 
