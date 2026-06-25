@@ -360,8 +360,20 @@ def main():
         print(f"Error: Directory '{output_dir}' does not exist.", file=sys.stderr)
         sys.exit(1)
 
-    formatted_txt_path = os.path.join(output_dir, "01_formatted.txt")
-    findings_yaml_path = os.path.join(output_dir, "00_integrated_findings.yaml")
+    basename = os.path.basename(os.path.abspath(output_dir))
+    formatted_txt_path = os.path.join(output_dir, f"{basename}_formatted.txt")
+    findings_yaml_path = os.path.join(output_dir, f"{basename}_findings.yaml")
+
+    # Fallback for backward compatibility
+    if not os.path.exists(formatted_txt_path):
+        fallback_txt = os.path.join(output_dir, "01_formatted.txt")
+        if os.path.exists(fallback_txt):
+            formatted_txt_path = fallback_txt
+
+    if not os.path.exists(findings_yaml_path):
+        fallback_yaml = os.path.join(output_dir, "00_integrated_findings.yaml")
+        if os.path.exists(fallback_yaml):
+            findings_yaml_path = fallback_yaml
 
     if not os.path.exists(formatted_txt_path):
         print(f"Error: '{formatted_txt_path}' not found.", file=sys.stderr)
@@ -369,6 +381,7 @@ def main():
     if not os.path.exists(findings_yaml_path):
         print(f"Error: '{findings_yaml_path}' not found.", file=sys.stderr)
         sys.exit(1)
+
 
     # Read formatted text (split into lines)
     raw_text = read_file(formatted_txt_path)

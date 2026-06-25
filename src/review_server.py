@@ -190,8 +190,15 @@ async def list_novels():
     for f in sorted(novel_dir.glob("*.txt")):
         basename = f.stem
         findings_yaml = (
-            Path("novel_check_results") / basename / "00_integrated_findings.yaml"
+            Path("novel_check_results") / basename / f"{basename}_findings.yaml"
         )
+        if not findings_yaml.exists():
+            # Fallback to the old format
+            fallback_yaml = (
+                Path("novel_check_results") / basename / "00_integrated_findings.yaml"
+            )
+            if fallback_yaml.exists():
+                findings_yaml = fallback_yaml
         has_findings = findings_yaml.exists()
 
         mtime = os.path.getmtime(f)
@@ -255,16 +262,31 @@ async def select_file(payload: SelectFileRequest):
 
     # Check if we have formatted check results
     formatted_path = os.path.abspath(
-        os.path.join("novel_check_results", basename, "01_formatted.txt")
+        os.path.join("novel_check_results", basename, f"{basename}_formatted.txt")
     )
+    # Fallback to older format if exists
+    if not os.path.exists(formatted_path):
+        fallback_path = os.path.abspath(
+            os.path.join("novel_check_results", basename, "01_formatted.txt")
+        )
+        if os.path.exists(fallback_path):
+            formatted_path = fallback_path
+
     if os.path.exists(formatted_path):
         NOVEL_PATH = formatted_path
     else:
         NOVEL_PATH = os.path.abspath(os.path.join("novels", payload.novel_name))
 
     YAML_PATH = os.path.abspath(
-        os.path.join("novel_check_results", basename, "00_integrated_findings.yaml")
+        os.path.join("novel_check_results", basename, f"{basename}_findings.yaml")
     )
+    # Fallback to older YAML format if exists
+    if not os.path.exists(YAML_PATH):
+        fallback_yaml = os.path.abspath(
+            os.path.join("novel_check_results", basename, "00_integrated_findings.yaml")
+        )
+        if os.path.exists(fallback_yaml):
+            YAML_PATH = fallback_yaml
 
     return {
         "status": "success",
