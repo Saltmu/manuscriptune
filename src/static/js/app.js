@@ -5,7 +5,7 @@ let activeCategoryFilter = 'all';
 let activeSeverityFilter = 'all';
 let activeHighlightLine = null;
 
-let selectedNovelFile = "";
+let selectedNovelFile = localStorage.getItem('selectedNovelFile') || "";
 
 // Switch Tabs/Views
 function switchView(viewId) {
@@ -53,7 +53,7 @@ async function loadDashboardData() {
         }
         
         const hiddenInput = document.getElementById('review-file-select');
-        const currentSelected = hiddenInput ? hiddenInput.value : "";
+        const currentSelected = selectedNovelFile || (hiddenInput ? hiddenInput.value : "");
         let selectedFound = false;
 
         if (data.novels.length === 0) {
@@ -164,6 +164,9 @@ function selectDraftCard(novelName, hasFindings) {
         hiddenInput.value = novelName;
     }
 
+    selectedNovelFile = novelName;
+    localStorage.setItem('selectedNovelFile', selectedNovelFile);
+
     loadPreview(novelName);
 }
 
@@ -211,18 +214,11 @@ async function loadPreview(novelName) {
 // Action: Select novel and switch to editor
 async function selectAndEditNovel(novelName) {
     try {
-        const res = await fetch('/api/select', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ novel_name: novelName })
-        });
-        const data = await res.json();
-        if (data.status === 'success') {
-            selectedNovelFile = novelName;
-            // Load Editor Data
-            await loadEditorData();
-            switchView('editor');
-        }
+        selectedNovelFile = novelName;
+        localStorage.setItem('selectedNovelFile', selectedNovelFile);
+        // Load Editor Data
+        await loadEditorData();
+        switchView('editor');
     } catch (err) {
         console.error(err);
         alert('ファイルの選択に失敗しました。');
@@ -568,7 +564,11 @@ function runReviewPipeline() {
 // Load active editor data
 async function loadEditorData() {
     try {
-        const response = await fetch('/api/data');
+        if (!selectedNovelFile) {
+            console.log('No active novel file selected.');
+            return;
+        }
+        const response = await fetch(`/api/data?file=${encodeURIComponent(selectedNovelFile)}`);
         if (!response.ok) throw new Error('Data fetch failed');
         
         const data = await response.json();
@@ -787,10 +787,11 @@ function updateStats() {
 
 async function saveChanges() {
     try {
+        if (!selectedNovelFile) return;
         await fetch('/api/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ findings: findings })
+            body: JSON.stringify({ novel_name: selectedNovelFile, findings: findings })
         });
         showToast('自動保存しました');
     } catch (err) {
@@ -830,7 +831,14 @@ async function executeApply() {
     const closeBtn = document.getElementById('btn-close-apply-progress');
     if (closeBtn) closeBtn.disabled = true;
 
-    startEventStream('/api/stream/apply', 'apply-console-log', 'apply-console-status', (success) => {
+    if (!selectedNovelFile) {
+        showToast('小説ファイルが選択されていません。');
+        if (closeBtn) closeBtn.disabled = false;
+        closeModal('apply-progress-modal');
+        return;
+    }
+
+    startEventStream(`/api/stream/apply?file=${encodeURIComponent(selectedNovelFile)}`, 'apply-console-log', 'apply-console-status', (success) => {
         if (closeBtn) closeBtn.disabled = false;
         if (success) {
             showToast('反映処理が完了しました');
@@ -888,12 +896,19 @@ async function saveNovel() {
     textarea.disabled = true;
 
     try {
+        if (!selectedNovelFile) {
+            showToast('小説ファイルが選択されていません。');
+            if (btnSave) btnSave.disabled = false;
+            if (btnToggle) btnToggle.disabled = false;
+            textarea.disabled = false;
+            return;
+        }
         const response = await fetch('/api/save_novel', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ content: textarea.value })
+            body: JSON.stringify({ novel_name: selectedNovelFile, content: textarea.value })
         });
         const data = await response.json();
 
@@ -946,7 +961,12 @@ async function executeRollback() {
     if (rollbackBtn) rollbackBtn.disabled = true;
 
     try {
-        const response = await fetch('/api/rollback', {
+        if (!selectedNovelFile) {
+            showToast('小説ファイルが選択されていません。');
+            if (rollbackBtn) rollbackBtn.disabled = false;
+            return;
+        }
+        const response = await fetch(`/api/rollback?file=${encodeURIComponent(selectedNovelFile)}`, {
             method: 'POST'
         });
         const data = await response.json();
@@ -1000,6 +1020,11 @@ async function loadProjectConfig() {
         if (data.novel_title) {
             const titleEl = document.getElementById('novel-title-display');
             if (titleEl) titleEl.textContent = data.novel_title;
+        }
+        if (data.initial_novel && !selectedNovelFile) {
+            selectedNovelFile = data.initial_novel;
+            localStorage.setItem('selectedNovelFile', selectedNovelFile);
+            loadEditorData();
         }
     } catch (err) {
         console.error('Failed to load project config:', err);

@@ -27,9 +27,8 @@ app.mount(
     name="static",
 )
 
-# Global variables to store paths
-NOVEL_PATH = ""
-YAML_PATH = ""
+# Global configuration set at startup (read-only)
+INITIAL_NOVEL = ""
 
 
 class FindingItem(BaseModel):
@@ -46,6 +45,7 @@ class FindingItem(BaseModel):
 
 
 class SaveFindingsRequest(BaseModel):
+    novel_name: str
     findings: list[FindingItem]
 
 
@@ -54,7 +54,47 @@ class SelectFileRequest(BaseModel):
 
 
 class SaveNovelRequest(BaseModel):
+    novel_name: str
     content: str
+
+
+def resolve_paths(novel_name: str) -> tuple[str, str]:
+    """Resolve novel_path and yaml_path dynamically from a novel filename."""
+    if not novel_name:
+        raise HTTPException(status_code=400, detail="Novel filename is required.")
+
+    # Ensure it's safe (prevent path traversal)
+    safe_name = os.path.basename(novel_name)
+    basename = Path(safe_name).stem
+
+    # Resolve novel path
+    formatted_path = os.path.abspath(
+        os.path.join("novel_check_results", basename, f"{basename}_formatted.txt")
+    )
+    if not os.path.exists(formatted_path):
+        fallback_path = os.path.abspath(
+            os.path.join("novel_check_results", basename, "01_formatted.txt")
+        )
+        if os.path.exists(fallback_path):
+            formatted_path = fallback_path
+
+    if os.path.exists(formatted_path):
+        novel_path = formatted_path
+    else:
+        novel_path = os.path.abspath(os.path.join("novels", safe_name))
+
+    # Resolve YAML path
+    yaml_path = os.path.abspath(
+        os.path.join("novel_check_results", basename, f"{basename}_findings.yaml")
+    )
+    if not os.path.exists(yaml_path):
+        fallback_yaml = os.path.abspath(
+            os.path.join("novel_check_results", basename, "00_integrated_findings.yaml")
+        )
+        if os.path.exists(fallback_yaml):
+            yaml_path = fallback_yaml
+
+    return novel_path, yaml_path
 
 
 def render_html_template(template_name: str) -> str:
@@ -115,7 +155,7 @@ async def get_index():
 @app.get("/api/config")
 async def get_config():
     novel_title = writer_helper.get_novel_setting("title", "重天の調律師")
-    return {"novel_title": novel_title}
+    return {"novel_title": novel_title, "initial_novel": INITIAL_NOVEL}
 
 
 @app.get("/api/models")
@@ -249,49 +289,25 @@ async def preview_novel(
 
 @app.post("/api/select")
 async def select_file(payload: SelectFileRequest):
-    global NOVEL_PATH, YAML_PATH
-    basename = Path(payload.novel_name).stem
-
-    # Check if we have formatted check results
-    formatted_path = os.path.abspath(
-        os.path.join("novel_check_results", basename, f"{basename}_formatted.txt")
-    )
-    # Fallback to older format if exists
-    if not os.path.exists(formatted_path):
-        fallback_path = os.path.abspath(
-            os.path.join("novel_check_results", basename, "01_formatted.txt")
-        )
-        if os.path.exists(fallback_path):
-            formatted_path = fallback_path
-
-    if os.path.exists(formatted_path):
-        NOVEL_PATH = formatted_path
-    else:
-        NOVEL_PATH = os.path.abspath(os.path.join("novels", payload.novel_name))
-
-    YAML_PATH = os.path.abspath(
-        os.path.join("novel_check_results", basename, f"{basename}_findings.yaml")
-    )
-    # Fallback to older YAML format if exists
-    if not os.path.exists(YAML_PATH):
-        fallback_yaml = os.path.abspath(
-            os.path.join("novel_check_results", basename, "00_integrated_findings.yaml")
-        )
-        if os.path.exists(fallback_yaml):
-            YAML_PATH = fallback_yaml
-
-    return {
-        "status": "success",
-        "novel_path": NOVEL_PATH,
-        "yaml_path": YAML_PATH,
-        "exists": os.path.exists(NOVEL_PATH) and os.path.exists(YAML_PATH),
-    }
+    try:
+        novel_path, yaml_path = resolve_paths(payload.novel_name)
+        return {
+            "status": "success",
+            "novel_path": novel_path,
+            "yaml_path": yaml_path,
+            "exists": os.path.exists(novel_path) and os.path.exists(yaml_path),
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/data")
-async def get_data():
-    global NOVEL_PATH, YAML_PATH
-    if not NOVEL_PATH or not YAML_PATH:
+async def get_data(file: str = Query(..., description="Novel filename")):
+    try:
+        novel_path, yaml_path = resolve_paths(file)
+    except HTTPException:
         return JSONResponse(
             content={
                 "novel_lines": [],
@@ -301,19 +317,19 @@ async def get_data():
             }
         )
 
-    if not os.path.exists(NOVEL_PATH):
+    if not os.path.exists(novel_path):
         raise HTTPException(
-            status_code=404, detail=f"Novel file not found: {NOVEL_PATH}"
+            status_code=404, detail=f"Novel file not found: {novel_path}"
         )
 
     # Read novel lines
-    with open(NOVEL_PATH, encoding="utf-8") as f:
+    with open(novel_path, encoding="utf-8") as f:
         novel_lines = [line.rstrip("\r\n") for line in f.readlines()]
 
     findings = []
     # Findings YAML might not exist yet if review hasn't run
-    if os.path.exists(YAML_PATH):
-        with open(YAML_PATH, encoding="utf-8") as f:
+    if os.path.exists(yaml_path):
+        with open(yaml_path, encoding="utf-8") as f:
             try:
                 data = yaml.safe_load(f) or {}
                 findings = data.get("findings", [])
@@ -322,13 +338,13 @@ async def get_data():
                     status_code=500, detail=f"Failed to parse YAML: {str(e)}"
                 )
 
-    has_backup = os.path.exists(f"{NOVEL_PATH}.bak")
+    has_backup = os.path.exists(f"{novel_path}.bak")
 
     return JSONResponse(
         content={
             "novel_lines": novel_lines,
             "findings": findings,
-            "novel_filename": os.path.basename(NOVEL_PATH),
+            "novel_filename": os.path.basename(novel_path),
             "has_backup": has_backup,
         }
     )
@@ -336,17 +352,15 @@ async def get_data():
 
 @app.post("/api/save")
 async def save_findings(payload: SaveFindingsRequest):
-    global YAML_PATH
-    if not YAML_PATH:
-        raise HTTPException(status_code=400, detail="No active YAML file selected.")
     try:
+        _, yaml_path = resolve_paths(payload.novel_name)
         findings_list = [item.model_dump() for item in payload.findings]
 
         # Ensure parent directory exists
-        os.makedirs(os.path.dirname(YAML_PATH), exist_ok=True)
+        os.makedirs(os.path.dirname(yaml_path), exist_ok=True)
 
         # Write back to YAML
-        with open(YAML_PATH, "w", encoding="utf-8") as f:
+        with open(yaml_path, "w", encoding="utf-8") as f:
             yaml.dump(
                 {"findings": findings_list},
                 f,
@@ -361,12 +375,10 @@ async def save_findings(payload: SaveFindingsRequest):
 
 @app.post("/api/save_novel")
 async def save_novel(payload: SaveNovelRequest):
-    global NOVEL_PATH
-    if not NOVEL_PATH:
-        raise HTTPException(status_code=400, detail="No active novel file selected.")
     try:
+        novel_path, _ = resolve_paths(payload.novel_name)
         # Write back to novel file
-        with open(NOVEL_PATH, "w", encoding="utf-8") as f:
+        with open(novel_path, "w", encoding="utf-8") as f:
             f.write(payload.content)
         return {"status": "success", "message": "Novel saved successfully."}
     except Exception as e:
@@ -374,15 +386,13 @@ async def save_novel(payload: SaveNovelRequest):
 
 
 @app.post("/api/backup")
-async def create_backup():
-    global NOVEL_PATH, YAML_PATH
-    if not NOVEL_PATH:
-        raise HTTPException(status_code=400, detail="No active novel file selected.")
+async def create_backup(file: str = Query(..., description="Novel filename")):
     try:
-        if os.path.exists(NOVEL_PATH):
-            shutil.copy2(NOVEL_PATH, f"{NOVEL_PATH}.bak")
-        if YAML_PATH and os.path.exists(YAML_PATH):
-            shutil.copy2(YAML_PATH, f"{YAML_PATH}.bak")
+        novel_path, yaml_path = resolve_paths(file)
+        if os.path.exists(novel_path):
+            shutil.copy2(novel_path, f"{novel_path}.bak")
+        if yaml_path and os.path.exists(yaml_path):
+            shutil.copy2(yaml_path, f"{yaml_path}.bak")
         return {"status": "success", "message": "Backup created successfully."}
     except Exception as e:
         raise HTTPException(
@@ -391,13 +401,14 @@ async def create_backup():
 
 
 @app.post("/api/rollback")
-async def rollback_backup():
-    global NOVEL_PATH, YAML_PATH
-    if not NOVEL_PATH:
-        raise HTTPException(status_code=400, detail="No active novel file selected.")
+async def rollback_backup(file: str = Query(..., description="Novel filename")):
+    try:
+        novel_path, yaml_path = resolve_paths(file)
+    except HTTPException as he:
+        raise he
 
-    novel_bak = f"{NOVEL_PATH}.bak"
-    yaml_bak = f"{YAML_PATH}.bak" if YAML_PATH else None
+    novel_bak = f"{novel_path}.bak"
+    yaml_bak = f"{yaml_path}.bak" if yaml_path else None
 
     if not os.path.exists(novel_bak):
         raise HTTPException(
@@ -406,19 +417,19 @@ async def rollback_backup():
 
     try:
         # Restore novel file
-        shutil.copy2(novel_bak, NOVEL_PATH)
+        shutil.copy2(novel_bak, novel_path)
         # Restore YAML file if backup exists
         if yaml_bak and os.path.exists(yaml_bak):
-            shutil.copy2(yaml_bak, YAML_PATH)
+            shutil.copy2(yaml_bak, yaml_path)
         else:
-            if YAML_PATH and os.path.exists(YAML_PATH):
-                with open(YAML_PATH, encoding="utf-8") as f:
+            if yaml_path and os.path.exists(yaml_path):
+                with open(yaml_path, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
                 findings = data.get("findings", [])
                 for f in findings:
                     f["apply_status"] = None
                     f["apply_result"] = None
-                with open(YAML_PATH, "w", encoding="utf-8") as f:
+                with open(yaml_path, "w", encoding="utf-8") as f:
                     yaml.dump(
                         {"findings": findings},
                         f,
@@ -437,18 +448,19 @@ def shutdown_server():
 
 
 @app.get("/api/stream/apply")
-async def stream_apply():
-    global NOVEL_PATH, YAML_PATH
-    if not NOVEL_PATH or not YAML_PATH:
-        raise HTTPException(status_code=400, detail="No active file selected.")
+async def stream_apply(file: str = Query(..., description="Novel filename")):
+    try:
+        novel_path, yaml_path = resolve_paths(file)
+    except HTTPException as he:
+        raise he
     try:
         # Automatically create backup before applying changes
-        if os.path.exists(NOVEL_PATH):
-            shutil.copy2(NOVEL_PATH, f"{NOVEL_PATH}.bak")
-        if os.path.exists(YAML_PATH):
-            shutil.copy2(YAML_PATH, f"{YAML_PATH}.bak")
+        if os.path.exists(novel_path):
+            shutil.copy2(novel_path, f"{novel_path}.bak")
+        if os.path.exists(yaml_path):
+            shutil.copy2(yaml_path, f"{yaml_path}.bak")
 
-        parent_dir = os.path.dirname(NOVEL_PATH)
+        parent_dir = os.path.dirname(novel_path)
         script_path = os.path.join(os.path.dirname(__file__), "apply_findings.py")
         cmd = [
             "poetry",
@@ -572,17 +584,13 @@ def main():
     )
     args = parser.parse_args()
 
-    global NOVEL_PATH, YAML_PATH
+    global INITIAL_NOVEL
     if args.novel:
-        NOVEL_PATH = os.path.abspath(args.novel)
-    if args.yaml:
-        YAML_PATH = os.path.abspath(args.yaml)
+        INITIAL_NOVEL = os.path.basename(args.novel)
 
     print("=== Novel Studio Server Running ===")
-    if NOVEL_PATH:
-        print(f"Initial Novel: {NOVEL_PATH}")
-    if YAML_PATH:
-        print(f"Initial YAML : {YAML_PATH}")
+    if INITIAL_NOVEL:
+        print(f"Initial Novel: {INITIAL_NOVEL}")
     print(f"URL  : http://localhost:{args.port}\n")
 
     # Start browser auto-opener
