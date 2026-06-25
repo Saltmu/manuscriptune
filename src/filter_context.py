@@ -156,6 +156,145 @@ def split_into_sections(content: str) -> list[str]:
     return sections
 
 
+def _collect_raw_chunks(sources_dir: str) -> tuple[list[dict], list[tuple]]:
+    """
+    Scans the sources directory and collects basic contexts and split chunks.
+    """
+    source_files = [f for f in os.listdir(sources_dir) if f.endswith(".txt")]
+    raw_chunks_all = []
+    basic_contexts = []
+
+    for filename in source_files:
+        file_path = os.path.join(sources_dir, filename)
+        with open(file_path, encoding="utf-8") as f:
+            content = f.read()
+
+        if is_basic_context_file(filename):
+            content_str = content.strip()
+            if content_str:
+                basic_contexts.append(
+                    {
+                        "file": filename,
+                        "text": content_str,
+                    }
+                )
+                raw_chunks_all.append((filename, 0, content_str))
+        else:
+            raw_chunks = split_into_sections(content)
+            for i, raw_chunk in enumerate(raw_chunks):
+                chunk_text = raw_chunk.strip()
+                if not chunk_text:
+                    continue
+                raw_chunks_all.append((filename, i, chunk_text))
+
+    return basic_contexts, raw_chunks_all
+
+
+def _calculate_word_weights(
+    novel_keywords: set[str], entity_words: set[str], raw_chunks_all: list
+) -> dict[str, float]:
+    """
+    Calculates weights for each keyword using an IDF-like metric.
+    """
+    total_chunks = len(raw_chunks_all)
+    word_weights = {}
+
+    for kw in novel_keywords:
+        df = sum(1 for _, _, text in raw_chunks_all if kw in text)
+        idf = math.log(total_chunks / (df + 1)) + 1.0
+
+        base_weight = 10.0 if kw in entity_words else 1.0
+        word_weights[kw] = base_weight * idf
+
+    return word_weights
+
+
+def _score_and_sort_chunks(
+    raw_chunks_all: list, novel_keywords: set[str], word_weights: dict[str, float]
+) -> list[dict]:
+    """
+    Scores each chunk based on the keywords it contains and sorts them in descending order.
+    """
+    all_chunks = []
+    for filename, idx, chunk_text in raw_chunks_all:
+        score = 0.0
+        matched_kws = []
+        for kw in novel_keywords:
+            if kw in chunk_text:
+                count = chunk_text.count(kw)
+                score += count * word_weights[kw]
+                matched_kws.append(kw)
+
+        if score > 0:
+            all_chunks.append(
+                {
+                    "file": filename,
+                    "index": idx,
+                    "text": chunk_text,
+                    "score": score,
+                    "matches": matched_kws,
+                }
+            )
+
+    all_chunks.sort(key=lambda x: x["score"], reverse=True)
+    return all_chunks
+
+
+def _select_and_format_context(
+    basic_contexts: list[dict], all_chunks: list[dict], max_chars: int
+) -> tuple[str, list[dict], int]:
+    """
+    Selects top chunks up to the character limit and formats the output content.
+    """
+    selected_chunks: list[dict] = []
+    output_content = "=== FILTERED SETTING CONTEXT ===\n"
+    output_content += "This file contains automatically filtered relevant settings based on keywords in the chapter.\n\n"
+
+    # Prioritize basic contexts (timelines, rules, etc.)
+    if basic_contexts:
+        output_content += "=== BASIC CONTEXTS (PRIORITIZED & UNFRAGMENTED) ===\n"
+        for bc in basic_contexts:
+            chunk_header = f"--- Source: {bc['file']} (Basic Context) ---\n"
+            chunk_body = bc["text"] + "\n\n"
+            chunk_full = chunk_header + chunk_body
+
+            if len(output_content) + len(chunk_full) > max_chars:
+                output_content += (
+                    chunk_header
+                    + chunk_body[: max_chars - len(output_content) - len(chunk_header)]
+                    + "... (truncated)\n"
+                )
+                break
+            output_content += chunk_full
+
+    current_length = len(output_content)
+    added_files = {bc["file"] for bc in basic_contexts}
+
+    # Add other chunks
+    for chunk in all_chunks:
+        if chunk["file"] in added_files:
+            continue
+
+        chunk_header = f"--- Source: {chunk['file']} (Section {chunk['index']}, Score: {chunk['score']:.1f}) ---\n"
+        chunk_body = chunk["text"] + "\n\n"
+        chunk_full = chunk_header + chunk_body
+
+        if current_length + len(chunk_full) > max_chars:
+            if not selected_chunks and current_length < max_chars:
+                output_content += (
+                    chunk_header
+                    + chunk_body[: max_chars - current_length - len(chunk_header)]
+                    + "... (truncated)\n"
+                )
+            break
+
+        selected_chunks.append(chunk)
+        output_content += chunk_full
+        current_length += len(chunk_full)
+
+    return output_content, selected_chunks, current_length
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: python filter_context.py [NOVEL_PATH] [OUTPUT_PATH]")
@@ -189,135 +328,20 @@ def main():
     novel_keywords = extract_keywords_from_novel(novel_text)
     print(f"Extracted {len(novel_keywords)} valid keywords from novel.")
 
-    # 3. Read and split source files into chunks
-    source_files = [f for f in os.listdir(sources_dir) if f.endswith(".txt")]
-    all_chunks = []
-    basic_contexts = []
+    # 3. Collect chunks
+    basic_contexts, raw_chunks_all = _collect_raw_chunks(sources_dir)
 
-    # We will build document frequency (DF) to calculate IDF-like weights for keywords
-    # DF maps: keyword -> number of chunks containing it
-    df_counts = {}
+    # 4. Calculate word weights
+    word_weights = _calculate_word_weights(novel_keywords, entity_words, raw_chunks_all)
 
-    # Split source files into paragraph chunks or keep basic contexts whole
-    raw_chunks_all = []
-    for filename in source_files:
-        file_path = os.path.join(sources_dir, filename)
-        with open(file_path, encoding="utf-8") as f:
-            content = f.read()
+    # 5. Score and sort chunks
+    all_chunks = _score_and_sort_chunks(raw_chunks_all, novel_keywords, word_weights)
 
-        if is_basic_context_file(filename):
-            content_str = content.strip()
-            if content_str:
-                basic_contexts.append(
-                    {
-                        "file": filename,
-                        "text": content_str,
-                    }
-                )
-                # Add to raw_chunks_all to participate in DF computation
-                raw_chunks_all.append((filename, 0, content_str))
-        else:
-            raw_chunks = split_into_sections(content)
-            for i, raw_chunk in enumerate(raw_chunks):
-                chunk_text = raw_chunk.strip()
-                if not chunk_text:
-                    continue
-                raw_chunks_all.append((filename, i, chunk_text))
-
-    total_chunks = len(raw_chunks_all)
-
-    # Pre-calculate DF for novel keywords in setting chunks
-    for kw in novel_keywords:
-        df = sum(1 for _, _, text in raw_chunks_all if kw in text)
-        df_counts[kw] = df
-
-    # 4. Calculate word weights and score each chunk
-    # Word weight = base_weight * idf
-    # Base weight: 10.0 for entities, 1.0 for other keywords
-    # IDF = log(total_chunks / (df + 1)) + 1
-    word_weights = {}
-    for kw in novel_keywords:
-        df = df_counts.get(kw, 0)
-        idf = math.log(total_chunks / (df + 1)) + 1.0
-
-        base_weight = 1.0
-        if kw in entity_words:
-            base_weight = 10.0  # High weight for main characters & setting keywords
-
-        word_weights[kw] = base_weight * idf
-
-    # Score chunks
-    for filename, idx, chunk_text in raw_chunks_all:
-        score = 0.0
-        matched_kws = []
-        for kw in novel_keywords:
-            if kw in chunk_text:
-                count = chunk_text.count(kw)
-                score += count * word_weights[kw]
-                matched_kws.append(kw)
-
-        if score > 0:
-            all_chunks.append(
-                {
-                    "file": filename,
-                    "index": idx,
-                    "text": chunk_text,
-                    "score": score,
-                    "matches": matched_kws,
-                }
-            )
-
-    # 5. Sort chunks by score descending
-    all_chunks.sort(key=lambda x: x["score"], reverse=True)
-
-    # 6. Select top chunks up to a character limit (e.g., 20000 chars)
-    selected_chunks = []
+    # 6. Select chunks and format output
     MAX_CHARS = 20000
-
-    output_content = "=== FILTERED SETTING CONTEXT ===\n"
-    output_content += "This file contains automatically filtered relevant settings based on keywords in the chapter.\n\n"
-
-    # Prioritize basic contexts (timelines, rules, etc.)
-    if basic_contexts:
-        output_content += "=== BASIC CONTEXTS (PRIORITIZED & UNFRAGMENTED) ===\n"
-        for bc in basic_contexts:
-            chunk_header = f"--- Source: {bc['file']} (Basic Context) ---\n"
-            chunk_body = bc["text"] + "\n\n"
-            chunk_full = chunk_header + chunk_body
-
-            if len(output_content) + len(chunk_full) > MAX_CHARS:
-                output_content += (
-                    chunk_header
-                    + chunk_body[: MAX_CHARS - len(output_content) - len(chunk_header)]
-                    + "... (truncated)\n"
-                )
-                break
-            output_content += chunk_full
-
-    current_length = len(output_content)
-    added_files = {bc["file"] for bc in basic_contexts}
-
-    # Add other chunks
-    for chunk in all_chunks:
-        if chunk["file"] in added_files:
-            continue
-
-        chunk_header = f"--- Source: {chunk['file']} (Section {chunk['index']}, Score: {chunk['score']:.1f}) ---\n"
-        chunk_body = chunk["text"] + "\n\n"
-        chunk_full = chunk_header + chunk_body
-
-        if current_length + len(chunk_full) > MAX_CHARS:
-            if not selected_chunks and current_length < MAX_CHARS:
-                output_content += (
-                    chunk_header
-                    + chunk_body[: MAX_CHARS - current_length - len(chunk_header)]
-                    + "... (truncated)\n"
-                )
-            break
-
-        selected_chunks.append(chunk)
-        output_content += chunk_full
-        current_length += len(chunk_full)
+    output_content, selected_chunks, current_length = _select_and_format_context(
+        basic_contexts, all_chunks, MAX_CHARS
+    )
 
     # Ensure directory of output path exists
     output_dir = os.path.dirname(output_path)
