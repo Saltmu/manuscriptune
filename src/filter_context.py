@@ -202,6 +202,66 @@ def extract_keywords_from_novel(text):
     return filtered
 
 
+# Keywords to identify basic contexts (e.g. timelines, core worldview rules)
+BASIC_CONTEXT_KEYWORDS = [
+    "年表",
+    "歴史",
+    "基本ルール",
+    "物理法則",
+    "魔力体系",
+    "世界観",
+    "タイムライン",
+    "timeline",
+    "history",
+    "rule",
+    "system",
+]
+
+
+def is_basic_context_file(filename: str) -> bool:
+    """
+    Checks if the given filename corresponds to a basic context file
+    (e.g., timeline, core rules) that should be prioritized and kept whole.
+    """
+    name_lower = filename.lower()
+    return any(keyword in name_lower for keyword in BASIC_CONTEXT_KEYWORDS)
+
+
+def split_into_sections(content: str) -> list[str]:
+    """
+    Splits the text into logical sections based on Markdown headers (#, ##, ###)
+    or specific block markers (like ■, ◆, ▲, ●, ★, ▼).
+    """
+    # Match Markdown headers or common Japanese block markers at the start of a line
+    header_pattern = re.compile(r"^(?:#{1,6}\s+|[■◆▲●★▼])", re.MULTILINE)
+
+    sections = []
+    matches = list(header_pattern.finditer(content))
+
+    if not matches:
+        # Fallback to double newlines if no headers or markers are found
+        raw_chunks = re.split(r"\n\s*\n", content)
+        return [c.strip() for c in raw_chunks if c.strip()]
+
+    # If there is content before the first header, add it
+    first_match_start = matches[0].start()
+    pre_content = content[:first_match_start].strip()
+    if pre_content:
+        for part in re.split(r"\n\s*\n", pre_content):
+            if part.strip():
+                sections.append(part.strip())
+
+    # Extract sections starting with each header
+    for i in range(len(matches)):
+        start = matches[i].start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        section_content = content[start:end].strip()
+        if section_content:
+            sections.append(section_content)
+
+    return sections
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: python filter_context.py [NOVEL_PATH] [OUTPUT_PATH]")
@@ -238,26 +298,37 @@ def main():
     # 3. Read and split source files into chunks
     source_files = [f for f in os.listdir(sources_dir) if f.endswith(".txt")]
     all_chunks = []
+    basic_contexts = []
 
     # We will build document frequency (DF) to calculate IDF-like weights for keywords
     # DF maps: keyword -> number of chunks containing it
     df_counts = {}
 
-    # Split source files into paragraph chunks
+    # Split source files into paragraph chunks or keep basic contexts whole
     raw_chunks_all = []
     for filename in source_files:
         file_path = os.path.join(sources_dir, filename)
         with open(file_path, encoding="utf-8") as f:
             content = f.read()
 
-        # Split by double newlines to get paragraphs/sections
-        raw_chunks = re.split(r"\n\s*\n", content)
-
-        for i, raw_chunk in enumerate(raw_chunks):
-            chunk_text = raw_chunk.strip()
-            if not chunk_text:
-                continue
-            raw_chunks_all.append((filename, i, chunk_text))
+        if is_basic_context_file(filename):
+            content_str = content.strip()
+            if content_str:
+                basic_contexts.append(
+                    {
+                        "file": filename,
+                        "text": content_str,
+                    }
+                )
+                # Add to raw_chunks_all to participate in DF computation
+                raw_chunks_all.append((filename, 0, content_str))
+        else:
+            raw_chunks = split_into_sections(content)
+            for i, raw_chunk in enumerate(raw_chunks):
+                chunk_text = raw_chunk.strip()
+                if not chunk_text:
+                    continue
+                raw_chunks_all.append((filename, i, chunk_text))
 
     total_chunks = len(raw_chunks_all)
 
@@ -307,24 +378,45 @@ def main():
 
     # 6. Select top chunks up to a character limit (e.g., 20000 chars)
     selected_chunks = []
-    current_length = 0
     MAX_CHARS = 20000
 
     output_content = "=== FILTERED SETTING CONTEXT ===\n"
     output_content += "This file contains automatically filtered relevant settings based on keywords in the chapter.\n\n"
 
+    # Prioritize basic contexts (timelines, rules, etc.)
+    if basic_contexts:
+        output_content += "=== BASIC CONTEXTS (PRIORITIZED & UNFRAGMENTED) ===\n"
+        for bc in basic_contexts:
+            chunk_header = f"--- Source: {bc['file']} (Basic Context) ---\n"
+            chunk_body = bc["text"] + "\n\n"
+            chunk_full = chunk_header + chunk_body
+
+            if len(output_content) + len(chunk_full) > MAX_CHARS:
+                output_content += (
+                    chunk_header
+                    + chunk_body[: MAX_CHARS - len(output_content) - len(chunk_header)]
+                    + "... (truncated)\n"
+                )
+                break
+            output_content += chunk_full
+
+    current_length = len(output_content)
+    added_files = {bc["file"] for bc in basic_contexts}
+
+    # Add other chunks
     for chunk in all_chunks:
+        if chunk["file"] in added_files:
+            continue
+
         chunk_header = f"--- Source: {chunk['file']} (Section {chunk['index']}, Score: {chunk['score']:.1f}) ---\n"
-        # Optional: Print matched keywords for debug/transparency
-        # chunk_header += f"Matches: {', '.join(chunk['matches'][:10])}\n"
         chunk_body = chunk["text"] + "\n\n"
         chunk_full = chunk_header + chunk_body
 
         if current_length + len(chunk_full) > MAX_CHARS:
-            if not selected_chunks:
+            if not selected_chunks and current_length < MAX_CHARS:
                 output_content += (
                     chunk_header
-                    + chunk_body[: MAX_CHARS - len(chunk_header)]
+                    + chunk_body[: MAX_CHARS - current_length - len(chunk_header)]
                     + "... (truncated)\n"
                 )
             break
