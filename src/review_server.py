@@ -212,7 +212,7 @@ async def list_novels():
         return {"novels": []}
 
     novels_list = []
-    for f in sorted(novel_dir.glob("*.txt")):
+    for f in sorted(novel_dir.glob("*.txt"), key=writer_helper.natural_sort_key):
         basename = f.stem
         findings_yaml = (
             Path("novel_check_results") / basename / f"{basename}_findings.yaml"
@@ -248,7 +248,7 @@ async def sync_status():
         return {"sources": []}
 
     sources_list = []
-    for f in sorted(sources_dir.glob("*.txt")):
+    for f in sorted(sources_dir.glob("*.txt"), key=writer_helper.natural_sort_key):
         mtime = os.path.getmtime(f)
         dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
         sources_list.append(
