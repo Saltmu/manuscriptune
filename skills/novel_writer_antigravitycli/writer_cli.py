@@ -395,7 +395,228 @@ def generate_all_at_once(prompt, model):
     return "".join(full_output)
 
 
-def main():
+def _resolve_policy_paths(args) -> tuple[str, str, str]:
+    """
+    Resolves paths for policy and character overview files.
+    """
+    policy_global = (
+        args.policy_global
+        if args.policy_global
+        else writer_helper.resolve_novel_file_by_pattern(
+            "policy_global",
+            "*執筆ポリシー_全体*.txt",
+            "data/sources/00_1_執筆ポリシー_全体_ver.6.0.txt",
+        )
+    )
+    policy_chapter = (
+        args.policy_chapter
+        if args.policy_chapter
+        else writer_helper.resolve_novel_file_by_pattern(
+            "policy_chapter",
+            "*執筆ポリシー_第*.txt",
+            "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt",
+        )
+    )
+    character = (
+        args.character
+        if args.character
+        else writer_helper.resolve_novel_file_by_pattern(
+            "character",
+            "*キャラクター概要*.txt",
+            "data/sources/03_1_第1幕キャラクター概要 ver.2.txt",
+        )
+    )
+    return policy_global, policy_chapter, character
+
+
+def _write_single_scene(
+    chapter_title: str,
+    episode: str,
+    s_title: str,
+    s_plot: str,
+    context_written: str,
+    prev_context_block: str,
+    model: str,
+    title: str | None,
+    policy_paths: tuple[str, str, str],
+) -> str:
+    """
+    Writes a single scene using agy and returns the generated content.
+    """
+    import threading
+
+    policy_global, policy_chapter, character = policy_paths
+
+    scene_written_context = ""
+    if context_written:
+        scene_written_context = f"""
+==============================
+【既に執筆済みの本文（シーンの流れ）】
+{context_written}
+==============================
+"""
+
+    scene_prompt = f"""【超重要指示：ツールの使用禁止】
+あなたは一切のツールを使用してはなりません。
+思考プロセスやメタな解説などは一切出力せず、ただちに指定されたシーンの本文のみを出力してください。
+
+あなたは「{title or "重天の調律師"}」の専属作家です。
+以下の「執筆ポリシー」を厳守し、「既に執筆済みの本文」の展開、口調、描写リズムを自然に引き継いだ形で、「今回執筆する対象のシーンプロット」の本文を執筆してください。
+
+==============================
+【執筆ポリシー】
+{read_file(policy_global)}
+{read_file(policy_chapter)}
+==============================
+{prev_context_block}
+==============================
+【キャラクター概要】
+{read_file(character)}
+==============================
+{scene_written_context}
+==============================
+【今回執筆する対象のシーンプロット】
+対象: {chapter_title} {episode}
+現在のシーン: {s_title}
+
+{s_plot}
+==============================
+
+【執筆指示】
+「既に執筆済みの本文」の直後からシームレスに繋がるように、今回のシーン「{s_title}」の本文のみを出力してください。
+・挨拶や解説、マークダウン of コードブロック等は一切不要です。小説の本文のみを出力してください。
+・前の文脈を繰り返さないでください。今回指定されたプロット部分のみを新しく書き足してください。
+"""
+
+    cmd = ["agy", "-p", "", "--model", model]
+    process = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+
+    def write_scene_stdin(proc=process, prompt=scene_prompt):
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except Exception as e:
+            print(f"Error writing scene stdin: {e}", file=sys.stderr)
+
+    stdin_thread = threading.Thread(target=write_scene_stdin)
+    stdin_thread.start()
+
+    scene_output = []
+    while True:
+        line = process.stdout.readline()
+        if not line and process.poll() is not None:
+            break
+        if line:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            scene_output.append(line)
+
+    stdin_thread.join()
+
+    if process.returncode != 0:
+        stderr_msg = process.stderr.read()
+        print(
+            f"Error generating scene: {stderr_msg}",
+            file=sys.stderr,
+        )
+        sys.exit(process.returncode)
+
+    scene_content = "".join(scene_output).strip()
+    scene_content = re.sub(r"^```[a-zA-Z]*\n", "", scene_content)
+    scene_content = re.sub(r"\n```$", "", scene_content).strip()
+
+    return scene_content
+
+
+def _write_step_by_step(
+    chapter_title: str,
+    episode: str,
+    plot_content: str,
+    prev_text: str | None,
+    model: str,
+    title: str | None,
+    policy_paths: tuple[str, str, str],
+) -> str:
+    """
+    Executes scene-by-scene incremental writing.
+    """
+    common_header, scenes = split_scenes(plot_content)
+
+    prev_context_block = ""
+    if prev_text:
+        prev_context_block = f"""
+==============================
+【前話（直前のエピソード）の終盤描写】
+（※前話からの展開、キャラクターの状況、会話のトーン等の繋がりを維持するために参考にしてください）
+{prev_text}
+==============================
+"""
+
+    if not scenes:
+        print(
+            "No scenes detected in plot. Falling back to single-pass writing.",
+            file=sys.stderr,
+        )
+        policy_global, policy_chapter, character = policy_paths
+        prompt = generate_prompt(
+            chapter_title,
+            episode,
+            plot_content,
+            novel_title=title,
+            policy_global=policy_global,
+            policy_chapter=policy_chapter,
+            character=character,
+            previous_episode_text=prev_text,
+        )
+        return generate_all_at_once(prompt, model)
+
+    print(f"Detected {len(scenes)} scenes. Starting step-by-step writing...")
+    context_written = ""
+
+    for s_idx, (s_title, s_plot) in enumerate(scenes, 1):
+        print(f"\n--- Writing Scene {s_idx}/{len(scenes)}: {s_title} ---")
+        scene_content = _write_single_scene(
+            chapter_title,
+            episode,
+            s_title,
+            s_plot,
+            context_written,
+            prev_context_block,
+            model,
+            title,
+            policy_paths,
+        )
+        print(f"\n[Generated Scene {s_idx} length: {len(scene_content)} chars]")
+
+        if context_written:
+            context_written += "\n\n" + scene_content
+        else:
+            context_written = scene_content
+
+    return context_written
+
+
+def _perform_self_check(novel_content: str, plot_content: str, model: str, args) -> str:
+    """
+    Runs policy verification check on generated content and rewrites if needed.
+    """
+    policy_global, policy_chapter, _ = _resolve_policy_paths(args)
+    policy_text = read_file(policy_global)
+    policy_macro_text = read_file(policy_chapter)
+
+    return run_self_check(
+        novel_content, policy_text, policy_macro_text, plot_content, model
+    )
+
+
+def _parse_args():
     parser = argparse.ArgumentParser(
         description="Use Antigravity CLI (agy) to write a novel episode."
     )
@@ -425,8 +646,11 @@ def main():
         action="store_true",
         help="Perform self-verification and rewrite if needed.",
     )
+    return parser.parse_args()
 
-    args = parser.parse_args()
+
+def main():
+    args = _parse_args()
 
     # プロット内容の取得
     chapter_title, plot_content = get_episode_plot(args.plot_file, args.episode)
@@ -440,10 +664,7 @@ def main():
     if prev_file:
         print(f"Loading context from previous episode: {prev_file}")
         full_prev = read_file(prev_file)
-        if len(full_prev) > 1500:
-            prev_text = "...\n" + full_prev[-1500:]
-        else:
-            prev_text = full_prev
+        prev_text = "...\n" + full_prev[-1500:] if len(full_prev) > 1500 else full_prev
 
     # 出力ファイル名の決定 (novels/X_Y.txt)
     ch_num = extract_numbers(chapter_title) if chapter_title else "0"
@@ -465,211 +686,35 @@ def main():
 
     try:
         if args.step_by_step:
-            # プロットをシーンに分割
-            common_header, scenes = split_scenes(plot_content)
-
-            # ポリシーファイルのパスを解決
-            POLICY_FILE = (
-                args.policy_global
-                if args.policy_global
-                else writer_helper.resolve_novel_file_by_pattern(
-                    "policy_global",
-                    "*執筆ポリシー_全体*.txt",
-                    "data/sources/00_1_執筆ポリシー_全体_ver.6.0.txt",
-                )
+            policy_paths = _resolve_policy_paths(args)
+            novel_content = _write_step_by_step(
+                chapter_title,
+                args.episode,
+                plot_content,
+                prev_text,
+                args.model,
+                args.title,
+                policy_paths,
             )
-            POLICY_FILE_MACRO = (
-                args.policy_chapter
-                if args.policy_chapter
-                else writer_helper.resolve_novel_file_by_pattern(
-                    "policy_chapter",
-                    "*執筆ポリシー_第*.txt",
-                    "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt",
-                )
-            )
-            CHARACTER_FILE = (
-                args.character
-                if args.character
-                else writer_helper.resolve_novel_file_by_pattern(
-                    "character",
-                    "*キャラクター概要*.txt",
-                    "data/sources/03_1_第1幕キャラクター概要 ver.2.txt",
-                )
-            )
-
-            prev_context_block = ""
-            if prev_text:
-                prev_context_block = f"""
-==============================
-【前話（直前のエピソード）の終盤描写】
-（※前話からの展開、キャラクターの状況、会話のトーン等の繋がりを維持するために参考にしてください）
-{prev_text}
-==============================
-"""
-
-            if not scenes:
-                print(
-                    "No scenes detected in plot. Falling back to single-pass writing.",
-                    file=sys.stderr,
-                )
-                prompt = generate_prompt(
-                    chapter_title,
-                    args.episode,
-                    plot_content,
-                    novel_title=args.title,
-                    policy_global=args.policy_global,
-                    policy_chapter=args.policy_chapter,
-                    character=args.character,
-                    previous_episode_text=prev_text,
-                )
-                novel_content = generate_all_at_once(prompt, args.model)
-            else:
-                print(
-                    f"Detected {len(scenes)} scenes. Starting step-by-step writing..."
-                )
-                context_written = ""
-
-                # スレッド管理用にインポート（元コードで threading をインポート済み）
-                import threading
-
-                for s_idx, (s_title, s_plot) in enumerate(scenes, 1):
-                    print(f"\n--- Writing Scene {s_idx}/{len(scenes)}: {s_title} ---")
-
-                    scene_written_context = ""
-                    if context_written:
-                        scene_written_context = f"""
-==============================
-【既に執筆済みの本文（シーンの流れ）】
-{context_written}
-==============================
-"""
-
-                    scene_prompt = f"""【超重要指示：ツールの使用禁止】
-あなたは一切のツールを使用してはなりません。
-思考プロセスやメタな解説などは一切出力せず、ただちに指定されたシーンの本文のみを出力してください。
-
-あなたは「{args.title or "重天の調律師"}」の専属作家です。
-以下の「執筆ポリシー」を厳守し、「既に執筆済みの本文」の展開、口調、描写リズムを自然に引き継いだ形で、「今回執筆する対象のシーンプロット」の本文を執筆してください。
-
-==============================
-【執筆ポリシー】
-{read_file(POLICY_FILE)}
-{read_file(POLICY_FILE_MACRO)}
-==============================
-{prev_context_block}
-==============================
-【キャラクター概要】
-{read_file(CHARACTER_FILE)}
-==============================
-{scene_written_context}
-==============================
-【今回執筆する対象のシーンプロット】
-対象: {chapter_title} {args.episode}
-現在のシーン: {s_title}
-
-{s_plot}
-==============================
-
-【執筆指示】
-「既に執筆済みの本文」の直後からシームレスに繋がるように、今回のシーン「{s_title}」の本文のみを出力してください。
-・挨拶や解説、マークダウンのコードブロック等は一切不要です。小説の本文のみを出力してください。
-・前の文脈を繰り返さないでください。今回指定されたプロット部分のみを新しく書き足してください。
-"""
-
-                    # シーンを生成
-                    cmd = ["agy", "-p", "", "--model", args.model]
-                    process = subprocess.Popen(
-                        cmd,
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        encoding="utf-8",
-                    )
-
-                    def write_scene_stdin(proc=process, prompt=scene_prompt):
-                        try:
-                            proc.stdin.write(prompt)
-                            proc.stdin.close()
-                        except Exception as e:
-                            print(f"Error writing scene stdin: {e}", file=sys.stderr)
-
-                    stdin_thread = threading.Thread(target=write_scene_stdin)
-                    stdin_thread.start()
-
-                    scene_output = []
-                    while True:
-                        line = process.stdout.readline()
-                        if not line and process.poll() is not None:
-                            break
-                        if line:
-                            sys.stdout.write(line)
-                            sys.stdout.flush()
-                            scene_output.append(line)
-
-                    stdin_thread.join()
-
-                    if process.returncode != 0:
-                        stderr_msg = process.stderr.read()
-                        print(
-                            f"Error generating scene {s_idx}: {stderr_msg}",
-                            file=sys.stderr,
-                        )
-                        sys.exit(process.returncode)
-
-                    scene_content = "".join(scene_output).strip()
-                    scene_content = re.sub(r"^```[a-zA-Z]*\n", "", scene_content)
-                    scene_content = re.sub(r"\n```$", "", scene_content).strip()
-
-                    print(
-                        f"\n[Generated Scene {s_idx} length: {len(scene_content)} chars]"
-                    )
-
-                    if context_written:
-                        context_written += "\n\n" + scene_content
-                    else:
-                        context_written = scene_content
-
-                novel_content = context_written
         else:
             # 一括生成
+            policy_global, policy_chapter, character = _resolve_policy_paths(args)
             prompt = generate_prompt(
                 chapter_title,
                 args.episode,
                 plot_content,
                 novel_title=args.title,
-                policy_global=args.policy_global,
-                policy_chapter=args.policy_chapter,
-                character=args.character,
+                policy_global=policy_global,
+                policy_chapter=policy_chapter,
+                character=character,
                 previous_episode_text=prev_text,
             )
             novel_content = generate_all_at_once(prompt, args.model)
 
         # ポリシーの自己検知チェック & リライト
         if args.self_check and novel_content:
-            POLICY_FILE = (
-                args.policy_global
-                if args.policy_global
-                else writer_helper.resolve_novel_file_by_pattern(
-                    "policy_global",
-                    "*執筆ポリシー_全体*.txt",
-                    "data/sources/00_1_執筆ポリシー_全体_ver.6.0.txt",
-                )
-            )
-            POLICY_FILE_MACRO = (
-                args.policy_chapter
-                if args.policy_chapter
-                else writer_helper.resolve_novel_file_by_pattern(
-                    "policy_chapter",
-                    "*執筆ポリシー_第*.txt",
-                    "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt",
-                )
-            )
-            policy_text = read_file(POLICY_FILE)
-            policy_macro_text = read_file(POLICY_FILE_MACRO)
-
-            novel_content = run_self_check(
-                novel_content, policy_text, policy_macro_text, plot_content, args.model
+            novel_content = _perform_self_check(
+                novel_content, plot_content, args.model, args
             )
 
         # 結果をファイルに保存

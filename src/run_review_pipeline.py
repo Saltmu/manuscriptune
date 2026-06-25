@@ -232,6 +232,148 @@ def run_single_review_skill(skill_name, target_text, output_file, model, output_
         return skill_name, False, f"Unexpected error: {str(e)}"
 
 
+def _resolve_output_dir(target_path: Path, args_dir: str | None) -> tuple[str, str]:
+    """
+    Resolves basename and output directory.
+    """
+    if "novel_check_results" in target_path.parts:
+        idx = target_path.parts.index("novel_check_results")
+        if idx + 1 < len(target_path.parts):
+            basename = target_path.parts[idx + 1]
+            output_dir = os.path.join("novel_check_results", basename)
+            return basename, output_dir
+
+    basename = target_path.stem
+    output_dir = args_dir if args_dir else os.path.join("novel_check_results", basename)
+    return basename, output_dir
+
+
+def _run_step_format(
+    target_path: Path, formatted_draft: str, output_dir: str, basename: str
+) -> None:
+    """
+    Executes Step 1: mechanical formatter and archiving if needed.
+    """
+    findings_file = os.path.join(output_dir, f"{basename}_findings.yaml")
+    is_rereview = os.path.exists(findings_file)
+
+    if is_rereview:
+        archive_previous_review(output_dir, basename)
+        print(f"[INFO] Re-reviewing existing formatted draft: {formatted_draft}")
+    elif not os.path.exists(formatted_draft):
+        try:
+            run_formatter(str(target_path), formatted_draft)
+            print(f"[OK] Format completed: {formatted_draft}\n")
+        except Exception as e:
+            print(f"[ERROR] Formatting failed: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(
+            f"[INFO] Formatted draft already exists. Skipping formatting: {formatted_draft}"
+        )
+
+
+def _run_step_parallel_reviews(
+    target_text: str, output_dir: str, model: str, workers: int
+) -> None:
+    """
+    Executes Step 3: parallel execution of review skills.
+    """
+    review_skills = {
+        "logic-consistency-reviewer": "02_logic_consistency.yaml",
+        "style-expression-reviewer": "03_style_expression.yaml",
+    }
+    results = []
+
+    print(f"Spawning {len(review_skills)} review skills in parallel...")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for skill, yaml_name in review_skills.items():
+            output_yaml = os.path.join(output_dir, yaml_name)
+            futures[
+                executor.submit(
+                    run_single_review_skill,
+                    skill,
+                    target_text,
+                    output_yaml,
+                    model,
+                    output_dir,
+                )
+            ] = skill
+
+        for future in as_completed(futures):
+            skill = futures[future]
+            try:
+                skill_name, success, msg = future.result()
+                results.append((skill_name, success, msg))
+                if success:
+                    print(f"[OK] {skill_name}: {msg}")
+                else:
+                    print(f"[FAIL] {skill_name}: {msg}", file=sys.stderr)
+            except Exception as exc:
+                print(f"[FAIL] {skill} generated an exception: {exc}", file=sys.stderr)
+                results.append((skill, False, str(exc)))
+
+
+def _run_step_integration(output_dir: str, basename: str, model: str) -> None:
+    """
+    Executes Step 4: integrates all findings into a final report.
+    """
+    print("\nIntegrating review results...")
+    try:
+        import integrate_findings
+
+        print(
+            f"Calling: integrate_findings.integrate_findings_in_dir(output_dir='{output_dir}', model='{model}')"
+        )
+        success = integrate_findings.integrate_findings_in_dir(output_dir, model)
+        if success:
+            print("[OK] Reports integrated successfully.")
+            print(
+                f"Consolidated Report: {os.path.join(output_dir, f'{basename}_report.md')}"
+            )
+            print(
+                f"Consolidated YAML  : {os.path.join(output_dir, f'{basename}_findings.yaml')}"
+            )
+        else:
+            print(
+                "[ERROR] Failed to integrate findings.",
+                file=sys.stderr,
+            )
+    except Exception as e:
+        print(
+            f"[ERROR] Unexpected error while calling integrate_findings: {e}",
+            file=sys.stderr,
+        )
+
+
+def _run_step_server(
+    formatted_draft: str, output_dir: str, basename: str, no_server: bool
+) -> None:
+    """
+    Executes Step 5: launches the interactive review editor server.
+    """
+    if not no_server:
+        print("\nStarting Interactive Review Editor UI...")
+        server_script = os.path.join("src", "review_server.py")
+        if os.path.exists(server_script):
+            cmd = [
+                "poetry",
+                "run",
+                "python",
+                server_script,
+                formatted_draft,
+                os.path.join(output_dir, f"{basename}_findings.yaml"),
+            ]
+            print(f"Running: {' '.join(cmd)}")
+            subprocess.run(cmd)
+        else:
+            print(
+                "[WARNING] review_server.py not found. Interactive UI skipped.",
+                file=sys.stderr,
+            )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run the entire parallel review pipeline for a novel draft."
@@ -258,23 +400,8 @@ def main():
 
     target_path = Path(args.target_file)
 
-    # Smart path resolution:
-    # If the target path points inside novel_check_results/{basename}/...
-    if "novel_check_results" in target_path.parts:
-        idx = target_path.parts.index("novel_check_results")
-        if idx + 1 < len(target_path.parts):
-            basename = target_path.parts[idx + 1]
-            output_dir = os.path.join("novel_check_results", basename)
-        else:
-            basename = target_path.stem
-            output_dir = (
-                args.dir if args.dir else os.path.join("novel_check_results", basename)
-            )
-    else:
-        basename = target_path.stem
-        output_dir = (
-            args.dir if args.dir else os.path.join("novel_check_results", basename)
-        )
+    # Smart path resolution
+    basename, output_dir = _resolve_output_dir(target_path, args.dir)
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -285,23 +412,7 @@ def main():
 
     # Step 1: Run Formatter (or Skip if it's a re-review)
     formatted_draft = os.path.join(output_dir, f"{basename}_formatted.txt")
-    findings_file = os.path.join(output_dir, f"{basename}_findings.yaml")
-    is_rereview = os.path.exists(findings_file)
-
-    if is_rereview:
-        archive_previous_review(output_dir, basename)
-        print(f"[INFO] Re-reviewing existing formatted draft: {formatted_draft}")
-    elif not os.path.exists(formatted_draft):
-        try:
-            run_formatter(str(target_path), formatted_draft)
-            print(f"[OK] Format completed: {formatted_draft}\n")
-        except Exception as e:
-            print(f"[ERROR] Formatting failed: {e}", file=sys.stderr)
-            sys.exit(1)
-    else:
-        print(
-            f"[INFO] Formatted draft already exists. Skipping formatting: {formatted_draft}"
-        )
+    _run_step_format(target_path, formatted_draft, output_dir, basename)
 
     # Step 2: Run Context Filter
     filtered_context = os.path.join(output_dir, "01_filtered_context.txt")
@@ -310,92 +421,14 @@ def main():
     # Read formatted draft text
     target_text = read_file(formatted_draft)
 
-    # Step 3: Define review tasks (Logic and Style integrated reviewers)
-    review_skills = {
-        "logic-consistency-reviewer": "02_logic_consistency.yaml",
-        "style-expression-reviewer": "03_style_expression.yaml",
-    }
-
-    results = []
-
-    # Execute in parallel
-    print(f"Spawning {len(review_skills)} review skills in parallel...")
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = {}
-        for skill, yaml_name in review_skills.items():
-            output_yaml = os.path.join(output_dir, yaml_name)
-            futures[
-                executor.submit(
-                    run_single_review_skill,
-                    skill,
-                    target_text,
-                    output_yaml,
-                    args.model,
-                    output_dir,
-                )
-            ] = skill
-
-        for future in as_completed(futures):
-            skill = futures[future]
-            try:
-                skill_name, success, msg = future.result()
-                results.append((skill_name, success, msg))
-                if success:
-                    print(f"[OK] {skill_name}: {msg}")
-                else:
-                    print(f"[FAIL] {skill_name}: {msg}", file=sys.stderr)
-            except Exception as exc:
-                print(f"[FAIL] {skill} generated an exception: {exc}", file=sys.stderr)
-                results.append((skill, False, str(exc)))
+    # Step 3: Run parallel reviews
+    _run_step_parallel_reviews(target_text, output_dir, args.model, args.workers)
 
     # Step 4: Run integration report
-    print("\nIntegrating review results...")
-    try:
-        import integrate_findings
-
-        print(
-            f"Calling: integrate_findings.integrate_findings_in_dir(output_dir='{output_dir}', model='{args.model}')"
-        )
-        success = integrate_findings.integrate_findings_in_dir(output_dir, args.model)
-        if success:
-            print("[OK] Reports integrated successfully.")
-            print(
-                f"Consolidated Report: {os.path.join(output_dir, f'{basename}_report.md')}"
-            )
-            print(
-                f"Consolidated YAML  : {os.path.join(output_dir, f'{basename}_findings.yaml')}"
-            )
-        else:
-            print(
-                "[ERROR] Failed to integrate findings.",
-                file=sys.stderr,
-            )
-    except Exception as e:
-        print(
-            f"[ERROR] Unexpected error while calling integrate_findings: {e}",
-            file=sys.stderr,
-        )
+    _run_step_integration(output_dir, basename, args.model)
 
     # Step 5: Start Review Editor Server
-    if not args.no_server:
-        print("\nStarting Interactive Review Editor UI...")
-        server_script = os.path.join("src", "review_server.py")
-        if os.path.exists(server_script):
-            cmd = [
-                "poetry",
-                "run",
-                "python",
-                server_script,
-                formatted_draft,
-                os.path.join(output_dir, f"{basename}_findings.yaml"),
-            ]
-            print(f"Running: {' '.join(cmd)}")
-            subprocess.run(cmd)
-        else:
-            print(
-                "[WARNING] review_server.py not found. Interactive UI skipped.",
-                file=sys.stderr,
-            )
+    _run_step_server(formatted_draft, output_dir, basename, args.no_server)
 
     print("\n=== Review Pipeline Finished ===")
 

@@ -35,11 +35,8 @@ ignore = ["E501", "B007", "B904", "PLR0913", "PLR2004"]
 max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
-# 既存の複雑なレガシーコードのリファクタリング猶予
-"skills/novel_writer_antigravitycli/writer_cli.py" = ["C901", "PLR0912", "PLR0915"]
 "src/apply_findings.py" = ["C901", "PLR0912", "PLR0915"]
 "src/integrate_findings.py" = ["C901", "PLR0912", "PLR0915"]
-"src/run_review_pipeline.py" = ["PLR0912", "PLR0915"]
 
 [tool.mypy]
 python_version = "3.12"
