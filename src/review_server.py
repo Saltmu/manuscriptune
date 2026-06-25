@@ -6,7 +6,6 @@ import re
 import shutil
 import signal
 import subprocess
-import sys
 import webbrowser
 from pathlib import Path
 
@@ -17,14 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Import apply_findings logic from apply_findings.py
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(
-    os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "skills", "novel-writer")
-    )
-)
-import writer_helper
+from src.utils import project_config as writer_helper
 
 app = FastAPI(title="Novel Studio - AI Writing & Review Portal")
 

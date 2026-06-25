@@ -7,13 +7,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# Add skills/novel-writer to path to use writer_helper
-sys.path.append(
-    os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "skills", "novel-writer")
-    )
-)
-import writer_helper
+from src.utils import project_config as writer_helper
 
 
 def archive_previous_review(output_dir, basename):

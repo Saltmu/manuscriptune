@@ -1,0 +1,46 @@
+import glob
+import os
+
+import yaml
+
+
+def load_project_config():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    config_path = os.path.join(project_root, "antigravity.yaml")
+    if not os.path.exists(config_path):
+        config_path = "antigravity.yaml"
+        if not os.path.exists(config_path):
+            return {}
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
+def get_novel_setting(key, default=None):
+    config = load_project_config()
+    novel_config = config.get("project", {}).get("novel", {})
+    return novel_config.get(key, default)
+
+
+def resolve_novel_file_by_pattern(pattern_key, default_pattern, default_fallback=None):
+    file_patterns = get_novel_setting("file_patterns", {})
+    pattern = file_patterns.get(pattern_key, default_pattern)
+    if not pattern.startswith("data/sources/"):
+        pattern = os.path.join("data", "sources", pattern)
+    return resolve_latest_file(pattern, default_fallback)
+
+
+def resolve_latest_file(pattern, default=None):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    full_pattern = os.path.join(project_root, pattern)
+    files = glob.glob(full_pattern)
+    if not files:
+        files = glob.glob(pattern)
+        if not files:
+            return default
+    files.sort()
+    return files[-1]

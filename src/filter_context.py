@@ -3,16 +3,7 @@ import os
 import re
 import sys
 
-# Add skills/novel-writer to path to use writer_helper
-sys.path.append(
-    os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "skills", "novel-writer")
-    )
-)
-try:
-    import writer_helper
-except ImportError:
-    writer_helper = None
+from src.utils import project_config as writer_helper
 
 # A set of common Japanese words to ignore as search keywords (Stopwords)
 STOPWORDS = {

@@ -7,10 +7,18 @@ import subprocess
 import sys
 import threading
 
-sys.path.append(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "novel-writer"))
-)
-import writer_helper
+from src.utils import plot_parser, project_config
+
+
+class WriterHelperMock:
+    parse_plot = staticmethod(plot_parser.parse_plot)
+    resolve_novel_file_by_pattern = staticmethod(
+        project_config.resolve_novel_file_by_pattern
+    )
+    get_novel_setting = staticmethod(project_config.get_novel_setting)
+
+
+writer_helper = WriterHelperMock
 
 
 def read_file(filepath):
