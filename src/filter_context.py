@@ -314,10 +314,12 @@ def main():
         if is_basic_context_file(filename):
             content_str = content.strip()
             if content_str:
-                basic_contexts.append({
-                    "file": filename,
-                    "text": content_str,
-                })
+                basic_contexts.append(
+                    {
+                        "file": filename,
+                        "text": content_str,
+                    }
+                )
                 # Add to raw_chunks_all to participate in DF computation
                 raw_chunks_all.append((filename, 0, content_str))
         else:

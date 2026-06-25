@@ -145,8 +145,11 @@ def test_filter_context_main_integration(tmp_path):
     output_file = tmp_path / "filtered_context.txt"
 
     # Patch the sources_dir and sys.argv, then run main
-    with unittest.mock.patch("sys.argv", ["filter_context.py", str(novel_file), str(output_file)]):
+    with unittest.mock.patch(
+        "sys.argv", ["filter_context.py", str(novel_file), str(output_file)]
+    ):
         original_join = os.path.join
+
         def mock_join(*args):
             # If the join points to .../data/sources, redirect to tmp_path/data/sources
             joined = original_join(*args)
@@ -167,5 +170,7 @@ def test_filter_context_main_integration(tmp_path):
     assert "■ 創世記\n神が世界を創った。\n\n■ 第一紀\n調律師が現れた。" in output_text
 
     # Standard settings should be chunked and matched
-    assert "physics.txt (Section 1" in output_text # "# 魔力体系..." has "調律師" which matches novel
+    assert (
+        "physics.txt (Section 1" in output_text
+    )  # "# 魔力体系..." has "調律師" which matches novel
     assert "魔法は調律師によってのみ使える。" in output_text
