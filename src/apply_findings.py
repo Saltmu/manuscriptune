@@ -32,58 +32,6 @@ def parse_line_number(location_str):
     return None
 
 
-def query_llm_for_replacement(original, suggestion, model):
-    """
-    Uses the agy CLI to generate the rewritten text based on original text and suggestion.
-    """
-    prompt = f"""あなたは小説の優秀な編集者です。
-以下の【修正対象の原文】を、【修正の提案・解説】に従って適切に書き換えてください。
-
-【修正対象の原文】
-{original}
-
-【修正の提案・解説】
-{suggestion}
-
-【出力ルール】
-・修正・書き換え後のテキストのみを出力してください。
-・解説、挨拶、マークダウンのコードブロック（```）などは一切出力しないでください。
-・原文の意味やニュアンスを保ちつつ、指摘された問題点（語彙、設定矛盾、表現など）のみを解消してください。
-"""
-
-    cmd = ["agy", "-p", "", "--model", model]
-    try:
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        stdout, stderr = process.communicate(input=prompt)
-
-        if process.returncode != 0:
-            print(
-                f"Warning: agy CLI failed with error: {stderr.strip()}", file=sys.stderr
-            )
-            return None
-
-        result = stdout.strip()
-        # Clean up any accidental markdown formatting the LLM might have returned
-        result = re.sub(r"^```[a-zA-Z]*\n", "", result)
-        result = re.sub(r"\n```$", "", result).strip()
-        return result
-    except FileNotFoundError:
-        print(
-            "Warning: 'agy' CLI not found. Cannot use LLM for replacement.",
-            file=sys.stderr,
-        )
-        return None
-    except Exception as e:
-        print(f"Warning: Unexpected error calling agy: {e}", file=sys.stderr)
-        return None
-
-
 def extract_suggestion_candidate(suggestion):
     """
     Attempts to extract a replacement candidate enclosed in quotes from the suggestion.
@@ -243,65 +191,6 @@ def query_llm_for_block_replacement(context_lines, findings_in_block, model):
     except Exception as e:
         print(f"Warning: Unexpected error calling agy: {e}", file=sys.stderr)
         return None
-
-
-def apply_finding_to_text(text_lines, finding, model, use_llm=True):
-    """
-    Applies a single finding to the list of text lines.
-    Modifies text_lines in place if match is found.
-    Returns (success, applied_text, method)
-    """
-    original = finding.get("original", "").strip()
-    if not original:
-        return False, "Original text is empty", None
-
-    line_no = find_target_line(text_lines, finding)
-    if line_no is None:
-        return False, f"Could not find original text: '{original}'", None
-
-    L_min = line_no
-    L_max = line_no
-    C = 4
-    start_idx = max(0, L_min - 1 - C)
-    end_idx = min(len(text_lines), L_max + C)
-    context_lines = text_lines[start_idx:end_idx]
-
-    success = False
-    result_block_text = None
-    method = None
-
-    if use_llm:
-        result_block_text = query_llm_for_block_replacement(
-            context_lines, [finding], model
-        )
-        if result_block_text:
-            success = True
-            method = "llm"
-
-    if not success:
-        result_block_text, success_findings, failed_findings = apply_fallback_to_block(
-            context_lines, [finding]
-        )
-        if success_findings:
-            _, replacement, method = success_findings[0]
-            if not result_block_text.endswith("\n") and len(result_block_text) > 0:
-                result_block_text += "\n"
-            text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
-            return True, replacement, method
-        else:
-            error_msg = (
-                failed_findings[0][1] if failed_findings else "Replacement failed"
-            )
-            return False, error_msg, None
-    else:
-        if not result_block_text.endswith("\n") and len(result_block_text) > 0:
-            result_block_text += "\n"
-        text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
-
-        replacement = extract_suggestion_candidate(finding.get("suggestion", ""))
-        if not replacement:
-            replacement = result_block_text.strip()
-        return True, replacement, method
 
 
 def print_finding_diff(finding):
