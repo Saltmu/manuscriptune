@@ -382,7 +382,6 @@ def main():
         print(f"Error: '{findings_yaml_path}' not found.", file=sys.stderr)
         sys.exit(1)
 
-
     # Read formatted text (split into lines)
     raw_text = read_file(formatted_txt_path)
     text_lines = raw_text.splitlines(keepends=True)

@@ -23,12 +23,12 @@ def archive_previous_review(output_dir, basename):
     """
     history_dir = os.path.join(output_dir, "history")
     findings_file = os.path.join(output_dir, f"{basename}_findings.yaml")
-    
+
     if not os.path.exists(findings_file):
         return
-        
+
     os.makedirs(history_dir, exist_ok=True)
-    
+
     # Determine version number (v1, v2, v3...)
     existing_versions = []
     version_pattern = re.compile(rf"v(\d+)_(?:{re.escape(basename)})_")
@@ -37,12 +37,14 @@ def archive_previous_review(output_dir, basename):
             match = version_pattern.match(f)
             if match:
                 existing_versions.append(int(match.group(1)))
-            
+
     next_version = max(existing_versions) + 1 if existing_versions else 1
     v_prefix = f"v{next_version}"
-    
-    print(f"\n[Archive] Existing review findings found. Archiving to history/{v_prefix}_{basename}_...")
-    
+
+    print(
+        f"\n[Archive] Existing review findings found. Archiving to history/{v_prefix}_{basename}_..."
+    )
+
     # Files to archive
     files_to_archive = {
         f"{basename}_formatted.txt": f"{v_prefix}_{basename}_formatted.txt",
@@ -50,20 +52,19 @@ def archive_previous_review(output_dir, basename):
         f"{basename}_report.md": f"{v_prefix}_{basename}_report.md",
         "01_filtered_context.txt": f"{v_prefix}_filtered_context.txt",
     }
-    
+
     for src_name, dest_name in files_to_archive.items():
         src_path = os.path.join(output_dir, src_name)
         dest_path = os.path.join(history_dir, dest_name)
         if os.path.exists(src_path):
             shutil.copy2(src_path, dest_path)
             print(f"  Archived: {src_name} -> history/{dest_name}")
-            
+
     # Clean up current findings and report so they are regenerated
     for src_name in [f"{basename}_findings.yaml", f"{basename}_report.md"]:
         src_path = os.path.join(output_dir, src_name)
         if os.path.exists(src_path):
             os.remove(src_path)
-
 
 
 def read_file(filepath):
@@ -262,7 +263,7 @@ def main():
     args = parser.parse_args()
 
     target_path = Path(args.target_file)
-    
+
     # Smart path resolution:
     # If the target path points inside novel_check_results/{basename}/...
     if "novel_check_results" in target_path.parts:
@@ -272,10 +273,14 @@ def main():
             output_dir = os.path.join("novel_check_results", basename)
         else:
             basename = target_path.stem
-            output_dir = args.dir if args.dir else os.path.join("novel_check_results", basename)
+            output_dir = (
+                args.dir if args.dir else os.path.join("novel_check_results", basename)
+            )
     else:
         basename = target_path.stem
-        output_dir = args.dir if args.dir else os.path.join("novel_check_results", basename)
+        output_dir = (
+            args.dir if args.dir else os.path.join("novel_check_results", basename)
+        )
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -288,7 +293,7 @@ def main():
     formatted_draft = os.path.join(output_dir, f"{basename}_formatted.txt")
     findings_file = os.path.join(output_dir, f"{basename}_findings.yaml")
     is_rereview = os.path.exists(findings_file)
-    
+
     if is_rereview:
         archive_previous_review(output_dir, basename)
         print(f"[INFO] Re-reviewing existing formatted draft: {formatted_draft}")
@@ -303,7 +308,9 @@ def main():
                 print(f"[ERROR] Formatting failed: {e}", file=sys.stderr)
                 sys.exit(1)
         else:
-            print(f"[INFO] Formatted draft already exists. Skipping formatting: {formatted_draft}")
+            print(
+                f"[INFO] Formatted draft already exists. Skipping formatting: {formatted_draft}"
+            )
 
     # Step 2: Run Context Filter
     filtered_context = os.path.join(output_dir, "01_filtered_context.txt")
@@ -405,7 +412,6 @@ def main():
                 "[WARNING] review_server.py not found. Interactive UI skipped.",
                 file=sys.stderr,
             )
-
 
     print("\n=== Review Pipeline Finished ===")
 

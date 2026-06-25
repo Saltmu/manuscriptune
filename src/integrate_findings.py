@@ -182,7 +182,10 @@ def main():
         if os.path.exists(fallback_path):
             formatted_txt_path = fallback_path
         else:
-            print(f"Error: '{basename}_formatted.txt' not found in {output_dir}.", file=sys.stderr)
+            print(
+                f"Error: '{basename}_formatted.txt' not found in {output_dir}.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     target_text = read_file(formatted_txt_path)
@@ -233,9 +236,7 @@ def main():
         integrated_yaml_path = os.path.join(output_dir, f"{basename}_findings.yaml")
         with open(integrated_yaml_path, "w", encoding="utf-8") as f:
             f.write("findings: []\n")
-        generate_markdown_report(
-            [], os.path.join(output_dir, f"{basename}_report.md")
-        )
+        generate_markdown_report([], os.path.join(output_dir, f"{basename}_report.md"))
         print("Done.")
         sys.exit(0)
 
@@ -285,7 +286,6 @@ def main():
     report_md_path = os.path.join(output_dir, f"{basename}_report.md")
     generate_markdown_report(merged_findings_list, report_md_path)
     print(f"Saved Markdown report to {report_md_path}")
-
 
 
 if __name__ == "__main__":
