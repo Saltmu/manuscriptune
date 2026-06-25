@@ -5,11 +5,11 @@
         <p>AI Writing & Review Platform</p>
     </div>
     <ul class="nav-links">
-        <li><a class="nav-item active" onclick="switchView('dashboard')">📊 ダッシュボード</a></li>
-        <li><a class="nav-item" onclick="switchView('sync')">🔄 設定資料同期</a></li>
-        <li><a class="nav-item" onclick="switchView('write')">✍️ AI小説執筆</a></li>
-        <li><a class="nav-item" onclick="switchView('review')">🔍 レビュー実行</a></li>
-        <li><a class="nav-item" id="nav-editor-link" onclick="switchView('editor')">📝 校閲・反映</a></li>
+        <li><a class="nav-item active" href="#/dashboard" onclick="switchView('dashboard'); event.preventDefault();">📊 ダッシュボード</a></li>
+        <li><a class="nav-item" href="#/sync" onclick="switchView('sync'); event.preventDefault();">🔄 設定資料同期</a></li>
+        <li><a class="nav-item" href="#/write" onclick="switchView('write'); event.preventDefault();">✍️ AI小説執筆</a></li>
+        <li><a class="nav-item" href="#/review" onclick="switchView('review'); event.preventDefault();">🔍 レビュー実行</a></li>
+        <li><a class="nav-item" id="nav-editor-link" href="#/editor" onclick="switchView('editor'); event.preventDefault();">📝 校閲・反映</a></li>
     </ul>
     <div class="sidebar-footer">
         <span>Editor-AI v1.1</span>
