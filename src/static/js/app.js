@@ -413,20 +413,25 @@ async function loadSourcesForWrite() {
         // Load models
         const modelRes = await fetch('/api/models');
         const modelData = await modelRes.json();
-        const modelSelect = document.getElementById('write-model');
-        if (modelSelect && modelData.models) {
-            modelSelect.innerHTML = '';
-            modelData.models.forEach(m => {
-                const opt = document.createElement('option');
-                opt.value = m;
-                opt.textContent = m;
-                // Select Flash High as default
-                if (m.includes('High') || m.includes('Flash (High)')) {
-                    opt.selected = true;
-                }
-                modelSelect.appendChild(opt);
-            });
-        }
+        const modelSelects = [
+            document.getElementById('write-model'),
+            document.getElementById('review-model')
+        ];
+        modelSelects.forEach(modelSelect => {
+            if (modelSelect && modelData.models) {
+                modelSelect.innerHTML = '';
+                modelData.models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m;
+                    // Select Flash High as default
+                    if (m.includes('High') || m.includes('Flash (High)')) {
+                        opt.selected = true;
+                    }
+                    modelSelect.appendChild(opt);
+                });
+            }
+        });
 
         // Restore values from localStorage and attach event listeners to save changes
         const fields = [
@@ -436,7 +441,8 @@ async function loadSourcesForWrite() {
             'write-plot',
             'write-policy-global',
             'write-policy-chapter',
-            'write-character'
+            'write-character',
+            'review-model'
         ];
 
         fields.forEach(id => {
@@ -540,7 +546,11 @@ function runReviewPipeline() {
 
     lastReviewedFile = fileName;
 
-    const url = `/api/stream/review?file=${encodeURIComponent(fileName)}`;
+    const modelVal = document.getElementById('review-model').value;
+    let url = `/api/stream/review?file=${encodeURIComponent(fileName)}`;
+    if (modelVal) {
+        url += `&model=${encodeURIComponent(modelVal)}`;
+    }
     startEventStream(url, 'review-console-log', 'review-console-status', (success) => {
         btn.disabled = false;
         btn.innerHTML = '🔍 レビューパイプラインを実行';

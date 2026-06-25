@@ -471,6 +471,7 @@ async def stream_sync():
 @app.get("/api/stream/review")
 async def stream_review(
     file: str = Query(..., description="Novel text filename in novels/"),
+    model: str | None = Query(None),
 ):
     safe_file = os.path.basename(file)
     novel_path = os.path.join("novels", safe_file)
@@ -487,6 +488,8 @@ async def stream_review(
         novel_path,
         "--no-server",
     ]
+    if model:
+        cmd.extend(["--model", model])
 
     return stream_process_output(cmd)
 

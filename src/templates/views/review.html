@@ -10,6 +10,16 @@
                 </div>
 
                 <div class="card">
+                    <h3>校閲パラメーター設定</h3>
+                    <div class="form-grid" style="margin-bottom: 16px;">
+                        <div class="form-group">
+                            <label for="review-model">使用するAIモデル</label>
+                            <select id="review-model">
+                                <option value="Gemini 3.5 Flash (High)">Gemini 3.5 Flash (High)</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <h3>校閲対象のドラフトファイルを選択</h3>
                     <div style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center;">
                         <button class="btn-primary" id="btn-run-review" onclick="runReviewPipeline()">
