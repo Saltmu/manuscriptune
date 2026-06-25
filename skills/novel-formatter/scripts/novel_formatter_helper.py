@@ -1,7 +1,8 @@
-import sys
-import re
 import argparse
+import re
+import sys
 from pathlib import Path
+
 
 def format_text(text: str) -> str:
     """
@@ -34,7 +35,7 @@ def main():
         print(f"Error: Input file '{args.input_file}' not found.", file=sys.stderr)
         sys.exit(1)
         
-    with open(input_path, 'r', encoding='utf-8') as f:
+    with open(input_path, encoding='utf-8') as f:
         content = f.read()
         
     formatted_content = format_text(content)

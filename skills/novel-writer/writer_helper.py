@@ -1,8 +1,10 @@
-import re
 import argparse
-import os
 import glob
+import os
+import re
+
 import yaml
+
 
 def load_project_config():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,7 +15,7 @@ def load_project_config():
         if not os.path.exists(config_path):
             return {}
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
     except Exception:
         return {}
@@ -43,7 +45,7 @@ def resolve_latest_file(pattern, default=None):
     return files[-1]
 
 def parse_plot(file_path):
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         lines = f.readlines()
 
     chapters = []

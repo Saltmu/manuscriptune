@@ -1,21 +1,22 @@
-import os
 import argparse
-import subprocess
-import json
+import os
 import re
-import threading
+import subprocess
 
 # 既存のヘルパーからプロット情報を取得するため、パスを追加してインポート
 import sys
+import threading
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'novel-writer')))
 import writer_helper
+
 
 def read_file(filepath):
     """ファイルを読み込むヘルパー関数"""
     if not os.path.exists(filepath):
         print(f"Error: File not found: {filepath}", file=sys.stderr)
         return ""
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, encoding='utf-8') as f:
         return f.read()
 
 def get_episode_plot(plot_file, episode_title):
@@ -297,7 +298,6 @@ def generate_all_at_once(prompt, model):
     )
     
     # stdinへの書き込みを別スレッドで行い、デッドロックを防ぐ
-    import threading
     def write_stdin():
         try:
             process.stdin.write(prompt)
@@ -322,7 +322,7 @@ def generate_all_at_once(prompt, model):
     stderr = process.stderr.read()
     
     if process.returncode != 0:
-        print(f"Error calling Antigravity CLI (agy):", file=sys.stderr)
+        print("Error calling Antigravity CLI (agy):", file=sys.stderr)
         print(stderr, file=sys.stderr)
         sys.exit(process.returncode)
         
@@ -473,10 +473,10 @@ def main():
                         encoding='utf-8'
                     )
                     
-                    def write_scene_stdin():
+                    def write_scene_stdin(proc=process, prompt=scene_prompt):
                         try:
-                            process.stdin.write(scene_prompt)
-                            process.stdin.close()
+                            proc.stdin.write(prompt)
+                            proc.stdin.close()
                         except Exception as e:
                             print(f"Error writing scene stdin: {e}", file=sys.stderr)
                             
