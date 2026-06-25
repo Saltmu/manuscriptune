@@ -7,8 +7,8 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from src.utils import project_config as writer_helper
-from src.utils.ai_client import AgyClient, AgyClientError
+from src.utils.ai_client import AgyClientError
+from src.utils.ai_task import ReviewSkillInput, ReviewSkillTask
 
 
 def archive_previous_review(output_dir, basename):
@@ -115,100 +115,19 @@ def run_filter_context(formatted_file, output_file):
         return False
 
 
-def get_skill_prompt(skill_name, target_text, output_dir):
-    """
-    Generates the review prompt for a specific skill, attaching relevant source files or filtered context.
-    """
-    skill_md_path = os.path.join("skills", skill_name, "SKILL.md")
-    if not os.path.exists(skill_md_path):
-        print(
-            f"Error: SKILL.md not found for skill '{skill_name}' at {skill_md_path}",
-            file=sys.stderr,
-        )
-        return None
-
-    skill_instruction = read_file(skill_md_path)
-
-    context_text = ""
-
-    def get_latest_file(pattern_key, default_pattern):
-        return writer_helper.resolve_novel_file_by_pattern(
-            pattern_key, default_pattern, None
-        )
-
-    if skill_name == "logic-consistency-reviewer":
-        filtered_context_path = os.path.join(output_dir, "01_filtered_context.txt")
-        if os.path.exists(filtered_context_path):
-            print(
-                f"[{skill_name}] Loading filtered context from 01_filtered_context.txt"
-            )
-            context_text += f"\n【フィルタリング済み設定資料】\n{read_file(filtered_context_path)}\n"
-        else:
-            # Fallback to raw files
-            print(
-                f"[{skill_name}] Warning: filtered context not found. Loading raw sources."
-            )
-            setting_file = get_latest_file("settings", "*設定資料集*.txt")
-            char_file = get_latest_file("character", "*キャラクター概要*.txt")
-            plot_file = get_latest_file("plot", "*プロット*.txt")
-            if setting_file:
-                context_text += f"\n【設定資料集】\n{read_file(setting_file)}\n"
-            if char_file:
-                context_text += f"\n【キャラクター概要】\n{read_file(char_file)}\n"
-            if plot_file:
-                context_text += f"\n【プロット】\n{read_file(plot_file)}\n"
-
-    elif skill_name == "style-expression-reviewer":
-        char_file = get_latest_file("character", "*キャラクター概要*.txt")
-        policy_file = get_latest_file("policy_global", "*執筆ポリシー_全体*.txt")
-        if char_file:
-            context_text += f"\n【キャラクター概要】\n{read_file(char_file)}\n"
-        if policy_file:
-            context_text += f"\n【執筆ポリシー】\n{read_file(policy_file)}\n"
-
-    prompt = f"""{skill_instruction}
-
-==============================
-{context_text}
-==============================
-
-==============================
-【校閲対象の小説テキスト】
-{target_text}
-==============================
-
-【実行指示】
-上記の小説テキストに対し、あなたの役割に従って校閲を行ってください。
-指摘事項がある場合は、指定されたYAML形式で出力してください。
-・出力は必ず ```yaml で始まるYAMLコードブロックのみにしてください。
-・挨拶や解説などのメタなテキストは一切出力しないでください。
-・もし指摘事項がない場合は、以下のように空のfindingsリストを出力してください。
-```yaml
-findings: []
-```
-"""
-    return prompt
-
-
 def run_single_review_skill(skill_name, target_text, output_file, model, output_dir):
     """
-    Executes a single review skill via AgyClient.
+    Executes a single review skill via ReviewSkillTask.
     """
     print(f"[{skill_name}] Preparing review prompt...")
-    prompt = get_skill_prompt(skill_name, target_text, output_dir)
-    if not prompt:
-        return skill_name, False, "Failed to generate prompt"
+    task = ReviewSkillTask(model=model)
+    input_data = ReviewSkillInput(
+        skill_name=skill_name, target_text=target_text, output_dir=output_dir
+    )
 
     print(f"[{skill_name}] Running AgyClient ({model})...")
-    client = AgyClient(model=model)
-
     try:
-        result_text = client.generate(prompt).strip()
-        yaml_match = re.search(r"```yaml\s*([\s\S]*?)```", result_text)
-        if yaml_match:
-            yaml_content = yaml_match.group(1).strip()
-        else:
-            yaml_content = result_text
+        yaml_content = task.execute(input_data)
 
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(yaml_content + "\n")

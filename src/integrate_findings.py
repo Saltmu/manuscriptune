@@ -5,7 +5,8 @@ import sys
 
 import yaml
 
-from src.utils.ai_client import AgyClient, AgyClientError
+from src.utils.ai_client import AgyClientError
+from src.utils.ai_task import FindingsIntegrationInput, FindingsIntegrationTask
 
 
 def read_file(filepath):
@@ -83,56 +84,15 @@ def generate_markdown_report(findings, output_md):
 
 def run_integration_llm(output_dir, target_text, raw_findings_text, model):
     """
-    Calls the agy CLI to merge and resolve conflicts in the findings.
+    Calls FindingsIntegrationTask to merge and resolve conflicts in the findings.
     """
-    prompt = f"""あなたは小説の編集長です。
-以下は、異なる専門性を持つ校閲エージェントから提出された、同一の小説章に対する校閲指摘（YAML形式）のリストです。
-
-【校閲対象の小説テキスト】
-==============================
-{target_text}
-==============================
-
-【検出された校閲指摘リスト】
-==============================
-{raw_findings_text}
-==============================
-
-上記の指摘リストを精査し、以下のルールに従って1つの統合された指摘リスト（YAML）を作成してください。
-
-【マージルール】
-1. **重複の排除**: 同じ箇所の同じような指摘は、最も具体的で有益な内容に統合してください。
-2. **競合の解決**: 表現側の提案が世界観やキャラクター設定に反している場合は、設定側のルールを最優先し、表現側の提案を設定に矛盾しないように調整または棄却してください。
-3. **重要度による絞り込み**: 優先順位（severity: high > medium > low）を考慮し、重要度の低い些細な指摘は削除し、全体で最大20〜25件程度に抑えてください。
-4. **IDの振り直し**: 統合後の指摘に対して、`INT-001`, `INT-002` ... と連番でIDを振り直してください。
-5. **出力フォーマット**:
-   - 必ず `findings` キーを持つ配列形式のYAMLコードブロック（```yaml ... ```）のみを出力してください。
-   - 挨拶や解説などのメタなテキストは一切出力しないでください。
-   - 各 finding の構造は以下のキーを厳密に保持してください：
-     - `id` (INT-XXX)
-     - `location` (元の指摘の行数)
-     - `original` (該当箇所のテキスト抜粋)
-     - `category` (カテゴリ名)
-     - `severity` (high / medium / low / info)
-     - `analysis` (統合・競合解決された分析内容)
-     - `suggestion` (統合・調整された修正案)
-     - `accepted` ("n" で固定)
-
-もし指摘事項がなくなった場合は、以下のように空のfindingsリストを出力してください。
-```yaml
-findings: []
-```
-"""
-
     print(f"Sending consolidation request to AgyClient ({model})...")
-    client = AgyClient(model=model)
-
+    task = FindingsIntegrationTask(model=model)
+    input_data = FindingsIntegrationInput(
+        target_text=target_text, raw_findings_text=raw_findings_text
+    )
     try:
-        result_text = client.generate(prompt).strip()
-        yaml_match = re.search(r"```yaml\s*([\s\S]*?)```", result_text)
-        if yaml_match:
-            return yaml_match.group(1).strip()
-        return result_text
+        return task.execute(input_data)
     except AgyClientError as e:
         print(f"Error calling AgyClient: {e}", file=sys.stderr)
         return None
