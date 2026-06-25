@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -58,6 +59,10 @@ class SaveFindingsRequest(BaseModel):
 
 class SelectFileRequest(BaseModel):
     novel_name: str
+
+
+class SaveNovelRequest(BaseModel):
+    content: str
 
 
 def render_html_template(template_name: str) -> str:
@@ -278,6 +283,7 @@ async def get_data():
                 "novel_lines": [],
                 "findings": [],
                 "novel_filename": "ファイル未選択",
+                "has_backup": False,
             }
         )
 
@@ -302,11 +308,14 @@ async def get_data():
                     status_code=500, detail=f"Failed to parse YAML: {str(e)}"
                 )
 
+    has_backup = os.path.exists(f"{NOVEL_PATH}.bak")
+
     return JSONResponse(
         content={
             "novel_lines": novel_lines,
             "findings": findings,
             "novel_filename": os.path.basename(NOVEL_PATH),
+            "has_backup": has_backup,
         }
     )
 
@@ -336,6 +345,69 @@ async def save_findings(payload: SaveFindingsRequest):
         raise HTTPException(status_code=500, detail=f"Failed to save YAML: {str(e)}")
 
 
+@app.post("/api/save_novel")
+async def save_novel(payload: SaveNovelRequest):
+    global NOVEL_PATH
+    if not NOVEL_PATH:
+        raise HTTPException(status_code=400, detail="No active novel file selected.")
+    try:
+        # Write back to novel file
+        with open(NOVEL_PATH, "w", encoding="utf-8") as f:
+            f.write(payload.content)
+        return {"status": "success", "message": "Novel saved successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save novel: {str(e)}")
+
+
+@app.post("/api/backup")
+async def create_backup():
+    global NOVEL_PATH, YAML_PATH
+    if not NOVEL_PATH:
+        raise HTTPException(status_code=400, detail="No active novel file selected.")
+    try:
+        if os.path.exists(NOVEL_PATH):
+            shutil.copy2(NOVEL_PATH, f"{NOVEL_PATH}.bak")
+        if YAML_PATH and os.path.exists(YAML_PATH):
+            shutil.copy2(YAML_PATH, f"{YAML_PATH}.bak")
+        return {"status": "success", "message": "Backup created successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create backup: {str(e)}")
+
+
+@app.post("/api/rollback")
+async def rollback_backup():
+    global NOVEL_PATH, YAML_PATH
+    if not NOVEL_PATH:
+        raise HTTPException(status_code=400, detail="No active novel file selected.")
+
+    novel_bak = f"{NOVEL_PATH}.bak"
+    yaml_bak = f"{YAML_PATH}.bak" if YAML_PATH else None
+
+    if not os.path.exists(novel_bak):
+        raise HTTPException(status_code=404, detail="Backup file not found. Nothing to rollback.")
+
+    try:
+        # Restore novel file
+        shutil.copy2(novel_bak, NOVEL_PATH)
+        # Restore YAML file if backup exists
+        if yaml_bak and os.path.exists(yaml_bak):
+            shutil.copy2(yaml_bak, YAML_PATH)
+        else:
+            if YAML_PATH and os.path.exists(YAML_PATH):
+                with open(YAML_PATH, encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                findings = data.get("findings", [])
+                for f in findings:
+                    f["apply_status"] = None
+                    f["apply_result"] = None
+                with open(YAML_PATH, "w", encoding="utf-8") as f:
+                    yaml.dump({"findings": findings}, f, allow_unicode=True, default_flow_style=False)
+
+        return {"status": "success", "message": "Rollback completed successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to rollback: {str(e)}")
+
+
 def shutdown_server():
     print("[INFO] Shutting down Review Editor server...")
     os.kill(os.getpid(), signal.SIGINT)
@@ -347,6 +419,12 @@ async def stream_apply():
     if not NOVEL_PATH or not YAML_PATH:
         raise HTTPException(status_code=400, detail="No active file selected.")
     try:
+        # Automatically create backup before applying changes
+        if os.path.exists(NOVEL_PATH):
+            shutil.copy2(NOVEL_PATH, f"{NOVEL_PATH}.bak")
+        if os.path.exists(YAML_PATH):
+            shutil.copy2(YAML_PATH, f"{YAML_PATH}.bak")
+
         parent_dir = os.path.dirname(NOVEL_PATH)
         script_path = os.path.join(os.path.dirname(__file__), "apply_findings.py")
         cmd = [

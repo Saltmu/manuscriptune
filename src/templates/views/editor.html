@@ -10,6 +10,7 @@
             <div class="stats-counter">
                 採用: <span id="accepted-count">0</span> / <span id="total-count">0</span> 件
             </div>
+            <button class="btn-secondary btn-sm" id="btn-rollback" onclick="confirmRollback()" style="display: none; background-color: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">↩️ 元に戻す</button>
             <button class="btn-primary btn-sm" onclick="confirmApply()">小説へ反映</button>
         </div>
     </div>
@@ -17,17 +18,24 @@
     <!-- Editor split layout -->
     <div class="editor-container">
         <!-- Left Panel: Novel Draft -->
-        <div class="panel novel-panel">
-            <div class="panel-header">
-                <h2 id="filename-display">01_formatted.txt</h2>
-                <div style="font-size: 0.75rem; color: var(--text-muted);">
-                    ※ 下線の行をクリックすると指摘に移動します
+        <div class="panel novel-panel" style="display: flex; flex-direction: column; height: 100%;">
+            <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2 id="filename-display" style="display: inline-block; margin-right: 8px;">01_formatted.txt</h2>
+                    <span id="edit-mode-badge" class="badge" style="display: none; background-color: rgba(245, 158, 11, 0.15); color: #fbbf24;">直接編集</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn-secondary btn-sm" id="btn-toggle-edit" onclick="toggleEditMode()" style="padding: 4px 8px; font-size: 0.75rem;">📝 直接編集</button>
+                    <button class="btn-primary btn-sm" id="btn-save-novel" onclick="saveNovel()" style="display: none; padding: 4px 8px; font-size: 0.75rem;">💾 保存</button>
                 </div>
             </div>
-            <div class="novel-content" id="novel-content">
-                <div style="text-align: center; color: var(--text-muted); padding-top: 60px;">
-                    ダッシュボードで小説を選択し、「校閲」を押してください。
+            <div class="novel-content-container" style="flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column;">
+                <div class="novel-content" id="novel-content" style="flex: 1; overflow-y: auto;">
+                    <div style="text-align: center; color: var(--text-muted); padding-top: 60px;">
+                        ダッシュボードで小説を選択し、「校閲」を押してください。
+                    </div>
                 </div>
+                <textarea id="novel-editor-textarea" style="display: none; flex: 1; width: 100%; height: 100%; resize: none; background-color: #1e293b; color: #f8fafc; border: 1px solid var(--border-color); padding: 12px; font-family: monospace; font-size: 0.95rem; line-height: 1.6; border-radius: 4px; box-sizing: border-box; outline: none;" placeholder="ここに本文が表示されます"></textarea>
             </div>
         </div>
 

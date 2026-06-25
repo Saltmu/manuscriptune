@@ -523,6 +523,11 @@ body.process-running #view-sync .card button {
     color: #f87171;
     border: 1px solid rgba(239, 68, 68, 0.3);
 }
+.badge-apply-pending {
+    background-color: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
 .apply-error-msg {
     margin-top: 8px;
     padding: 8px 12px;

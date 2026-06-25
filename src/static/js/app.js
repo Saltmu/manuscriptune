@@ -567,6 +567,18 @@ async function loadEditorData() {
         
         document.getElementById('filename-display').textContent = data.novel_filename;
         
+        // Show/hide rollback button based on backup existence
+        const rollbackBtn = document.getElementById('btn-rollback');
+        if (rollbackBtn) {
+            rollbackBtn.style.display = data.has_backup ? 'inline-block' : 'none';
+        }
+        
+        // If in edit mode, ensure textarea has the latest content
+        const textarea = document.getElementById('novel-editor-textarea');
+        if (textarea && textarea.style.display !== 'none') {
+            textarea.value = novelLines.join('\n');
+        }
+        
         renderNovel();
         renderFindings();
         updateStats();
@@ -687,15 +699,17 @@ function renderFindings() {
 
         let statusBadgeHtml = '';
         let errorMsgHtml = '';
-        if (f.apply_status === 'success') {
-            statusBadgeHtml = `<span class="badge badge-apply-success">反映成功</span>`;
+        if (f.apply_status === 'success' || f.apply_status === 'applied') {
+            statusBadgeHtml = `<span class="badge badge-apply-success">反映済み (applied)</span>`;
         } else if (f.apply_status === 'failed') {
-            statusBadgeHtml = `<span class="badge badge-apply-failed">反映失敗</span>`;
+            statusBadgeHtml = `<span class="badge badge-apply-failed">失敗 (failed)</span>`;
             errorMsgHtml = `
                 <div class="apply-error-msg">
                     <strong>反映失敗:</strong> ${f.apply_result || '原因不明のエラー'}
                 </div>
             `;
+        } else {
+            statusBadgeHtml = `<span class="badge badge-apply-pending">未反映 (pending)</span>`;
         }
 
         card.innerHTML = `
@@ -814,6 +828,131 @@ async function executeApply() {
             showToast('反映処理中にエラーが発生しました');
         }
     });
+}
+
+// ================= INLINE EDITOR & ROLLBACK LOGIC =================
+
+let isNovelEditMode = false;
+
+function toggleEditMode() {
+    const novelContent = document.getElementById('novel-content');
+    const textarea = document.getElementById('novel-editor-textarea');
+    const btnToggle = document.getElementById('btn-toggle-edit');
+    const btnSave = document.getElementById('btn-save-novel');
+    const editBadge = document.getElementById('edit-mode-badge');
+
+    if (!novelContent || !textarea) return;
+
+    isNovelEditMode = !isNovelEditMode;
+
+    if (isNovelEditMode) {
+        // Switch to edit mode
+        textarea.value = novelLines.join('\n');
+        novelContent.style.display = 'none';
+        textarea.style.display = 'block';
+        btnToggle.textContent = '❌ キャンセル';
+        btnToggle.className = 'btn-secondary btn-sm';
+        if (btnSave) btnSave.style.display = 'inline-block';
+        if (editBadge) editBadge.style.display = 'inline-block';
+    } else {
+        // Switch to preview mode
+        novelContent.style.display = 'block';
+        textarea.style.display = 'none';
+        btnToggle.textContent = '📝 直接編集';
+        btnToggle.className = 'btn-secondary btn-sm';
+        if (btnSave) btnSave.style.display = 'none';
+        if (editBadge) editBadge.style.display = 'none';
+    }
+}
+
+async function saveNovel() {
+    const textarea = document.getElementById('novel-editor-textarea');
+    const btnSave = document.getElementById('btn-save-novel');
+    const btnToggle = document.getElementById('btn-toggle-edit');
+
+    if (!textarea) return;
+
+    // Control loader and block inputs
+    if (btnSave) btnSave.disabled = true;
+    if (btnToggle) btnToggle.disabled = true;
+    textarea.disabled = true;
+
+    try {
+        const response = await fetch('/api/save_novel', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ content: textarea.value })
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === 'success') {
+            showToast('小説本文を保存しました');
+            // Exit edit mode and reload
+            isNovelEditMode = false;
+            
+            // Switch UI back
+            const novelContent = document.getElementById('novel-content');
+            const editBadge = document.getElementById('edit-mode-badge');
+            if (novelContent) novelContent.style.display = 'block';
+            textarea.style.display = 'none';
+            if (btnToggle) {
+                btnToggle.textContent = '📝 直接編集';
+                btnToggle.className = 'btn-secondary btn-sm';
+                btnToggle.disabled = false;
+            }
+            if (btnSave) {
+                btnSave.style.display = 'none';
+                btnSave.disabled = false;
+            }
+            if (editBadge) editBadge.style.display = 'none';
+            textarea.disabled = false;
+
+            await loadEditorData();
+        } else {
+            showToast('保存に失敗しました: ' + (data.detail || ''));
+            if (btnSave) btnSave.disabled = false;
+            if (btnToggle) btnToggle.disabled = false;
+            textarea.disabled = false;
+        }
+    } catch (err) {
+        console.error(err);
+        showToast('保存中に通信エラーが発生しました');
+        if (btnSave) btnSave.disabled = false;
+        if (btnToggle) btnToggle.disabled = false;
+        textarea.disabled = false;
+    }
+}
+
+function confirmRollback() {
+    if (confirm('本当に反映前のバックアップ状態に戻しますか？\n（現在の小説本文と指摘の反映ステータスが復元されます）')) {
+        executeRollback();
+    }
+}
+
+async function executeRollback() {
+    const rollbackBtn = document.getElementById('btn-rollback');
+    if (rollbackBtn) rollbackBtn.disabled = true;
+
+    try {
+        const response = await fetch('/api/rollback', {
+            method: 'POST'
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === 'success') {
+            showToast('バックアップから元に戻しました');
+            await loadEditorData();
+        } else {
+            showToast('元に戻す処理に失敗しました: ' + (data.detail || ''));
+        }
+    } catch (err) {
+        console.error(err);
+        showToast('通信エラーが発生しました');
+    } finally {
+        if (rollbackBtn) rollbackBtn.disabled = false;
+    }
 }
 
 function closeApplyProgressModal() {
