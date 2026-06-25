@@ -174,10 +174,19 @@ def main():
         print(f"Error: Directory '{output_dir}' does not exist.", file=sys.stderr)
         sys.exit(1)
 
-    formatted_txt_path = os.path.join(output_dir, "01_formatted.txt")
+    basename = os.path.basename(os.path.abspath(output_dir))
+    formatted_txt_path = os.path.join(output_dir, f"{basename}_formatted.txt")
     if not os.path.exists(formatted_txt_path):
-        print(f"Error: '01_formatted.txt' not found in {output_dir}.", file=sys.stderr)
-        sys.exit(1)
+        # Fallback to 01_formatted.txt just in case of transition
+        fallback_path = os.path.join(output_dir, "01_formatted.txt")
+        if os.path.exists(fallback_path):
+            formatted_txt_path = fallback_path
+        else:
+            print(
+                f"Error: '{basename}_formatted.txt' not found in {output_dir}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     target_text = read_file(formatted_txt_path)
 
@@ -224,12 +233,10 @@ def main():
 
     if not all_findings:
         print("No findings to merge. Writing empty integrated findings.")
-        integrated_yaml_path = os.path.join(output_dir, "00_integrated_findings.yaml")
+        integrated_yaml_path = os.path.join(output_dir, f"{basename}_findings.yaml")
         with open(integrated_yaml_path, "w", encoding="utf-8") as f:
             f.write("findings: []\n")
-        generate_markdown_report(
-            [], os.path.join(output_dir, "00_integrated_report.md")
-        )
+        generate_markdown_report([], os.path.join(output_dir, f"{basename}_report.md"))
         print("Done.")
         sys.exit(0)
 
@@ -259,7 +266,7 @@ def main():
         )
 
     # Write output
-    integrated_yaml_path = os.path.join(output_dir, "00_integrated_findings.yaml")
+    integrated_yaml_path = os.path.join(output_dir, f"{basename}_findings.yaml")
     with open(integrated_yaml_path, "w", encoding="utf-8") as f:
         f.write(merged_yaml_content + "\n")
     print(f"Saved integrated findings to {integrated_yaml_path}")
@@ -276,7 +283,7 @@ def main():
             "Warning: Could not parse merged YAML back for Markdown report generation."
         )
 
-    report_md_path = os.path.join(output_dir, "00_integrated_report.md")
+    report_md_path = os.path.join(output_dir, f"{basename}_report.md")
     generate_markdown_report(merged_findings_list, report_md_path)
     print(f"Saved Markdown report to {report_md_path}")
 
