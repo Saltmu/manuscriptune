@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import re
@@ -5,101 +6,25 @@ import sys
 
 from src.utils import project_config as writer_helper
 
-# A set of common Japanese words to ignore as search keywords (Stopwords)
-STOPWORDS = {
-    "こと",
-    "もの",
-    "とき",
-    "ため",
-    "これ",
-    "それ",
-    "あれ",
-    "どれ",
-    "ここ",
-    "そこ",
-    "あそこ",
-    "どこ",
-    "自分",
-    "彼ら",
-    "彼女",
-    "人間",
-    "世界",
-    "時間",
-    "瞬間",
-    "場所",
-    "方法",
-    "理由",
-    "結果",
-    "状態",
-    "部分",
-    "全体",
-    "空気",
-    "感覚",
-    "意識",
-    "存在",
-    "言葉",
-    "名前",
-    "表情",
-    "吐息",
-    "沈黙",
-    "視線",
-    "呼吸",
-    "関係",
-    "周囲",
-    "様子",
-    "最後",
-    "最初",
-    "実際",
-    "現実",
-    "可能",
-    "絶対",
-    "必要",
-    "十分",
-    "普通",
-    "特別",
-    "簡単",
-    "複雑",
-    "重要",
-    "基本",
-    "詳細",
-    "現在",
-    "過去",
-    "未来",
-    "日常",
-    "対照",
-    "構造",
-    "機能",
-    "特徴",
-    "定義",
-    "分類",
-    "性質",
-    "役割",
-    "要素",
-    "一部",
-    "左右",
-    "上下",
-    "前後",
-    "内外",
-    "中心",
-    "周辺",
-    "背景",
-    "目的",
-    "効果",
-    "影響",
-    "変化",
-    "問題",
-    "課題",
-    "解決",
-    "対応",
-    "準備",
-    "確認",
-    "判断",
-    "選択",
-    "行動",
-    "反応",
-    "表現",
-    "理解",
-}
+
+# Load stopwords from external resource file
+def _load_stopwords() -> set[str]:
+    stopwords_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "utils", "resources", "stopwords.json")
+    )
+    try:
+        with open(stopwords_path, encoding="utf-8") as f:
+            words = json.load(f)
+            return set(words)
+    except Exception as e:
+        print(
+            f"Warning: Failed to load stopwords from {stopwords_path}: {e}",
+            file=sys.stderr,
+        )
+        return set()
+
+
+STOPWORDS = _load_stopwords()
 
 
 def extract_entities_from_sources(sources_dir):
