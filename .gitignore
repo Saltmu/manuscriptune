@@ -31,3 +31,8 @@ index/
 Thumbs.db
 novels/
 novel_check_results/
+
+# Test and Coverage
+.coverage
+htmlcov/
+.pytest_cache/
