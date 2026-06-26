@@ -1,6 +1,6 @@
 ---
 name: "Show-Dont-Tell-Enhancer"
-description: "「説明」を「体験」に変え、読者の感情を揺さぶる描写を提案する"
+description: "「説明」を「体験」に変え、読者の感情を揺さぶる描写を提案する（単体アドホック深掘り用）"
 version: "1.0.0"
 category: "Novel-Editing"
 ---

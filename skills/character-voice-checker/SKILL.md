@@ -1,6 +1,6 @@
 ---
 name: "Character-Voice-Checker"
-description: "キャラクターの口調のブレと感情導線の自然さをチェックする"
+description: "キャラクターの口調のブレと感情導線の自然さをチェックする（単体アドホック深掘り用）"
 version: "1.0.0"
 category: "Novel-Editing"
 ---

@@ -1,6 +1,6 @@
 ---
 name: "Rhythm-Vocabulary-Optimizer"
-description: "文章のリズムと語彙を最適化し、読みやすさと表現の豊かさを向上させる"
+description: "文章のリズムと語彙を最適化し、読みやすさと表現の豊かさを向上させる（単体アドホック深掘り用）"
 version: "1.0.0"
 category: "Novel-Editing"
 ---

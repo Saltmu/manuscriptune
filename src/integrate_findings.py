@@ -5,15 +5,10 @@ import sys
 
 import yaml
 
+from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import FindingsIntegrationInput, FindingsIntegrationTask
-
-
-def read_file(filepath):
-    if not filepath or not os.path.exists(filepath):
-        return ""
-    with open(filepath, encoding="utf-8") as f:
-        return f.read()
+from src.utils.file_io import read_file
 
 
 def parse_yaml_file(filepath):
@@ -169,17 +164,15 @@ def integrate_findings_in_dir(output_dir, model):
         return False
 
     basename = os.path.basename(os.path.abspath(output_dir))
-    formatted_txt_path = os.path.join(output_dir, f"{basename}_formatted.txt")
+    formatted_txt_path = project_paths.resolve_formatted_draft_path(
+        output_dir, basename
+    )
     if not os.path.exists(formatted_txt_path):
-        fallback_path = os.path.join(output_dir, "01_formatted.txt")
-        if os.path.exists(fallback_path):
-            formatted_txt_path = fallback_path
-        else:
-            print(
-                f"Error: '{basename}_formatted.txt' not found in {output_dir}.",
-                file=sys.stderr,
-            )
-            return False
+        print(
+            f"Error: '{basename}_formatted.txt' not found in {output_dir}.",
+            file=sys.stderr,
+        )
+        return False
 
     target_text = read_file(formatted_txt_path)
 
@@ -188,10 +181,14 @@ def integrate_findings_in_dir(output_dir, model):
 
     if not all_findings:
         print("No findings to merge. Writing empty integrated findings.")
-        integrated_yaml_path = os.path.join(output_dir, f"{basename}_findings.yaml")
+        integrated_yaml_path = project_paths.get_findings_yaml_path(
+            output_dir, basename
+        )
         with open(integrated_yaml_path, "w", encoding="utf-8") as f:
             f.write("findings: []\n")
-        generate_markdown_report([], os.path.join(output_dir, f"{basename}_report.md"))
+        generate_markdown_report(
+            [], project_paths.get_report_md_path(output_dir, basename)
+        )
         print("Done.")
         return True
 
@@ -210,7 +207,7 @@ def integrate_findings_in_dir(output_dir, model):
         merged_yaml_content = _fallback_merge(all_findings)
 
     # Write output
-    integrated_yaml_path = os.path.join(output_dir, f"{basename}_findings.yaml")
+    integrated_yaml_path = project_paths.get_findings_yaml_path(output_dir, basename)
     with open(integrated_yaml_path, "w", encoding="utf-8") as f:
         f.write(merged_yaml_content + "\n")
     print(f"Saved integrated findings to {integrated_yaml_path}")

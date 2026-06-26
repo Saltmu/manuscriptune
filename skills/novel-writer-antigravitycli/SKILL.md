@@ -26,13 +26,13 @@ category: "Novel-Writing"
 このスキルはチャット上のAIに直接執筆させるのではなく、専用のPythonスクリプト `writer_cli.py` を通じて Antigravity CLI（`agy`）を呼び出し、モデル（標準では `Gemini 3.5 Flash (High)` など）に執筆させます。
 
 ## エージェントへの依頼
-「第1章第1話をAntigravity CLIを使って執筆して」や「第2幕第3話をnovel_writer_antigravitycliで書いて」と依頼してください。
+「第1章第1話をAntigravity CLIを使って執筆して」や「第2幕第3話をnovel-writer-antigravitycliで書いて」と依頼してください。
 
 エージェントは以下のコマンドを実行します。
 
 ```bash
 # プロジェクトルートディレクトリ(novel_tools)で実行します
-poetry run python skills/novel_writer_antigravitycli/writer_cli.py --episode "第1話"
+poetry run python skills/novel-writer-antigravitycli/writer_cli.py --episode "第1話"
 ```
 
 ## 出力

@@ -2,28 +2,11 @@ import io
 import os
 import time
 
-import yaml
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-
-def load_config(config_path):
-    if not os.path.exists(config_path):
-        return None
-    with open(config_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def get_gdrive_config(config):
-    if not config or "skills" not in config:
-        return None, None
-    for skill in config["skills"]:
-        if "sources" in skill:
-            for source in skill["sources"]:
-                if source.get("type") == "google-drive":
-                    return source.get("folder_id"), source.get("auth_file")
-    return None, None
+from src.utils import project_config
 
 
 def _check_lock_and_cache(cache_file: str, lock_file: str, cache_duration: int) -> bool:
@@ -89,8 +72,8 @@ def main():
     if not _check_lock_and_cache(CACHE_FILE, LOCK_FILE, CACHE_DURATION):
         return
 
-    config = load_config(config_path)
-    folder_id, creds_path_rel = get_gdrive_config(config)
+    config = project_config.load_project_config(config_path)
+    folder_id, creds_path_rel = project_config.get_gdrive_config(config)
 
     if not folder_id or not creds_path_rel:
         print("[ERROR] Could not find Google Drive configuration in antigravity.yaml")

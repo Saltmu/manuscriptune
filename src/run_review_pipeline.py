@@ -7,8 +7,10 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import ReviewSkillInput, ReviewSkillTask
+from src.utils.file_io import read_file
 
 
 def archive_previous_review(output_dir, basename):
@@ -17,7 +19,7 @@ def archive_previous_review(output_dir, basename):
     and [basename]_report.md into a history directory.
     """
     history_dir = os.path.join(output_dir, "history")
-    findings_file = os.path.join(output_dir, f"{basename}_findings.yaml")
+    findings_file = project_paths.get_findings_yaml_path(output_dir, basename)
 
     if not os.path.exists(findings_file):
         return
@@ -60,13 +62,6 @@ def archive_previous_review(output_dir, basename):
         src_path = os.path.join(output_dir, src_name)
         if os.path.exists(src_path):
             os.remove(src_path)
-
-
-def read_file(filepath):
-    if not filepath or not os.path.exists(filepath):
-        return ""
-    with open(filepath, encoding="utf-8") as f:
-        return f.read()
 
 
 def run_formatter(input_file, output_file):
@@ -319,7 +314,7 @@ def main():
     print(f"Model: {args.model}\n")
 
     # Step 1: Run Formatter (or Skip if it's a re-review)
-    formatted_draft = os.path.join(output_dir, f"{basename}_formatted.txt")
+    formatted_draft = project_paths.get_formatted_draft_path(output_dir, basename)
     _run_step_format(target_path, formatted_draft, output_dir, basename)
 
     # Step 2: Run Context Filter

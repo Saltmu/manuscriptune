@@ -21,7 +21,7 @@ novel_tools/
 
 - **[Novel-Writer](file:///home/sshioyama/workspace/novel_tools/skills/novel-writer/)** [`novel-writer`]
   「重天の調律師」シリーズの専属作家スキル。設定資料・キャラクター概要・プロットに基づき、執筆ポリシーを厳守して小説を生成します。章単位の執筆指示を受け、エピソードごとに執筆して `novels/` フォルダに保存します。
-- **[Novel-Writer-AntigravityCLI](file:///home/sshioyama/workspace/novel_tools/skills/novel_writer_antigravitycli/)** [`novel_writer_antigravitycli`]
+- **[Novel-Writer-AntigravityCLI](file:///home/sshioyama/workspace/novel_tools/skills/novel-writer-antigravitycli/)** [`novel-writer-antigravitycli`]
   Antigravity CLIツール（agy）経由でローカルからAPIを呼び出し、コンテキスト制限を回避しつつ執筆を行う、CLI環境に最適化された小説執筆スキル。
 - **[Novel-Formatter](file:///home/sshioyama/workspace/novel_tools/skills/novel-formatter/)** [`novel-formatter`]
   執筆された小説テキストを、ウェブ小説（カクヨム、なろう等）向けに読みやすく整形（ルビ、改行、三点リーダーなど）します。機械的な前処理とAIによる文脈的調整の2段階で処理します。
@@ -34,23 +34,23 @@ novel_tools/
 - **[Style-Expression-Reviewer](file:///home/sshioyama/workspace/novel_tools/skills/style-expression-reviewer/)** [`style-expression-reviewer`]
   描写力（Show, Don't Tell）、文章のリズム・語彙、キャラクターの口調、構成（ペーシング）を統合的に検証します（文芸表現エージェントが使用）。
 
-### 3. 個別検証・改善（Domain Specific Skills）
-これらは、より専門的な校閲・推敲観点に特化した子（個別）スキルです。統合レビュースキルが内部で参照する専門知識としての役割を持ち、またエージェントと直接チャットで特定の側面に絞った指示を出す際にも使用されます。
+### 3. 個別検証・改善（Domain Specific Skills / 単体アドホック深掘り用）
+これらは、より専門的な校閲・推敲観点に特化した子（個別）スキルです。統合レビュースキルが内部で参照する専門知識としての役割を持ち、またエージェントと直接チャットで特定の側面に絞った指示を出す際（単体アドホック検証）に使用されます。※通常のレビューパイプラインでは親（統合）スキルが観点を包含しているため直接は使用されません。
 
 - **[World-Logic-Guard](file:///home/sshioyama/workspace/novel_tools/skills/world-logic-guard/)** [`world-logic-guard`]
-  独自の世界観設定（物理法則、地理、エネルギー体系Nephesなど）との論理的整合性を検証します。フラットアース地理に基づく物理法則への適合などをチェックします。
+  【単体アドホック深掘り用】 独自の世界観設定（物理法則、地理、エネルギー体系Nephesなど）との論理的整合性を検証します。フラットアース地理に基づく物理法則への適合などをチェックします。
 - **[Consistency-Checker](file:///home/sshioyama/workspace/novel_tools/skills/consistency-checker/)** [`consistency-checker`]
-  執筆中の最新シーンと、過去のプロットやキャラクター設定（一人称、外見、属性、タイムライン）との矛盾を検出します。
+  【単体アドホック深掘り用】 執筆中の最新シーンと、過去のプロットやキャラクター設定（一人称、外見、属性、タイムライン）との矛盾を検出します。
 - **[Foreshadowing-Tracker](file:///home/sshioyama/workspace/novel_tools/skills/foreshadowing-tracker/)** [`foreshadowing-tracker`]
-  伏線と情報開示のタイミングを追跡し、後出し設定（Deus ex machina）を防いでカタルシスを最大化します。
+  【単体アドホック深掘り用】 伏線と情報開示のタイミングを追跡し、後出し設定（Deus ex machina）を防いでカタルシスを最大化します。
 - **[Show-Dont-Tell-Enhancer](file:///home/sshioyama/workspace/novel_tools/skills/show-dont-tell-enhancer/)** [`show-dont-tell-enhancer`]
-  感情や状況を単に説明（Tell）している箇所を検出し、五感や具体的な行動を用いた描写（Show）へ変換する提案をします。
+  【単体アドホック深掘り用】 感情や状況を単に説明（Tell）している箇所を検出し、五感や具体的な行動を用いた描写（Show）へ変換する提案をします。
 - **[Rhythm-Vocabulary-Optimizer](file:///home/sshioyama/workspace/novel_tools/skills/rhythm-vocabulary-optimizer/)** [`rhythm-vocabulary-optimizer`]
-  文末重複の解消、過剰な接続詞の多用防止、類語の提案などを行い、文章のリズムと語彙力を高めます。
+  【単体アドホック深掘り用】 文末重複の解消、過剰な接続詞の多用防止、類語の提案などを行い、文章のリズムと語彙力を高めます。
 - **[Character-Voice-Checker](file:///home/sshioyama/workspace/novel_tools/skills/character-voice-checker/)** [`character-voice-checker`]
-  キャラクターの口調のブレ（ボイスの一貫性）や、シーンをまたぐ感情変化（心理導線）の自然さをチェックします。
+  【単体アドホック深掘り用】 キャラクターの口調のブレ（ボイスの一貫性）や、シーンをまたぐ感情変化（心理導線）の自然さをチェックします。
 - **[Plot-Pacing-Analyzer](file:///home/sshioyama/workspace/novel_tools/skills/plot-pacing-analyzer/)** [`plot-pacing-analyzer`]
-  プロットと本文を比較し、物語の進行速度、設定説明（ロアダンプ）による進行停止、展開の駆け足などのペース配分を分析します。
+  【単体アドホック深掘り用】 プロットと本文を比較し、物語の進行速度、設定説明（ロアダンプ）による進行停止、展開の駆け足などのペース配分を分析します。
 
 ## WebUI ポータル「Novel Studio」の利用
 

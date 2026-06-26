@@ -1,26 +1,9 @@
 import os
 
-import yaml
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-
-def load_config(config_path="antigravity.yaml"):
-    if not os.path.exists(config_path):
-        return None
-    with open(config_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def get_gdrive_config(config):
-    if not config or "skills" not in config:
-        return None, None
-    for skill in config["skills"]:
-        if "sources" in skill:
-            for source in skill["sources"]:
-                if source.get("type") == "google-drive":
-                    return source.get("folder_id"), source.get("auth_file")
-    return None, None
+from src.utils import project_config
 
 
 def main():
@@ -28,8 +11,8 @@ def main():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config_path = os.path.join(root_dir, "antigravity.yaml")
 
-    config = load_config(config_path)
-    folder_id, creds_path_rel = get_gdrive_config(config)
+    config = project_config.load_project_config(config_path)
+    folder_id, creds_path_rel = project_config.get_gdrive_config(config)
 
     if not folder_id or not creds_path_rel:
         print("[ERROR] Could not find Google Drive configuration in antigravity.yaml")

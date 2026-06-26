@@ -1,6 +1,6 @@
 ---
 name: "Consistency-Checker"
-description: "執筆中の最新シーンと、過去のプロット・キャラ設定との矛盾を検出する"
+description: "執筆中の最新シーンと、過去のプロット・キャラ設定との矛盾を検出する（単体アドホック深掘り用）"
 version: "1.0.0"
 category: "Novel-Editing"
 ---

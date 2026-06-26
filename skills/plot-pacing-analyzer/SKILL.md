@@ -1,6 +1,6 @@
 ---
 name: "Plot-Pacing-Analyzer"
-description: "プロットと本文を比較し、物語の進行速度や文字数の比重を分析する"
+description: "プロットと本文を比較し、物語の進行速度や文字数の比重を分析する（単体アドホック深掘り用）"
 version: "1.0.0"
 category: "Novel-Editing"
 ---

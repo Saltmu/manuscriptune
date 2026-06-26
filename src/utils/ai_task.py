@@ -5,16 +5,10 @@ from typing import Any, Generic, TypeVar
 
 from src.utils import project_config as writer_helper
 from src.utils.ai_client import AgyClient
+from src.utils.file_io import read_file
 
 InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
-
-
-def _read_file(filepath: str | None) -> str:
-    if not filepath or not os.path.exists(filepath):
-        return ""
-    with open(filepath, encoding="utf-8") as f:
-        return f.read()
 
 
 class AgyTask(ABC, Generic[InputT, OutputT]):
@@ -82,7 +76,7 @@ class ReviewSkillTask(AgyTask[ReviewSkillInput, str]):
                 f"SKILL.md not found for skill '{skill_name}' at {skill_md_path}"
             )
 
-        skill_instruction = _read_file(skill_md_path)
+        skill_instruction = read_file(skill_md_path)
         context_text = ""
 
         def get_latest_file(pattern_key: str, default_pattern: str) -> str | None:
@@ -93,25 +87,25 @@ class ReviewSkillTask(AgyTask[ReviewSkillInput, str]):
         if skill_name == "logic-consistency-reviewer":
             filtered_context_path = os.path.join(output_dir, "01_filtered_context.txt")
             if os.path.exists(filtered_context_path):
-                context_text += f"\n【フィルタリング済み設定資料】\n{_read_file(filtered_context_path)}\n"
+                context_text += f"\n【フィルタリング済み設定資料】\n{read_file(filtered_context_path)}\n"
             else:
                 setting_file = get_latest_file("settings", "*設定資料集*.txt")
                 char_file = get_latest_file("character", "*キャラクター概要*.txt")
                 plot_file = get_latest_file("plot", "*プロット*.txt")
                 if setting_file:
-                    context_text += f"\n【設定資料集】\n{_read_file(setting_file)}\n"
+                    context_text += f"\n【設定資料集】\n{read_file(setting_file)}\n"
                 if char_file:
-                    context_text += f"\n【キャラクター概要】\n{_read_file(char_file)}\n"
+                    context_text += f"\n【キャラクター概要】\n{read_file(char_file)}\n"
                 if plot_file:
-                    context_text += f"\n【プロット】\n{_read_file(plot_file)}\n"
+                    context_text += f"\n【プロット】\n{read_file(plot_file)}\n"
 
         elif skill_name == "style-expression-reviewer":
             char_file = get_latest_file("character", "*キャラクター概要*.txt")
             policy_file = get_latest_file("policy_global", "*執筆ポリシー_全体*.txt")
             if char_file:
-                context_text += f"\n【キャラクター概要】\n{_read_file(char_file)}\n"
+                context_text += f"\n【キャラクター概要】\n{read_file(char_file)}\n"
             if policy_file:
-                context_text += f"\n【執筆ポリシー】\n{_read_file(policy_file)}\n"
+                context_text += f"\n【執筆ポリシー】\n{read_file(policy_file)}\n"
 
         prompt = f"""{skill_instruction}
 

@@ -44,10 +44,9 @@ def test_review_skill_task_prompt_and_postprocess(tmp_path, mock_client):
 
     task = ReviewSkillTask(client=mock_client)
 
-    # Use patch to redirect SKILL.md reading to the temporary file
     with (
         patch("os.path.exists", mock_exists),
-        patch("src.utils.ai_task._read_file", return_value="Dummy Instruction"),
+        patch("src.utils.ai_task.read_file", return_value="Dummy Instruction"),
     ):
         prompt = task.render_prompt(input_data)
         assert "Dummy Instruction" in prompt

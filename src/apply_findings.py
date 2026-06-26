@@ -5,15 +5,10 @@ import sys
 
 import yaml
 
+from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import BlockReplacementInput, BlockReplacementTask
-
-
-def read_file(filepath):
-    if not filepath or not os.path.exists(filepath):
-        return ""
-    with open(filepath, encoding="utf-8") as f:
-        return f.read()
+from src.utils.file_io import read_file
 
 
 def write_file(filepath, content):
@@ -209,18 +204,10 @@ def _validate_output_dir(output_dir: str) -> None:
 
 def _load_inputs(output_dir: str) -> tuple[str, str, list[str], list[dict], str]:
     basename = os.path.basename(os.path.abspath(output_dir))
-    formatted_txt_path = os.path.join(output_dir, f"{basename}_formatted.txt")
-    findings_yaml_path = os.path.join(output_dir, f"{basename}_findings.yaml")
-
-    if not os.path.exists(formatted_txt_path):
-        fallback_txt = os.path.join(output_dir, "01_formatted.txt")
-        if os.path.exists(fallback_txt):
-            formatted_txt_path = fallback_txt
-
-    if not os.path.exists(findings_yaml_path):
-        fallback_yaml = os.path.join(output_dir, "00_integrated_findings.yaml")
-        if os.path.exists(fallback_yaml):
-            findings_yaml_path = fallback_yaml
+    formatted_txt_path = project_paths.resolve_formatted_draft_path(
+        output_dir, basename
+    )
+    findings_yaml_path = project_paths.resolve_findings_yaml_path(output_dir, basename)
 
     if not os.path.exists(formatted_txt_path):
         print(f"Error: '{formatted_txt_path}' not found.", file=sys.stderr)

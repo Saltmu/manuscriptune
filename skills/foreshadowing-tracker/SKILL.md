@@ -1,6 +1,6 @@
 ---
 name: "Foreshadowing-Tracker"
-description: "伏線と情報開示のタイミングを追跡し、カタルシスを最大化する"
+description: "伏線と情報開示のタイミングを追跡し、カタルシスを最大化する（単体アドホック深掘り用）"
 version: "1.0.0"
 category: "Novel-Editing"
 ---

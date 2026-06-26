@@ -1,8 +1,8 @@
 ---
 name: "World-Logic-Guard"
-description: "独自の世界観設定（物理法則、地理、エネルギー体系）との論理的整合性を検証する"
+description: "独自の世界観設定（物理法則、地理、エネルギー体系）との論理的整合性を検証する（単体アドホック深掘り用）"
 version: "1.0.0"
-category: "Novel-WorldBuilding"
+category: "Novel-Editing"
 ---
 
 # 役割
