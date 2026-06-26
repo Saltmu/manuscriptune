@@ -1,12 +1,18 @@
-from unittest.mock import patch
+import builtins
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 
 from src.apply_findings import (
+    _determine_accepted_findings,
+    _interactive_choice,
+    _save_outputs_and_print_summary,
     extract_suggestion_candidate,
+    find_target_line,
     main,
     parse_line_number,
+    query_llm_for_block_replacement,
 )
 
 
@@ -31,7 +37,6 @@ def test_extract_suggestion_candidate():
 
 
 def test_main_block_merging_auto_fallback(tmp_path):
-    # テスト用のテキストファイル作成
     formatted_txt_content = (
         "第１章　重天の調べ\n"
         "少年は悲しげな顔をして佇んでいた。\n"
@@ -40,8 +45,6 @@ def test_main_block_merging_auto_fallback(tmp_path):
     formatted_txt_path = tmp_path / "01_formatted.txt"
     formatted_txt_path.write_text(formatted_txt_content, encoding="utf-8")
 
-    # テスト用の指摘YAML作成
-    # 隣接行に2つの指摘を配置して、同じブロックとしてマージされるかを検証
     findings_data = {
         "findings": [
             {
@@ -64,18 +67,14 @@ def test_main_block_merging_auto_fallback(tmp_path):
     with open(findings_yaml_path, "w", encoding="utf-8") as f:
         yaml.dump(findings_data, f, allow_unicode=True, default_flow_style=False)
 
-    # コマンドライン引数をシミュレートして main を呼び出す
-    # --auto --no-llm を指定して、LLMなしで自動適用
     test_args = ["apply_findings.py", "--dir", str(tmp_path), "--auto", "--no-llm"]
     with patch("sys.argv", test_args):
         main()
 
-    # 小説テキストが正しく更新されたか検証
     updated_txt = formatted_txt_path.read_text(encoding="utf-8")
     assert "第１章　重天の調律" in updated_txt
     assert "少年は憂いを帯びた表情をして佇んでいた。" in updated_txt
 
-    # 指摘YAMLが正しく更新されたか検証
     with open(findings_yaml_path, encoding="utf-8") as f:
         updated_yaml = yaml.safe_load(f)
 
@@ -117,8 +116,6 @@ def test_main_block_merging_auto_llm(tmp_path):
     with open(findings_yaml_path, "w", encoding="utf-8") as f:
         yaml.dump(findings_data, f, allow_unicode=True, default_flow_style=False)
 
-    # LLMのレスポンスをモック
-    # コンテキスト全体を書き換えた結果を返す
     llm_output = (
         "第１章　重天の調律\n"
         "少年は憂いを帯びた表情をして佇んでいた。\n"
@@ -139,12 +136,10 @@ def test_main_block_merging_auto_llm(tmp_path):
         assert args[1][0]["id"] == "INT-001"
         assert args[1][1]["id"] == "INT-002"
 
-    # 小説テキストが正しく更新されたか検証
     updated_txt = formatted_txt_path.read_text(encoding="utf-8")
     assert "第１章　重天の調律" in updated_txt
     assert "少年は憂いを帯びた表情をして佇んでいた。" in updated_txt
 
-    # 指摘YAMLが正しく更新されたか検証
     with open(findings_yaml_path, encoding="utf-8") as f:
         updated_yaml = yaml.safe_load(f)
 
@@ -156,7 +151,6 @@ def test_main_block_merging_auto_llm(tmp_path):
 
 
 def test_main_prevents_writing_to_sources(tmp_path):
-    # パス名に "data/sources" が含まれるような tmp_path のサブディレクトリを作る
     sources_dir = tmp_path / "data" / "sources" / "volume1"
     sources_dir.mkdir(parents=True, exist_ok=True)
 
@@ -166,11 +160,123 @@ def test_main_prevents_writing_to_sources(tmp_path):
     findings_yaml_path = sources_dir / "volume1_findings.yaml"
     findings_yaml_path.write_text("findings: []", encoding="utf-8")
 
-    # コマンドライン引数をシミュレートして main を呼び出す
     test_args = ["apply_findings.py", "--dir", str(sources_dir), "--auto"]
     with patch("sys.argv", test_args):
         with pytest.raises(SystemExit) as excinfo:
             main()
 
-        # 終了ステータスが 1 であることを検証
         assert excinfo.value.code == 1
+
+
+# --- 新規テスト: 各種分岐の網羅 ---
+
+
+def test_find_target_line_fallback_scan():
+    text_lines = ["line1\n", "target text here\n", "line3\n"]
+    finding = {"original": "target text here", "location": "15行目"}
+    assert find_target_line(text_lines, finding) == 2
+
+
+def test_find_target_line_not_found():
+    text_lines = ["line1\n", "line2\n"]
+    finding = {"original": "not found", "location": "1行目"}
+    assert find_target_line(text_lines, finding) is None
+
+
+def test_find_target_line_empty_original():
+    text_lines = ["line1\n"]
+    finding = {"original": "", "location": "1"}
+    assert find_target_line(text_lines, finding) is None
+
+
+def test_query_llm_for_block_replacement_generic_exception():
+    mock_task = MagicMock()
+    mock_task.execute.side_effect = Exception("Generic LLM failure")
+
+    with patch("src.apply_findings.BlockReplacementTask", return_value=mock_task):
+        res = query_llm_for_block_replacement(["line1"], [], "model")
+        assert res is None
+
+
+def test_interactive_choice_edit():
+    finding = {"id": "INT-001", "suggestion": "「元の文」を「修正後」に。"}
+    with patch("builtins.input", side_effect=["e", "修正後"]):
+        choice = _interactive_choice(finding)
+        assert choice == "e"
+        assert finding["accepted"] == "y"
+        assert finding["suggestion"] == "「修正後」に修正してください。"
+
+
+def test_interactive_choice_no():
+    finding = {"id": "INT-001", "suggestion": "提案", "accepted": None}
+    with patch("builtins.input", return_value="n"):
+        choice = _interactive_choice(finding)
+        assert choice == "n"
+        assert finding["accepted"] is None
+
+
+def test_determine_accepted_findings_target_not_found():
+    findings = [
+        {"id": "INT-001", "accepted": "y", "original": "not found", "location": "1"}
+    ]
+    text_lines = ["line1"]
+
+    args = MagicMock()
+    args.accept_ids = None
+    args.auto = True
+
+    active = _determine_accepted_findings(findings, text_lines, args)
+    assert len(active) == 0
+    assert findings[0]["apply_status"] == "failed"
+
+
+def test_main_empty_findings(tmp_path):
+    formatted_txt_path = tmp_path / "01_formatted.txt"
+    formatted_txt_path.write_text("content", encoding="utf-8")
+
+    findings_yaml_path = tmp_path / "00_integrated_findings.yaml"
+    findings_yaml_path.write_text("findings: []", encoding="utf-8")
+
+    test_args = ["apply_findings.py", "--dir", str(tmp_path), "--auto"]
+    with patch("sys.argv", test_args):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+
+def test_main_default_to_interactive(tmp_path):
+    formatted_txt_path = tmp_path / "01_formatted.txt"
+    formatted_txt_path.write_text("content", encoding="utf-8")
+
+    findings_yaml_path = tmp_path / "00_integrated_findings.yaml"
+    findings_yaml_path.write_text(
+        "findings:\n  - id: INT-001\n    original: content", encoding="utf-8"
+    )
+
+    test_args = ["apply_findings.py", "--dir", str(tmp_path)]
+    with (
+        patch("sys.argv", test_args),
+        patch(
+            "src.apply_findings._determine_accepted_findings", return_value=[]
+        ) as mock_determine,
+        patch("src.apply_findings._save_outputs_and_print_summary"),
+    ):
+        main()
+        mock_determine.assert_called_once()
+        args = mock_determine.call_args[0][2]
+        assert args.interactive is True
+
+
+def test_save_outputs_yaml_exception(tmp_path):
+    stats = (0, 0, 0)
+    real_open = builtins.open
+
+    def mock_open(file, *args, **kwargs):
+        if "dummy.yaml" in str(file):
+            raise Exception("YAML write failed")
+        return real_open(tmp_path / "dummy.txt", *args, **kwargs)
+
+    with patch("builtins.open", mock_open):
+        _save_outputs_and_print_summary(
+            str(tmp_path / "dummy.txt"), "dummy.yaml", [], [], stats
+        )

@@ -1,14 +1,21 @@
+import os
+import signal
+import tempfile
+from unittest.mock import patch
+
+import pytest
+import yaml
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from src.review_server import app
+from src.routes.api import WriteParams
+from src.services import novel_service
 
-client = TestClient(app)
+client = TestClient(app, raise_server_exceptions=False)
 
 
 def test_get_index():
-    # Test index page rendering (FastAPI returns index.html)
-    # The index page will look for templates and components.
-    # If the index.html template and included files exist, it should succeed.
     response = client.get("/")
     assert response.status_code == 200
     assert "html" in response.headers["content-type"]
@@ -23,20 +30,15 @@ def test_api_config():
 
 
 def test_list_available_models():
-    # Since agy models might or might not be installed, the server has a fallback
     response = client.get("/api/models")
     assert response.status_code == 200
     data = response.json()
     assert "models" in data
     assert len(data["models"]) > 0
-    # Fallback or active models should contain Gemini model types
     assert any("Gemini" in m for m in data["models"])
 
 
 def test_save_novel():
-    import os
-    import tempfile
-
     os.makedirs("novels", exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:
         tmp.write(b"Original Content")
@@ -59,9 +61,6 @@ def test_save_novel():
 
 
 def test_backup_and_rollback():
-    import os
-    import tempfile
-
     os.makedirs("novels", exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:
         tmp.write(b"Original content for backup")
@@ -108,9 +107,6 @@ def test_sync_status():
 
 
 def test_preview_novel():
-    import os
-    import tempfile
-
     os.makedirs("novels", exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:
         tmp.write(b"Test preview content")
@@ -133,9 +129,6 @@ def test_preview_novel():
 
 
 def test_select_file():
-    import os
-    import tempfile
-
     os.makedirs("novels", exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:
         tmp.write(b"content")
@@ -155,9 +148,6 @@ def test_select_file():
 
 
 def test_get_data():
-    import os
-    import tempfile
-
     os.makedirs("novels", exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:
         tmp.write(b"Line 1\nLine 2")
@@ -181,3 +171,355 @@ def test_get_data():
     finally:
         if os.path.exists(tmp_name):
             os.remove(tmp_name)
+
+
+# --- 新規テスト: services/novel_service.py ---
+
+
+def test_novel_service_resolve_paths_empty():
+    with pytest.raises(Exception) as excinfo:
+        novel_service.resolve_paths("")
+    assert excinfo.value.status_code == 400
+
+
+def test_novel_service_render_html_template_not_found():
+    with pytest.raises(FileNotFoundError):
+        novel_service.render_html_template("non_existent_template.html")
+
+
+def test_novel_service_stream_process_output():
+    res = novel_service.stream_process_output(["echo", "hello"])
+    assert isinstance(res, StreamingResponse)
+    assert res.media_type == "text/event-stream"
+
+
+def test_novel_service_rollback_backup_not_found():
+    with pytest.raises(Exception) as excinfo:
+        novel_service.rollback_backup("non_existent.txt", "non_existent.yaml")
+    assert excinfo.value.status_code == 404
+
+
+def test_novel_service_rollback_backup_yaml_only(tmp_path):
+    novel_path = tmp_path / "novel.txt"
+    yaml_path = tmp_path / "novel_findings.yaml"
+    novel_bak = tmp_path / "novel.txt.bak"
+
+    novel_bak.write_text("backup text", encoding="utf-8")
+    yaml_path.write_text(
+        "findings:\n  - id: INT-001\n    apply_status: success\n    apply_result: done",
+        encoding="utf-8",
+    )
+
+    res = novel_service.rollback_backup(str(novel_path), str(yaml_path))
+    assert res["status"] == "success"
+
+    with open(yaml_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+        assert data["findings"][0]["apply_status"] is None
+        assert data["findings"][0]["apply_result"] is None
+
+
+def test_novel_service_rollback_backup_exception(tmp_path):
+    novel_path = tmp_path / "exists.txt"
+    yaml_path = tmp_path / "exists.yaml"
+    novel_bak = tmp_path / "exists.txt.bak"
+    novel_bak.touch()
+
+    with patch("shutil.copy2", side_effect=Exception("Permission denied")):
+        with pytest.raises(Exception) as excinfo:
+            novel_service.rollback_backup(str(novel_path), str(yaml_path))
+        assert excinfo.value.status_code == 500
+
+
+def test_novel_service_build_writer_cmd():
+    params = WriteParams(
+        episode="1",
+        novel_title="Title",
+        policy_global="global.txt",
+        policy_chapter="chapter.txt",
+        character="char.txt",
+        plot="plot.txt",
+        model="model-name",
+        step_by_step=True,
+        self_check=True,
+    )
+    cmd = novel_service.build_writer_cmd(params)
+    assert "--episode" in cmd
+    assert "1" in cmd
+    assert "--title" in cmd
+    assert "Title" in cmd
+    assert "--policy-global" in cmd
+    assert "data/sources/global.txt" in cmd
+    assert "--policy-chapter" in cmd
+    assert "data/sources/chapter.txt" in cmd
+    assert "--character" in cmd
+    assert "data/sources/char.txt" in cmd
+    assert "--plot-file" in cmd
+    assert "data/sources/plot.txt" in cmd
+    assert "--step-by-step" in cmd
+    assert "--self-check" in cmd
+    assert "model-name" in cmd
+
+
+def test_novel_service_shutdown_server():
+    with patch("os.kill") as mock_kill:
+        novel_service.shutdown_server()
+        mock_kill.assert_called_once_with(os.getpid(), signal.SIGINT)
+
+
+# --- 新規テスト: routes/api.py ---
+
+
+def test_routes_api_save_novel_guardrail():
+    with patch(
+        "src.services.novel_service.resolve_paths",
+        return_value=("data/sources/some_source.txt", "some.yaml"),
+    ):
+        response = client.post(
+            "/api/save_novel",
+            json={"novel_name": "some_source.txt", "content": "Updated Content"},
+        )
+        assert response.status_code == 403
+        assert "strictly prohibited" in response.json()["detail"]
+
+
+def test_routes_api_save_novel_exception():
+    with (
+        patch(
+            "src.services.novel_service.resolve_paths",
+            return_value=("novels/dummy.txt", "dummy.yaml"),
+        ),
+        patch("builtins.open", side_effect=Exception("IO Error")),
+    ):
+        response = client.post(
+            "/api/save_novel",
+            json={"novel_name": "dummy.txt", "content": "Updated Content"},
+        )
+        assert response.status_code == 500
+
+
+def test_routes_api_save_findings_success(tmp_path):
+    yaml_path = tmp_path / "dummy_findings.yaml"
+    with patch(
+        "src.services.novel_service.resolve_paths",
+        return_value=("dummy.txt", str(yaml_path)),
+    ):
+        response = client.post(
+            "/api/save",
+            json={
+                "novel_name": "dummy.txt",
+                "findings": [
+                    {
+                        "id": "INT-001",
+                        "location": "1",
+                        "original": "orig",
+                        "category": "cat",
+                        "severity": "high",
+                        "analysis": "anal",
+                        "suggestion": "sugg",
+                        "accepted": "y",
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+        assert yaml_path.exists()
+
+
+def test_routes_api_save_findings_no_yaml():
+    with patch(
+        "src.services.novel_service.resolve_paths", return_value=("dummy.txt", None)
+    ):
+        response = client.post(
+            "/api/save", json={"novel_name": "dummy.txt", "findings": []}
+        )
+        assert response.status_code == 400
+
+
+def test_routes_api_save_findings_exception():
+    with (
+        patch(
+            "src.services.novel_service.resolve_paths",
+            return_value=("dummy.txt", "dummy_findings.yaml"),
+        ),
+        patch("os.makedirs", side_effect=Exception("Failed")),
+    ):
+        response = client.post(
+            "/api/save", json={"novel_name": "dummy.txt", "findings": []}
+        )
+        assert response.status_code == 500
+
+
+def test_routes_api_create_backup_exception():
+    with (
+        patch(
+            "src.services.novel_service.resolve_paths",
+            return_value=("dummy.txt", "dummy.yaml"),
+        ),
+        patch("os.path.exists", return_value=True),
+        patch("shutil.copy2", side_effect=Exception("Error")),
+    ):
+        response = client.post("/api/backup?file=dummy.txt")
+        assert response.status_code == 500
+
+
+def test_routes_api_stream_apply():
+    mock_streaming = StreamingResponse(
+        iter(["data: line\n\n"]), media_type="text/event-stream"
+    )
+    with patch(
+        "src.services.novel_service.stream_process_output", return_value=mock_streaming
+    ) as mock_stream:
+        response = client.get("/api/stream/apply?file=dummy.txt")
+        assert response.status_code == 200
+        assert response.text == "data: line\n\n"
+        mock_stream.assert_called_once()
+
+
+def test_routes_api_stream_apply_exception():
+    with patch(
+        "src.services.novel_service.resolve_paths", side_effect=Exception("Error")
+    ):
+        response = client.get("/api/stream/apply?file=dummy.txt")
+        assert response.status_code == 500
+
+
+def test_routes_api_stream_sync():
+    mock_streaming = StreamingResponse(
+        iter(["data: line\n\n"]), media_type="text/event-stream"
+    )
+    with patch(
+        "src.services.novel_service.stream_process_output", return_value=mock_streaming
+    ) as mock_stream:
+        response = client.get("/api/stream/sync")
+        assert response.status_code == 200
+        mock_stream.assert_called_once()
+
+
+def test_routes_api_stream_review():
+    mock_streaming = StreamingResponse(
+        iter(["data: line\n\n"]), media_type="text/event-stream"
+    )
+    with (
+        patch("os.path.exists", return_value=True),
+        patch(
+            "src.services.novel_service.stream_process_output",
+            return_value=mock_streaming,
+        ) as mock_stream,
+    ):
+        response = client.get("/api/stream/review?file=dummy.txt&model=Gemini")
+        assert response.status_code == 200
+        mock_stream.assert_called_once()
+
+
+def test_routes_api_stream_review_not_found():
+    with patch("os.path.exists", return_value=False):
+        response = client.get("/api/stream/review?file=dummy.txt")
+        assert response.status_code == 404
+
+
+def test_routes_api_stream_write():
+    mock_streaming = StreamingResponse(
+        iter(["data: line\n\n"]), media_type="text/event-stream"
+    )
+    with patch(
+        "src.services.novel_service.stream_process_output", return_value=mock_streaming
+    ) as mock_stream:
+        response = client.get("/api/stream/write?episode=1")
+        assert response.status_code == 200
+        mock_stream.assert_called_once()
+
+
+def test_routes_api_shutdown():
+    response = client.post("/api/shutdown")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+def test_routes_api_novels_empty():
+    with patch("pathlib.Path.exists", return_value=False):
+        response = client.get("/api/novels")
+        assert response.status_code == 200
+        assert response.json() == {"novels": []}
+
+
+def test_routes_api_novel_yaml_exception(tmp_path):
+    novel_path = tmp_path / "dummy.txt"
+    yaml_path = tmp_path / "dummy_findings.yaml"
+    novel_path.write_text("novel content", encoding="utf-8")
+    yaml_path.write_text("invalid_yaml: [", encoding="utf-8")
+
+    with patch(
+        "src.services.novel_service.resolve_paths",
+        return_value=(str(novel_path), str(yaml_path)),
+    ):
+        response = client.get(f"/api/novel?file={os.path.basename(novel_path)}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["findings"] == []
+
+
+def test_routes_api_novel_not_found():
+    with patch(
+        "src.services.novel_service.resolve_paths",
+        return_value=("non_existent.txt", None),
+    ):
+        response = client.get("/api/novel?file=non_existent.txt")
+        assert response.status_code == 404
+
+
+def test_routes_api_get_data_404():
+    with (
+        patch(
+            "src.services.novel_service.resolve_paths",
+            return_value=("non_existent.txt", None),
+        ),
+        patch("os.path.exists", return_value=False),
+    ):
+        response = client.get("/api/data?file=non_existent.txt")
+        assert response.status_code == 404
+
+
+def test_routes_api_get_data_yaml_exception(tmp_path):
+    novel_path = tmp_path / "dummy.txt"
+    yaml_path = tmp_path / "dummy_findings.yaml"
+    novel_path.write_text("line1\nline2", encoding="utf-8")
+    yaml_path.write_text("invalid_yaml: [", encoding="utf-8")
+
+    with (
+        patch(
+            "src.services.novel_service.resolve_paths",
+            return_value=(str(novel_path), str(yaml_path)),
+        ),
+        patch("os.path.exists", side_effect=[True, True]),
+    ):
+        response = client.get(f"/api/data?file={os.path.basename(novel_path)}")
+        assert response.status_code == 500
+
+
+def test_routes_api_preview_novel_exception():
+    with (
+        patch("os.path.exists", return_value=True),
+        patch("builtins.open", side_effect=Exception("Read Error")),
+    ):
+        response = client.get("/api/preview?file=dummy.txt")
+        assert response.status_code == 500
+
+
+def test_routes_api_get_index_exception():
+    with patch(
+        "src.services.novel_service.render_html_template",
+        side_effect=Exception("Render error"),
+    ):
+        response = client.get("/")
+        assert response.status_code == 500
+
+
+def test_routes_api_select_file_exception():
+    with patch(
+        "src.services.novel_service.resolve_paths",
+        side_effect=Exception("General error"),
+    ):
+        response = client.post("/api/select", json={"novel_name": "dummy.txt"})
+        assert response.status_code == 500

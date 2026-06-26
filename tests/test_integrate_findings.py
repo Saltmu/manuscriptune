@@ -1,10 +1,17 @@
+import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+import yaml
+
 from src.integrate_findings import (
+    _collect_raw_findings,
     generate_markdown_report,
     integrate_findings_in_dir,
+    main,
     parse_yaml_file,
     read_file,
+    run_integration_llm,
 )
 
 
@@ -113,8 +120,6 @@ findings:
         report_md = chapter_dir / "chapter_01_report.md"
         assert report_md.exists()
 
-        import yaml
-
         with open(merged_yaml, encoding="utf-8") as f:
             data = yaml.safe_load(f)
             assert "findings" in data
@@ -160,8 +165,95 @@ findings:
         merged_yaml = chapter_dir / "chapter_01_findings.yaml"
         assert merged_yaml.exists()
 
-        import yaml
-
         with open(merged_yaml, encoding="utf-8") as f:
             data = yaml.safe_load(f)
             assert data["findings"][0]["analysis"] == "LLM統合された分析"
+
+
+# --- 新規テスト: 各種分岐と例外処理 ---
+
+
+def test_parse_yaml_other_list_key(tmp_path):
+    yaml_content = """
+other_key:
+  - id: INT-999
+    category: dummy
+"""
+    test_file = tmp_path / "other.yaml"
+    test_file.write_text(yaml_content, encoding="utf-8")
+    res = parse_yaml_file(str(test_file))
+    assert len(res) == 1
+    assert res[0]["id"] == "INT-999"
+
+
+def test_generate_markdown_report_info_and_unknown(tmp_path):
+    findings = [
+        {"id": "INT-001", "severity": "info", "category": "情報"},
+        {"id": "INT-002", "severity": "unknown", "category": "不明"},
+    ]
+    report_file = tmp_path / "report.md"
+    generate_markdown_report(findings, str(report_file))
+
+    content = report_file.read_text(encoding="utf-8")
+    assert "参考情報" in content
+    assert "💡" in content  # unknown -> low -> 💡
+
+
+def test_run_integration_llm_generic_exception():
+    mock_task = MagicMock()
+    mock_task.execute.side_effect = Exception("General LLM Error")
+    with patch(
+        "src.integrate_findings.FindingsIntegrationTask", return_value=mock_task
+    ):
+        res = run_integration_llm("dir", "text", "raw", "model")
+        assert res is None
+
+
+def test_collect_raw_findings_fallback_yamls(tmp_path):
+    world_yaml = tmp_path / "02_world_logic.yaml"
+    world_yaml.write_text(
+        "findings:\n  - id: WOR-001\n    original: text", encoding="utf-8"
+    )
+
+    findings = _collect_raw_findings(str(tmp_path))
+    assert len(findings) == 1
+    assert findings[0]["id"] == "WOR-001"
+    assert findings[0]["_source_file"] == "02_world_logic.yaml"
+
+
+def test_integrate_findings_in_dir_dir_not_exists():
+    assert integrate_findings_in_dir("non_existent_dir", "model") is False
+
+
+def test_integrate_findings_in_dir_formatted_not_exists(tmp_path):
+    assert integrate_findings_in_dir(str(tmp_path), "model") is False
+
+
+def test_integrate_findings_in_dir_parse_merged_exception(tmp_path):
+    chapter_dir = tmp_path / "chapter"
+    chapter_dir.mkdir()
+
+    formatted_txt = chapter_dir / "chapter_formatted.txt"
+    formatted_txt.write_text("本文", encoding="utf-8")
+
+    logic_yaml = chapter_dir / "02_logic_consistency.yaml"
+    logic_yaml.write_text(
+        "findings:\n  - id: LOG-001\n    original: 本文", encoding="utf-8"
+    )
+
+    with patch(
+        "src.integrate_findings.run_integration_llm", return_value="invalid_yaml: ["
+    ):
+        success = integrate_findings_in_dir(str(chapter_dir), "model")
+        assert success is True
+        assert os.path.exists(chapter_dir / "chapter_findings.yaml")
+        assert os.path.exists(chapter_dir / "chapter_report.md")
+
+
+def test_main_failure():
+    with patch("src.integrate_findings.integrate_findings_in_dir", return_value=False):
+        test_args = ["integrate_findings.py", "--dir", "dummy_dir"]
+        with patch("sys.argv", test_args):
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+            assert excinfo.value.code == 1

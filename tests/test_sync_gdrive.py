@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from src.sync_gdrive import (
     _check_lock_and_cache,
     _download_gdrive_file,
+    main,
 )
 
 
@@ -58,3 +59,101 @@ def test_download_gdrive_file_document(tmp_path):
         fileId="doc_id_123", mimeType="text/plain"
     )
     assert os.path.exists(tmp_path / "01_テスト小説.txt")
+
+
+def test_download_gdrive_file_normal(tmp_path):
+    mock_service = MagicMock()
+    mock_files = mock_service.files.return_value
+
+    mock_media = MagicMock()
+    mock_media.next_chunk.return_value = (None, True)
+
+    item = {
+        "id": "file_id_456",
+        "name": "image.png",
+        "mimeType": "image/png",
+    }
+
+    with patch("src.sync_gdrive.MediaIoBaseDownload", return_value=mock_media):
+        _download_gdrive_file(mock_service, item, str(tmp_path))
+
+    mock_files.get_media.assert_called_once_with(fileId="file_id_456")
+    assert os.path.exists(tmp_path / "image.png")
+
+
+def test_download_gdrive_file_skips(tmp_path):
+    mock_service = MagicMock()
+
+    # folder skip
+    item_folder = {
+        "id": "folder_id",
+        "name": "SubFolder",
+        "mimeType": "application/vnd.google-apps.folder",
+    }
+    _download_gdrive_file(mock_service, item_folder, str(tmp_path))
+    assert not os.path.exists(tmp_path / "SubFolder")
+
+    # unsupported google workspace file skip
+    item_unsupported = {
+        "id": "sheet_id",
+        "name": "Spreadsheet",
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+    }
+    _download_gdrive_file(mock_service, item_unsupported, str(tmp_path))
+    assert not os.path.exists(tmp_path / "Spreadsheet")
+
+
+@patch("src.sync_gdrive.build")
+@patch("src.sync_gdrive.service_account.Credentials.from_service_account_file")
+@patch("src.sync_gdrive.project_config")
+@patch("src.sync_gdrive._check_lock_and_cache", return_value=True)
+def test_main_success(mock_check, mock_config, mock_creds, mock_build, tmp_path):
+    mock_config.load_project_config.return_value = {}
+    mock_config.get_gdrive_config.return_value = (
+        "folder_123",
+        "./credentials/creds.json",
+    )
+
+    mock_service = MagicMock()
+    mock_build.return_value = mock_service
+
+    # Correct mock definition to avoid calling the non-existent fields() method
+    mock_service.files.return_value.list.return_value.execute.return_value = {
+        "files": [
+            {
+                "id": "doc_1",
+                "name": "doc1",
+                "mimeType": "application/vnd.google-apps.document",
+            }
+        ]
+    }
+
+    with (
+        patch("src.sync_gdrive.os.path.dirname", return_value=str(tmp_path)),
+        patch("src.sync_gdrive._download_gdrive_file") as mock_download,
+    ):
+        main()
+        mock_download.assert_called_once()
+
+
+def test_main_skipped_by_lock():
+    with (
+        patch("src.sync_gdrive._check_lock_and_cache", return_value=False),
+        patch("src.sync_gdrive.project_config") as mock_config,
+    ):
+        main()
+        mock_config.load_project_config.assert_not_called()
+
+
+def test_main_no_config():
+    with (
+        patch("src.sync_gdrive._check_lock_and_cache", return_value=True),
+        patch("src.sync_gdrive.project_config") as mock_config,
+        patch("src.sync_gdrive.os.path.dirname", return_value="/dummy"),
+    ):
+        mock_config.load_project_config.return_value = {}
+        mock_config.get_gdrive_config.return_value = (None, None)
+
+        with patch("src.sync_gdrive.build") as mock_build:
+            main()
+            mock_build.assert_not_called()
