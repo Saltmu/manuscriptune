@@ -336,3 +336,101 @@ async def stream_review(
 async def stream_write(params: WriteParams = Depends()):  # noqa: B008
     cmd = novel_service.build_writer_cmd(params)
     return novel_service.stream_process_output(cmd)
+
+
+@router.get("/api/sync/status")
+async def sync_status():
+    sources_dir = Path("data/sources")
+    if not sources_dir.exists():
+        return {"sources": []}
+
+    sources_list = []
+    for f in sorted(sources_dir.glob("*.txt"), key=writer_helper.natural_sort_key):
+        mtime = os.path.getmtime(f)
+        dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+        sources_list.append(
+            {"name": f.name, "size": f.stat().st_size, "last_updated": dt}
+        )
+    return {"sources": sources_list}
+
+
+@router.get("/api/preview")
+async def preview_novel(
+    file: str = Query(..., description="Novel text filename in novels/"),
+):
+    safe_file = os.path.basename(file)
+    novel_path = os.path.abspath(os.path.join("novels", safe_file))
+    print(
+        f"[DEBUG] preview_novel: file={repr(file)}, safe_file={repr(safe_file)}, novel_path={repr(novel_path)}, exists={os.path.exists(novel_path)}, cwd={os.getcwd()}"
+    )
+    if not os.path.exists(novel_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Novel file not found: {novel_path} (CWD: {os.getcwd()})",
+        )
+
+    try:
+        with open(novel_path, encoding="utf-8") as f:
+            content = f.read()
+        return {"content": content, "filename": safe_file}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read novel: {str(e)}")
+
+
+@router.post("/api/select")
+async def select_file(payload: SelectFileRequest):
+    try:
+        novel_path, yaml_path = novel_service.resolve_paths(payload.novel_name)
+        return {
+            "status": "success",
+            "novel_path": novel_path,
+            "yaml_path": yaml_path,
+            "exists": os.path.exists(novel_path) and os.path.exists(yaml_path),
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/data")
+async def get_data(file: str = Query(..., description="Novel filename")):
+    try:
+        novel_path, yaml_path = novel_service.resolve_paths(file)
+    except HTTPException:
+        return {
+            "novel_lines": [],
+            "findings": [],
+            "novel_filename": "ファイル未選択",
+            "has_backup": False,
+        }
+
+    if not os.path.exists(novel_path):
+        raise HTTPException(
+            status_code=404, detail=f"Novel file not found: {novel_path}"
+        )
+
+    # Read novel lines
+    with open(novel_path, encoding="utf-8") as f:
+        novel_lines = [line.rstrip("\r\n") for line in f.readlines()]
+
+    findings = []
+    # Findings YAML might not exist yet if review hasn't run
+    if yaml_path and os.path.exists(yaml_path):
+        with open(yaml_path, encoding="utf-8") as f:
+            try:
+                data = yaml.safe_load(f) or {}
+                findings = data.get("findings", [])
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to parse YAML: {str(e)}"
+                )
+
+    has_backup = os.path.exists(f"{novel_path}.bak")
+
+    return {
+        "novel_lines": novel_lines,
+        "findings": findings,
+        "novel_filename": os.path.basename(novel_path),
+        "has_backup": has_backup,
+    }
