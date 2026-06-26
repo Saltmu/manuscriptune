@@ -47,6 +47,10 @@ jobs:
       - name: Run Mypy Type Checker
         run: poetry run mypy src tests
 
-      - name: Run Unit Tests
-        run: poetry run pytest
+      - name: Run Bloat Detection (AGENTS.md checks)
+        run: poetry run detect-bloat
+
+      - name: Run Unit Tests with Coverage
+        run: poetry run pytest --cov=src
+
 
