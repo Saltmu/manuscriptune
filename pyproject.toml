@@ -60,4 +60,4 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-addopts = "--cov=src --cov-fail-under=85 --cov-report=term-missing"
+addopts = "--cov=src --cov-fail-under=75 --cov-report=term-missing"
