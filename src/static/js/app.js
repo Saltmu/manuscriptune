@@ -2,7 +2,7 @@ import { state, setSelectedNovelFile } from './state.js';
 import { showToast, initPanelResizer, shutdownServerGlobal, toggleConsole, closeModal, executeGlobalShutdown } from './utils.js';
 import { loadDashboardData, selectDraftCard, loadPreview, selectAndEditNovel, selectAndReviewNovel } from './views/dashboard.js';
 import { runDriveSync } from './views/sync.js';
-import { loadSourcesForWrite, runAiWriting } from './views/write.js';
+import { loadSourcesForWrite, runAiWriting, copyWritingPrompt } from './views/write.js';
 import { runReviewPipeline } from './views/review.js';
 import {
     loadEditorData,
@@ -173,6 +173,7 @@ window.addEventListener('DOMContentLoaded', () => {
 window.switchView = switchView;
 window.runDriveSync = runDriveSync;
 window.runAiWriting = runAiWriting;
+window.copyWritingPrompt = copyWritingPrompt;
 window.runReviewPipeline = runReviewPipeline;
 window.selectAndEditNovel = selectAndEditNovel;
 window.selectAndReviewNovel = selectAndReviewNovel;

@@ -24,9 +24,12 @@
 
                 <div class="card" style="margin-top: 8px;">
                     <h3>執筆パラメーター設定</h3>
-                    <div style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center;">
+                    <div style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
                         <button class="btn-primary" id="btn-run-write" onclick="runAiWriting()">
                             ✍️ 執筆を開始する
+                        </button>
+                        <button class="btn-secondary" id="btn-copy-prompt" onclick="copyWritingPrompt()">
+                            📋 プロンプトをコピー
                         </button>
                         <button class="console-toggle-btn" id="write-console-toggle" onclick="toggleConsole('view-write')">
                             🖥️ コンソール表示

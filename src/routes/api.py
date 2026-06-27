@@ -338,6 +338,30 @@ async def stream_write(params: WriteParams = Depends()):  # noqa: B008
     return novel_service.stream_process_output(cmd)
 
 
+@router.get("/api/write/prompt")
+async def get_write_prompt(params: WriteParams = Depends()):  # noqa: B008
+    cmd = novel_service.build_writer_cmd(params)
+    cmd.append("--prompt-only")
+
+    import asyncio
+    import subprocess
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+
+    if process.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prompt generation failed: {stderr.decode('utf-8')}",
+        )
+
+    return {"prompt": stdout.decode("utf-8")}
+
+
 @router.get("/api/sync/status")
 async def sync_status():
     sources_dir = Path("data/sources")

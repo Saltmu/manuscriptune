@@ -49,7 +49,7 @@ explicit_package_bases = true
 
 [tool.poetry.scripts]
 run-review = "src.run_review_pipeline:main"
-review-server = "src.review_server:main"
+server = "src.review_server:main"
 apply-findings = "src.apply_findings:main"
 sync-gdrive = "src.sync_gdrive:main"
 detect-bloat = "src.utils.detect_bloat:main"

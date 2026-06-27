@@ -140,3 +140,58 @@ export function runAiWriting() {
         }
     });
 }
+
+export async function copyWritingPrompt() {
+    const epInput = document.getElementById('write-episode').value.trim();
+    if (!epInput) {
+        alert('執筆する話を入力してください (例: 第1話)');
+        return;
+    }
+
+    const titleVal = document.getElementById('write-title').value.trim();
+    const modelVal = document.getElementById('write-model').value;
+    const plotVal = document.getElementById('write-plot').value;
+    const policyGlobalVal = document.getElementById('write-policy-global').value;
+    const policyChapterVal = document.getElementById('write-policy-chapter').value;
+    const characterVal = document.getElementById('write-character').value;
+
+    const btn = document.getElementById('btn-copy-prompt');
+    const writeBtn = document.getElementById('btn-run-write');
+    if (btn) btn.disabled = true;
+    if (writeBtn) writeBtn.disabled = true;
+
+    // Show loading overlay
+    const overlay = document.getElementById('write-loading-overlay');
+    const loadingText = overlay ? overlay.querySelector('.view-loading-text') : null;
+    const originalText = loadingText ? loadingText.textContent : '';
+    if (loadingText) loadingText.textContent = 'プロンプト生成中...';
+    if (overlay) overlay.classList.add('active');
+
+    try {
+        let url = `/api/write/prompt?episode=${encodeURIComponent(epInput)}`;
+        if (modelVal) url += `&model=${encodeURIComponent(modelVal)}`;
+        if (titleVal) url += `&novel_title=${encodeURIComponent(titleVal)}`;
+        if (plotVal) url += `&plot=${encodeURIComponent(plotVal)}`;
+        if (policyGlobalVal) url += `&policy_global=${encodeURIComponent(policyGlobalVal)}`;
+        if (policyChapterVal) url += `&policy_chapter=${encodeURIComponent(policyChapterVal)}`;
+        if (characterVal) url += `&character=${encodeURIComponent(characterVal)}`;
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.detail || 'プロンプト生成に失敗しました');
+        }
+
+        const data = await response.json();
+        await navigator.clipboard.writeText(data.prompt);
+        showToast('プロンプトをクリップボードにコピーしました');
+    } catch (err) {
+        console.error('Failed to copy prompt:', err);
+        showToast(`エラー: ${err.message}`);
+    } finally {
+        if (btn) btn.disabled = false;
+        if (writeBtn) writeBtn.disabled = false;
+        if (loadingText) loadingText.textContent = originalText;
+        if (overlay) overlay.classList.remove('active');
+    }
+}

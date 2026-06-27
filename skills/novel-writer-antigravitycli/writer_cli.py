@@ -562,6 +562,11 @@ def _parse_args():
         action="store_true",
         help="Perform self-verification and rewrite if needed.",
     )
+    parser.add_argument(
+        "--prompt-only",
+        action="store_true",
+        help="Only output the generated prompt and exit.",
+    )
     return parser.parse_args()
 
 
@@ -578,9 +583,25 @@ def main():
     prev_file = get_previous_episode_file(args.plot_file, args.episode)
     prev_text = None
     if prev_file:
-        print(f"Loading context from previous episode: {prev_file}")
+        if not args.prompt_only:
+            print(f"Loading context from previous episode: {prev_file}")
         full_prev = read_file(prev_file)
         prev_text = "...\n" + full_prev[-1500:] if len(full_prev) > 1500 else full_prev
+
+    if args.prompt_only:
+        policy_global, policy_chapter, character = _resolve_policy_paths(args)
+        prompt = generate_prompt(
+            chapter_title,
+            args.episode,
+            plot_content,
+            novel_title=args.title,
+            policy_global=policy_global,
+            policy_chapter=policy_chapter,
+            character=character,
+            previous_episode_text=prev_text,
+        )
+        print(prompt)
+        sys.exit(0)
 
     # 出力ファイル名の決定 (novels/X_Y.txt)
     ch_num = extract_numbers(chapter_title) if chapter_title else "0"

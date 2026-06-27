@@ -158,7 +158,7 @@ novel_tools/
 #### 1. WebUIサーバー単体の起動
 小説の選択、新規執筆、Google Driveとの同期、既存のレビュー結果の確認や適用を行う場合は、以下のコマンドでWebUIサーバーを起動します。
 ```bash
-poetry run review-server
+poetry run server
 ```
 起動後、自動的にブラウザ（デフォルト: `http://localhost:8000`）が開きます。
 

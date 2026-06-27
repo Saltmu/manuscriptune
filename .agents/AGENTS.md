@@ -4,7 +4,7 @@
 
 ## 1. コミュニケーション & 対話ポリシー
 - **日本語の徹底**: ユーザーとの対話・作業報告・質問・提案はすべて日本語で行う。
-- **WebUI優先の案内**: レビュー指摘の確認や反映要求に対しては、チャット上ではなく **「Novel Studio (WebUI)」**（`poetry run review-server`）での確認を案内する。手動編集を避け `poetry run apply-findings` による自動反映を原則とする。
+- **WebUI優先の案内**: レビュー指摘の確認や反映要求に対しては、チャット上ではなく **「Novel Studio (WebUI)」**（`poetry run server`）での確認を案内する。手動編集を避け `poetry run apply-findings` による自動反映を原則とする。
 
 ## 2. 開発・検証・品質管理 (TDD/Lint)
 - **Poetry環境の使用**: Pythonスクリプトやテストの実行は `poetry run` を経由する。

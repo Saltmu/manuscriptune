@@ -523,3 +523,26 @@ def test_routes_api_select_file_exception():
     ):
         response = client.post("/api/select", json={"novel_name": "dummy.txt"})
         assert response.status_code == 500
+
+
+def test_routes_api_get_write_prompt():
+    from unittest.mock import AsyncMock
+
+    mock_process = AsyncMock()
+    mock_process.communicate.return_value = (b"Generated Prompt Content", b"")
+    mock_process.returncode = 0
+
+    with patch(
+        "asyncio.create_subprocess_exec", return_value=mock_process
+    ) as mock_exec:
+        response = client.get(
+            "/api/write/prompt?episode=%E7%AC%AC1%E8%A9%B1&novel_title=TestTitle"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["prompt"] == "Generated Prompt Content"
+
+        mock_exec.assert_called_once()
+        cmd_arg = mock_exec.call_args
+        # The first argument tuple to create_subprocess_exec has command parts
+        assert any("--prompt-only" in str(arg) for arg in cmd_arg[0])
