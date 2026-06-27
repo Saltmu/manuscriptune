@@ -238,9 +238,9 @@ def test_run_step_parallel_reviews(tmp_path):
 
     with patch("src.run_review_pipeline.run_single_review_skill") as mock_run_skill:
         mock_run_skill.side_effect = [
-            ("logic-consistency-reviewer", True, "success"),
-            ("style-expression-reviewer", False, "failed"),
-            ("logic-consistency-reviewer", True, "success"),
+            ("text-reviewer-logic", True, "success"),
+            ("text-reviewer-style", False, "failed"),
+            ("text-reviewer-logic", True, "success"),
         ]
         _run_step_parallel_reviews("target text", str(output_dir), "model", 2)
         assert mock_run_skill.call_count >= 2

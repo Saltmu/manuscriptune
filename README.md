@@ -15,7 +15,7 @@ novel_tools/
 
 ## スキル構成
 
-本プロジェクトには、小説の執筆、校閲、フォーマットをサポートする **12のエージェントスキル** が用意されています。エージェントに指示を出す際は、各スキルの**キーワード**（`skills/` 配下のディレクトリ名）を参考にしてください。
+本プロジェクトには、小説の執筆、校閲、フォーマットをサポートする エージェントスキル が用意されています。エージェントに指示を出す際は、各スキルの**キーワード**（`skills/` 配下のディレクトリ名）を参考にしてください。
 
 ### 1. 執筆・整形（Writing & Formatting）
 
@@ -26,31 +26,17 @@ novel_tools/
 - **[Novel-Formatter](file:///home/sshioyama/workspace/novel_tools/skills/novel-formatter/)** [`novel-formatter`]
   執筆された小説テキストを、ウェブ小説（カクヨム、なろう等）向けに読みやすく整形（ルビ、改行、三点リーダーなど）します。機械的な前処理とAIによる文脈的調整の2段階で処理します。
 
-### 2. 統合レビュー（Integrated Reviewers）
-これらは、複数の個別レビュー観点を統合したメタ（親）スキルです。レビューパイプラインを実行した際、サブエージェントに直接装備されて実行されます。
-
-- **[Logic-Consistency-Reviewer](file:///home/sshioyama/workspace/novel_tools/skills/logic-consistency-reviewer/)** [`logic-consistency-reviewer`]
+### 2. 本文レビュー（Text Reviewers）
+- **[text-reviewer-logic](file:///home/sshioyama/workspace/novel_tools/skills/text-reviewer-logic/)** [`text-reviewer-logic`]
   世界観設定、過去のプロット・キャラ設定との矛盾、伏線の配置を統合的に検証します（設定監査エージェントが使用）。
-- **[Style-Expression-Reviewer](file:///home/sshioyama/workspace/novel_tools/skills/style-expression-reviewer/)** [`style-expression-reviewer`]
+- **[text-reviewer-style](file:///home/sshioyama/workspace/novel_tools/skills/text-reviewer-style/)** [`text-reviewer-style`]
   描写力（Show, Don't Tell）、文章のリズム・語彙、キャラクターの口調、構成（ペーシング）を統合的に検証します（文芸表現エージェントが使用）。
 
-### 3. 個別検証・改善（Domain Specific Skills / 単体アドホック深掘り用）
-これらは、より専門的な校閲・推敲観点に特化した子（個別）スキルです。統合レビュースキルが内部で参照する専門知識としての役割を持ち、またエージェントと直接チャットで特定の側面に絞った指示を出す際（単体アドホック検証）に使用されます。※通常のレビューパイプラインでは親（統合）スキルが観点を包含しているため直接は使用されません。
-
-- **[World-Logic-Guard](file:///home/sshioyama/workspace/novel_tools/skills/world-logic-guard/)** [`world-logic-guard`]
-  【単体アドホック深掘り用】 独自の世界観設定（物理法則、地理、エネルギー体系Nephesなど）との論理的整合性を検証します。フラットアース地理に基づく物理法則への適合などをチェックします。
-- **[Consistency-Checker](file:///home/sshioyama/workspace/novel_tools/skills/consistency-checker/)** [`consistency-checker`]
-  【単体アドホック深掘り用】 執筆中の最新シーンと、過去のプロットやキャラクター設定（一人称、外見、属性、タイムライン）との矛盾を検出します。
-- **[Foreshadowing-Tracker](file:///home/sshioyama/workspace/novel_tools/skills/foreshadowing-tracker/)** [`foreshadowing-tracker`]
-  【単体アドホック深掘り用】 伏線と情報開示のタイミングを追跡し、後出し設定（Deus ex machina）を防いでカタルシスを最大化します。
-- **[Show-Dont-Tell-Enhancer](file:///home/sshioyama/workspace/novel_tools/skills/show-dont-tell-enhancer/)** [`show-dont-tell-enhancer`]
-  【単体アドホック深掘り用】 感情や状況を単に説明（Tell）している箇所を検出し、五感や具体的な行動を用いた描写（Show）へ変換する提案をします。
-- **[Rhythm-Vocabulary-Optimizer](file:///home/sshioyama/workspace/novel_tools/skills/rhythm-vocabulary-optimizer/)** [`rhythm-vocabulary-optimizer`]
-  【単体アドホック深掘り用】 文末重複の解消、過剰な接続詞の多用防止、類語の提案などを行い、文章のリズムと語彙力を高めます。
-- **[Character-Voice-Checker](file:///home/sshioyama/workspace/novel_tools/skills/character-voice-checker/)** [`character-voice-checker`]
-  【単体アドホック深掘り用】 キャラクターの口調のブレ（ボイスの一貫性）や、シーンをまたぐ感情変化（心理導線）の自然さをチェックします。
-- **[Plot-Pacing-Analyzer](file:///home/sshioyama/workspace/novel_tools/skills/plot-pacing-analyzer/)** [`plot-pacing-analyzer`]
-  【単体アドホック深掘り用】 プロットと本文を比較し、物語の進行速度、設定説明（ロアダンプ）による進行停止、展開の駆け足などのペース配分を分析します。
+### 3. プロットレビュー（Plot Reviewers）
+- **[plot-reviewer-structure](file:///home/sshioyama/workspace/novel_tools/skills/plot-reviewer-structure/)** [`plot-reviewer-structure`]
+  プロット全体の物語構造（三幕構成・感情の山場・カタルシス）を評価し、構造的な弱点を指摘します。
+- **[plot-reviewer-conflict](file:///home/sshioyama/workspace/novel_tools/skills/plot-reviewer-conflict/)** [`plot-reviewer-conflict`]
+  各シーン・章の目標・障害・葛藤・結果（GMCO）を検証し、停滞シーンや動機の弱いシーンを検出します。
 
 ## WebUI ポータル「Novel Studio」の利用
 
@@ -105,16 +91,9 @@ poetry run run-review novels/1_12.txt --no-server
 2. **サブエージェント並列レビュー (Parallel Review)**:
    メインエージェントが、専門領域に分かれた2つのサブエージェントを並列で起動します：
    * **設定監査エージェント (Logic Auditor)**
-     **[Logic-Consistency-Reviewer](file:///home/sshioyama/workspace/novel_tools/skills/logic-consistency-reviewer/)** スキルを適用し、世界観・プロットとの矛盾を検証します。この親スキルは、以下の個別スキルの校閲観点を統合しています：
-     - [World-Logic-Guard](file:///home/sshioyama/workspace/novel_tools/skills/world-logic-guard/)（独自設定・地理の監査）
-     - [Consistency-Checker](file:///home/sshioyama/workspace/novel_tools/skills/consistency-checker/)（キャラ属性やタイムラインの整合性）
-     - [Foreshadowing-Tracker](file:///home/sshioyama/workspace/novel_tools/skills/foreshadowing-tracker/)（伏線の配置チェック）
+     **[text-reviewer-logic](file:///home/sshioyama/workspace/novel_tools/skills/text-reviewer-logic/)** スキルを適用し、世界観・プロットとの矛盾を検証します。
    * **文芸表現エージェント (Style Editor)**
-     **[Style-Expression-Reviewer](file:///home/sshioyama/workspace/novel_tools/skills/style-expression-reviewer/)** スキルを適用し、文章のリズムや描写の魅力を検証します。この親スキルは、以下の個別スキルの校閲観点を統合しています：
-     - [Show-Dont-Tell-Enhancer](file:///home/sshioyama/workspace/novel_tools/skills/show-dont-tell-enhancer/)（説明から具体的描写への変換）
-     - [Rhythm-Vocabulary-Optimizer](file:///home/sshioyama/workspace/novel_tools/skills/rhythm-vocabulary-optimizer/)（文章のリズムと語彙向上）
-     - [Character-Voice-Checker](file:///home/sshioyama/workspace/novel_tools/skills/character-voice-checker/)（口調の一貫性と感情導線）
-     - [Plot-Pacing-Analyzer](file:///home/sshioyama/workspace/novel_tools/skills/plot-pacing-analyzer/)（進行ペーシングとロアダンプ過多の検知）
+     **[text-reviewer-style](file:///home/sshioyama/workspace/novel_tools/skills/text-reviewer-style/)** スキルを適用し、文章のリズムや描写の魅力を検証します。
 3. **編集長による統合 (Merge & Conflict Resolution)**:
    メインエージェントが双方の指摘結果を分析し、**重複の排除**および**「表現の提案が世界観設定（ロジック）と衝突していないか」の自動調整**を行い、統合された唯一の指摘ファイル `00_integrated_findings.yaml` と、概要レポート `00_integrated_report.md` を出力します。
 

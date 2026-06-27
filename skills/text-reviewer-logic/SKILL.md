@@ -1,5 +1,5 @@
 ---
-name: "Logic-Consistency-Reviewer"
+name: "text-reviewer-logic"
 description: "世界観設定、過去のプロット・キャラ設定との矛盾、伏線の配置を統合的に検証する"
 version: "1.0.0"
 category: "Novel-Editing"

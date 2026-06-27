@@ -1,5 +1,5 @@
 ---
-name: "Style-Expression-Reviewer"
+name: "text-reviewer-style"
 description: "描写力（Show, Don't Tell）、文章のリズム・語彙、キャラクターの口調、構成（ペーシング）を統合的に検証する"
 version: "1.0.0"
 category: "Novel-Editing"

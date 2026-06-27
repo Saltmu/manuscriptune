@@ -183,8 +183,8 @@ def _run_step_parallel_reviews(
     Executes Step 3: parallel execution of review skills.
     """
     review_skills = {
-        "logic-consistency-reviewer": "02_logic_consistency.yaml",
-        "style-expression-reviewer": "03_style_expression.yaml",
+        "text-reviewer-logic": "02_logic_consistency.yaml",
+        "text-reviewer-style": "03_style_expression.yaml",
     }
     results = []
 

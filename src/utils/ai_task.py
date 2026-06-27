@@ -84,7 +84,7 @@ class ReviewSkillTask(AgyTask[ReviewSkillInput, str]):
                 pattern_key, default_pattern, None
             )
 
-        if skill_name == "logic-consistency-reviewer":
+        if skill_name == "text-reviewer-logic":
             filtered_context_path = os.path.join(output_dir, "01_filtered_context.txt")
             if os.path.exists(filtered_context_path):
                 context_text += f"\n【フィルタリング済み設定資料】\n{read_file(filtered_context_path)}\n"
@@ -99,7 +99,7 @@ class ReviewSkillTask(AgyTask[ReviewSkillInput, str]):
                 if plot_file:
                     context_text += f"\n【プロット】\n{read_file(plot_file)}\n"
 
-        elif skill_name == "style-expression-reviewer":
+        elif skill_name == "text-reviewer-style":
             char_file = get_latest_file("character", "*キャラクター概要*.txt")
             policy_file = get_latest_file("policy_global", "*執筆ポリシー_全体*.txt")
             if char_file:

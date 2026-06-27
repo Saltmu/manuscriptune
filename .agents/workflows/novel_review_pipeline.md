@@ -33,8 +33,8 @@ poetry run python src/filter_context.py novel_check_results/[TARGET_FILE_BASENAM
 
 **SUBAGENT PARALLEL EXECUTION:**
 The main agent MUST spawn two specialist subagents in parallel to perform the review:
-- **Logic Auditor (Subagent)**: Runs the `logic-consistency-reviewer` skill on `01_formatted.txt` using `01_filtered_context.txt` as settings reference. Saves findings to `novel_check_results/[TARGET_FILE_BASENAME]/02_logic_consistency.yaml`.
-- **Style Editor (Subagent)**: Runs the `style-expression-reviewer` skill on `01_formatted.txt`. Saves findings to `novel_check_results/[TARGET_FILE_BASENAME]/03_style_expression.yaml`.
+- **Logic Auditor (Subagent)**: Runs the `text-reviewer-logic` skill on `01_formatted.txt` using `01_filtered_context.txt` as settings reference. Saves findings to `novel_check_results/[TARGET_FILE_BASENAME]/02_logic_consistency.yaml`.
+- **Style Editor (Subagent)**: Runs the `text-reviewer-style` skill on `01_formatted.txt`. Saves findings to `novel_check_results/[TARGET_FILE_BASENAME]/03_style_expression.yaml`.
 
 Use the `invoke_subagent` tool to spawn these subagents concurrently.
 
