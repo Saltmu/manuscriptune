@@ -2,16 +2,107 @@
 
 「重天の調律師」シリーズの執筆・校閲・フォーマットを支援するエージェント環境です。
 
+---
+
+## セットアップ
+
+### 1. 依存関係のインストール
+
+本プロジェクトは **Poetry** を使用してパッケージと仮想環境の管理を行っています。以下のコマンドで必要な依存関係をインストールします。
+
+```bash
+poetry install
+```
+
+### 2. 設定ファイルの準備
+
+1. [antigravity.yaml.example](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml.example) を [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) にコピーします。
+   ```bash
+   cp antigravity.yaml.example antigravity.yaml
+   ```
+2. [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) を編集し、`folder_id` や `auth_file` のパスを自身の環境に合わせて設定してください。
+   - **主要キャラクター名の指定（任意）**:
+     別作品の執筆や校閲を行う際、設定資料ファイル（`data/sources/`）からの自動抽出に加え、明示的に文脈フィルタリング（`filter_context`）の辞書に含めたい主要キャラクターがある場合は、`project.novel.main_characters` にリストとして設定できます（自動抽出された名前とマージしてハイブリッドで使用されます）。
+     ```yaml
+     project:
+       novel:
+         main_characters:
+           - "キャラクター名A"
+           - "キャラクター名B"
+     ```
+   > [!IMPORTANT]
+   > [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) には機密情報が含まれるため、Gitにはコミットしないよう `.gitignore` で設定されています。
+
+### 3. Antigravity CLI (agy) のセットアップ
+
+本プロジェクトの校閲（レビュー）および執筆プロセスでは、内部的に **Antigravity CLI (agy)** を使用して LLM（Geminiモデル等）の呼び出しを行っています。実行前に以下のセットアップを完了させてください。
+
+#### 1. インストール
+お使いの環境に合わせて `agy` をインストールします。
+
+- **macOS / Linux:**
+  ```bash
+  curl -fsSL https://antigravity.google/cli/install.sh | bash
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  irm https://antigravity.google/cli/install.ps1 | iex
+  ```
+
+#### 2. ログイン（認証）
+インストール完了後、ターミナルで `agy` を起動してログイン（認証）処理を行います。
+```bash
+agy
+```
+初回起動時にインタラクティブなセットアップと Google 認証（ブラウザ起動による Google OAuth または Google Cloud プロジェクト連携）が開始されますので、画面の指示に従ってログインを完了させてください。
+
+> [!NOTE]
+> ヘッドレス環境や WSL2 (Windows Subsystem for Linux) などで認証状態が保持されない（毎回ログインを求められる）場合は、OSのキーリングサービス（`gnome-keyring` や `dbus-x11`）が不足している可能性があります。詳細は下記の参考文献を参照してください。
+
+#### 参考文献
+- [Antigravity CLI 概要（公式）](https://antigravity.google/docs/cli-overview)
+- [Antigravity CLI 製品紹介](https://antigravity.google/product/antigravity-cli)
+- [GitHub - google-antigravity/antigravity-cli](https://github.com/google-antigravity/antigravity-cli)
+
+### 4. 設定資料の配置
+
+`data/sources/` ディレクトリに、執筆・校閲の参照資料を配置してください（次節参照）。
+
+---
+
 ## プロジェクト構成
 
 ```
 novel_tools/
 ├── novels/                   # 執筆済み小説テキスト（章-話.txt 形式）
 ├── novel_check_results/      # レビュー結果の保存先（章-話ごとのサブフォルダ）
-├── data/sources/             # 執筆参照資料（設定資料集・プロット・キャラ概要）
+├── data/sources/             # 執筆参照資料（設定資料集・プロット・キャラ概要）※Git管理外
+├── src/                      # Pythonスクリプト群（レビューパイプライン・WebUIサーバー等）
 ├── skills/                   # エージェントスキル群
 └── .agents/workflows/        # 定義済みワークフロー
 ```
+
+---
+
+## 参照資料（data/sources/）
+
+`data/sources/` は **Gitリポジトリ管理外** のディレクトリです。各自の環境に以下の種別のファイルを配置してください。
+
+> [!IMPORTANT]
+> このディレクトリの内容は世界観・設定の「バイブル（真実の基準）」として扱われます。エージェントはここに配置されたファイルを**読み取り専用**で参照します。エージェントによる自動上書きは禁止されており、変更は手動のみ許可されています。
+
+| 種別 | 内容 | ファイル例（命名は任意） |
+| --------------------------------- | ------------------------------------ | ------------------------------------ |
+| 執筆ポリシー（全体） | 文体・ルビ・描写ルール等、シリーズ共通の執筆方針 | `00_1_執筆ポリシー_全体.txt` |
+| 執筆ポリシー（幕別） | 各幕固有の執筆方針（任意） | `00_2_執筆ポリシー_第1幕.txt` |
+| 設定資料集 | 世界観・魔法体系・地理・組織等の設定資料 | `09_0_重天の調律師_設定資料集.txt` |
+| 歴史年表 | 創世記から現代までの世界の歴史・出来事の時系列 | `09_1_創世記から現代まで.txt` |
+| キャラクター概要 | 登場キャラクターの詳細設定（幕ごとに分けることを推奨） | `03_1_第1幕キャラクター概要.txt` |
+| プロット（幕別） | 各幕の詳細プロット（シーン・台詞レベルまで記述） | `04_1_第1幕プロット.txt` |
+| 大枠プロット | シリーズ全体の大枠・章構成 | `04_0_大枠プロット.txt` |
+| 作例 | 文体・描写の参考作例（執筆AIへのfew-shot用途） | `99_作例.txt` |
+
+---
 
 ## スキル構成
 
@@ -25,16 +116,25 @@ novel_tools/
   執筆された小説テキストを、ウェブ小説（カクヨム、なろう等）向けに読みやすく整形（ルビ、改行、三点リーダーなど）します。機械的な前処理とAIによる文脈的調整の2段階で処理します。
 
 ### 2. 本文レビュー（Text Reviewers）
+
 - **[text-reviewer-logic](file:///home/sshioyama/workspace/novel_tools/skills/text-reviewer-logic/)** [`text-reviewer-logic`]
   世界観設定、過去のプロット・キャラ設定との矛盾、伏線の配置を統合的に検証します（設定監査エージェントが使用）。
 - **[text-reviewer-style](file:///home/sshioyama/workspace/novel_tools/skills/text-reviewer-style/)** [`text-reviewer-style`]
   描写力（Show, Don't Tell）、文章のリズム・語彙、キャラクターの口調、構成（ペーシング）を統合的に検証します（文芸表現エージェントが使用）。
 
 ### 3. プロットレビュー（Plot Reviewers）
+
 - **[plot-reviewer-structure](file:///home/sshioyama/workspace/novel_tools/skills/plot-reviewer-structure/)** [`plot-reviewer-structure`]
   プロット全体の物語構造（三幕構成・感情の山場・カタルシス）を評価し、構造的な弱点を指摘します。
 - **[plot-reviewer-conflict](file:///home/sshioyama/workspace/novel_tools/skills/plot-reviewer-conflict/)** [`plot-reviewer-conflict`]
   各シーン・章の目標・障害・葛藤・結果（GMCO）を検証し、停滞シーンや動機の弱いシーンを検出します。
+
+### 4. WebUI開発（WebUI Developer）
+
+- **[webui-developer](file:///home/sshioyama/workspace/novel_tools/skills/webui-developer/)** [`webui-developer`]
+  Novel Studio（WebUI）のフロントエンド・バックエンドの実装・修正を行う際のポリシーと手順を定義します。WebUIの機能追加・修正時はこのスキルを遵守してください。
+
+---
 
 ## WebUI ポータル「Novel Studio」の利用
 
@@ -104,7 +204,7 @@ poetry run run-review novels/1_12.txt --no-server
 
 ### 2. コマンドライン（CLI）での対話的・自動反映（フォールバック）
 
-WebUIを使わずに、コマンドラインから直接反映を実行したい場合や、手動で `00_integrated_findings.yaml` をテキストエディタで編集して反映させたい場合は、以下のPythonスクリプトを使用できます。
+WebUIを使わずに、コマンドラインから直接反映を実行したい場合や、手動で `00_integrated_findings.yaml` をテキストエディタで編集して反映させたい場合は、以下のコマンドを使用できます。
 
 ```bash
 # ターミナル上で1件ずつ確認しながら反映する（手動修正入力も可能）
@@ -135,74 +235,3 @@ findings:
     suggestion: "設定を考慮して調整された修正提案"
     accepted: "n"              # ← WebUIまたはテキストエディタで "y" に変更すると採用
 ```
-
-## 参照資料（data/sources/）
-
-| ファイル                          | 内容                                 |
-| --------------------------------- | ------------------------------------ |
-| `00_執筆ポリシーver.2.txt`        | 文体・ルビ・描写ルール等の執筆方針   |
-| `01_重天の調律師_設定資料集.txt`  | 世界観・魔法体系・地理等の設定資料集 |
-| `02_創世記から現代まで.txt`       | 世界の歴史年表                       |
-| `03-1_第１幕キャラクター概要.txt` | 第1幕登場キャラクターの詳細          |
-| `04-1_第1幕プロットver.2.txt`     | 第1幕の詳細プロット                  |
-| `04_大枠プロット.txt`             | シリーズ全体の大枠プロット           |
-
-## セットアップ
-
-### 1. 依存関係のインストール
-
-本プロジェクトは **Poetry** を使用してパッケージと仮想環境の管理を行っています。以下のコマンドで必要な依存関係をインストールします。
-
-```bash
-poetry install
-```
-
-### 2. 設定ファイルの準備
-
-1. [antigravity.yaml.example](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml.example) を [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) にコピーします。
-   ```bash
-   cp antigravity.yaml.example antigravity.yaml
-   ```
-2. [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) を編集し、`folder_id` や `auth_file` のパスを自身の環境に合わせて設定してください。
-   - **主要キャラクター名の指定（任意）**:
-     別作品の執筆や校閲を行う際、設定資料ファイル（`data/sources/`）からの自動抽出に加え、明示的に文脈フィルタリング（`filter_context`）の辞書に含めたい主要キャラクターがある場合は、`project.novel.main_characters` にリストとして設定できます（自動抽出された名前とマージしてハイブリッドで使用されます）。
-     ```yaml
-     project:
-       novel:
-         main_characters:
-           - "キャラクター名A"
-           - "キャラクター名B"
-     ```
-   > [!IMPORTANT]
-   > [antigravity.yaml](file:///home/sshioyama/workspace/novel_tools/antigravity.yaml) には機密情報が含まれるため、Gitにはコミットしないよう `.gitignore` で設定されています。
-
-### 3. Antigravity CLI (agy) のセットアップ
-
-本プロジェクトの校閲（レビュー）および執筆プロセスでは、内部的に **Antigravity CLI (agy)** を使用して LLM（Geminiモデル等）の呼び出しを行っています。実行前に以下のセットアップを完了させてください。
-
-#### 1. インストール
-お使いの環境に合わせて `agy` をインストールします。
-
-- **macOS / Linux:**
-  ```bash
-  curl -fsSL https://antigravity.google/cli/install.sh | bash
-  ```
-- **Windows (PowerShell):**
-  ```powershell
-  irm https://antigravity.google/cli/install.ps1 | iex
-  ```
-
-#### 2. ログイン（認証）
-インストール完了後、ターミナルで `agy` を起動してログイン（認証）処理を行います。
-```bash
-agy
-```
-初回起動時にインタラクティブなセットアップと Google 認証（ブラウザ起動による Google OAuth または Google Cloud プロジェクト連携）が開始されますので、画面の指示に従ってログインを完了させてください。
-
-> [!NOTE]
-> ヘッドレス環境や WSL2 (Windows Subsystem for Linux) などで認証状態が保持されない（毎回ログインを求められる）場合は、OSのキーリングサービス（`gnome-keyring` や `dbus-x11`）が不足している可能性があります。詳細は下記の参考文献を参照してください。
-
-#### 参考文献
-- [Antigravity CLI 概要（公式）](https://antigravity.google/docs/cli-overview)
-- [Antigravity CLI 製品紹介](https://antigravity.google/product/antigravity-cli)
-- [GitHub - google-antigravity/antigravity-cli](https://github.com/google-antigravity/antigravity-cli)
