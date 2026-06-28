@@ -13,10 +13,10 @@ from src.utils.ai_task import ReviewSkillInput, ReviewSkillTask
 from src.utils.file_io import read_file
 
 
-def archive_previous_review(output_dir, basename):
+def archive_previous_review(output_dir, basename, target_path=None):
     """
     Archives the current [basename]_formatted.txt, [basename]_findings.yaml,
-    and [basename]_report.md into a history directory.
+    [basename]_report.md, and the original target file into a history/v{version}/ directory.
     """
     history_dir = os.path.join(output_dir, "history")
     findings_file = project_paths.get_findings_yaml_path(output_dir, basename)
@@ -28,34 +28,47 @@ def archive_previous_review(output_dir, basename):
 
     # Determine version number (v1, v2, v3...)
     existing_versions = []
-    version_pattern = re.compile(rf"v(\d+)_(?:{re.escape(basename)})_")
+    version_pattern = re.compile(r"^v(\d+)$")
     if os.path.exists(history_dir):
-        for f in os.listdir(history_dir):
-            match = version_pattern.match(f)
-            if match:
-                existing_versions.append(int(match.group(1)))
+        for d in os.listdir(history_dir):
+            if os.path.isdir(os.path.join(history_dir, d)):
+                match = version_pattern.match(d)
+                if match:
+                    existing_versions.append(int(match.group(1)))
 
     next_version = max(existing_versions) + 1 if existing_versions else 1
     v_prefix = f"v{next_version}"
+    version_dir = os.path.join(history_dir, v_prefix)
+    os.makedirs(version_dir, exist_ok=True)
 
     print(
-        f"\n[Archive] Existing review findings found. Archiving to history/{v_prefix}_{basename}_..."
+        f"\n[Archive] Existing review findings found. Archiving to history/{v_prefix}/..."
     )
 
     # Files to archive
     files_to_archive = {
-        f"{basename}_formatted.txt": f"{v_prefix}_{basename}_formatted.txt",
-        f"{basename}_findings.yaml": f"{v_prefix}_{basename}_findings.yaml",
-        f"{basename}_report.md": f"{v_prefix}_{basename}_report.md",
-        "01_filtered_context.txt": f"{v_prefix}_filtered_context.txt",
+        f"{basename}_formatted.txt": f"{basename}_formatted.txt",
+        f"{basename}_findings.yaml": f"{basename}_findings.yaml",
+        f"{basename}_report.md": f"{basename}_report.md",
+        "01_filtered_context.txt": "01_filtered_context.txt",
     }
 
     for src_name, dest_name in files_to_archive.items():
         src_path = os.path.join(output_dir, src_name)
-        dest_path = os.path.join(history_dir, dest_name)
+        dest_path = os.path.join(version_dir, dest_name)
         if os.path.exists(src_path):
             shutil.copy2(src_path, dest_path)
-            print(f"  Archived: {src_name} -> history/{dest_name}")
+            print(f"  Archived: {src_name} -> history/{v_prefix}/{dest_name}")
+
+    # Archive original novel text (target_path)
+    if target_path:
+        target_path_obj = Path(target_path)
+        if target_path_obj.exists():
+            dest_original = os.path.join(version_dir, target_path_obj.name)
+            shutil.copy2(str(target_path_obj), dest_original)
+            print(
+                f"  Archived Original Text: {target_path_obj.name} -> history/{v_prefix}/{target_path_obj.name}"
+            )
 
     # Clean up current findings and report so they are regenerated
     for src_name in [f"{basename}_findings.yaml", f"{basename}_report.md"]:
@@ -165,7 +178,7 @@ def _run_step_format(
     is_rereview = os.path.exists(findings_file)
 
     if is_rereview:
-        archive_previous_review(output_dir, basename)
+        archive_previous_review(output_dir, basename, target_path=target_path)
         print(f"[INFO] Re-reviewing existing formatted draft: {formatted_draft}")
     elif not os.path.exists(formatted_draft):
         try:

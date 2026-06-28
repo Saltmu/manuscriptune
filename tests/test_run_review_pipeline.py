@@ -48,6 +48,11 @@ def test_archive_previous_review(tmp_path):
     output_dir = tmp_path / DEFAULT_RESULTS_DIR / basename
     os.makedirs(output_dir, exist_ok=True)
 
+    # Place mock original novel file
+    original_novel = tmp_path / "novels" / f"{basename}.txt"
+    os.makedirs(original_novel.parent, exist_ok=True)
+    original_novel.write_text("original novel text content", encoding="utf-8")
+
     # Place mock files to archive
     formatted_txt = output_dir / f"{basename}_formatted.txt"
     findings_yaml = output_dir / f"{basename}_findings.yaml"
@@ -60,20 +65,28 @@ def test_archive_previous_review(tmp_path):
     filtered_ctx.write_text("filtered context contents", encoding="utf-8")
 
     # Perform first archive
-    archive_previous_review(str(output_dir), basename)
+    archive_previous_review(str(output_dir), basename, target_path=original_novel)
 
     # Verify history directory and archived files
     history_dir = output_dir / "history"
+    version_1_dir = history_dir / "v1"
     assert os.path.exists(history_dir)
-    assert os.path.exists(history_dir / f"v1_{basename}_formatted.txt")
-    assert os.path.exists(history_dir / f"v1_{basename}_findings.yaml")
-    assert os.path.exists(history_dir / f"v1_{basename}_report.md")
-    assert os.path.exists(history_dir / "v1_filtered_context.txt")
+    assert os.path.exists(version_1_dir)
+    assert os.path.exists(version_1_dir / f"{basename}_formatted.txt")
+    assert os.path.exists(version_1_dir / f"{basename}_findings.yaml")
+    assert os.path.exists(version_1_dir / f"{basename}_report.md")
+    assert os.path.exists(version_1_dir / "01_filtered_context.txt")
+    assert os.path.exists(
+        version_1_dir / f"{basename}.txt"
+    )  # Original text is archived
 
     # Perform second archive (recreate findings file so archive isn't skipped)
     findings_yaml.write_text("findings yaml contents v2", encoding="utf-8")
-    archive_previous_review(str(output_dir), basename)
-    assert os.path.exists(history_dir / f"v2_{basename}_formatted.txt")
+    archive_previous_review(str(output_dir), basename, target_path=original_novel)
+    version_2_dir = history_dir / "v2"
+    assert os.path.exists(version_2_dir)
+    assert os.path.exists(version_2_dir / f"{basename}_formatted.txt")
+    assert os.path.exists(version_2_dir / f"{basename}.txt")
 
 
 def test_run_formatter_fallback(tmp_path):
@@ -190,7 +203,9 @@ def test_run_step_format_rereview(tmp_path):
 
     with patch("src.run_review_pipeline.archive_previous_review") as mock_archive:
         _run_step_format(Path("dummy.txt"), "formatted.txt", str(output_dir), "episode")
-        mock_archive.assert_called_once_with(str(output_dir), "episode")
+        mock_archive.assert_called_once_with(
+            str(output_dir), "episode", target_path=Path("dummy.txt")
+        )
 
 
 def test_run_step_format_not_exists_success(tmp_path):

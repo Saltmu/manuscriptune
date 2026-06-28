@@ -1,5 +1,6 @@
 import datetime
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -150,14 +151,14 @@ async def get_novel(file: str = Query(..., description="Novel filename")):
 
     # Read backup list
     backups = []
-    parent_dir = os.path.dirname(novel_path)
     basename = Path(novel_path).stem
-    history_dir = os.path.join(parent_dir, "history")
+    output_dir = project_paths.get_output_dir(basename)
+    history_dir = os.path.join(output_dir, "history")
     if os.path.exists(history_dir):
-        for fname in os.listdir(history_dir):
-            if fname.endswith(".txt") and basename in fname:
-                backups.append(fname)
-        backups.sort(key=writer_helper.natural_sort_key)
+        for d in os.listdir(history_dir):
+            if os.path.isdir(os.path.join(history_dir, d)) and re.match(r"^v\d+$", d):
+                backups.append(d)
+        backups.sort(key=lambda x: int(x[1:]))
 
     # Check for direct single backup
     novel_bak = f"{novel_path}.bak"
@@ -253,13 +254,18 @@ async def create_backup(file: str = Query(..., description="Novel filename")):
 
 
 @router.post("/api/rollback")
-async def rollback_backup(file: str = Query(..., description="Novel filename")):
+async def rollback_backup(
+    file: str = Query(..., description="Novel filename"),
+    version: str | None = Query(
+        None, description="Specific backup version folder to restore"
+    ),
+):
     try:
         novel_path, yaml_path = novel_service.resolve_paths(file)
     except HTTPException as he:
         raise he
 
-    return novel_service.rollback_backup(novel_path, yaml_path)
+    return novel_service.rollback_backup(novel_path, yaml_path, version=version)
 
 
 @router.get("/api/stream/apply")
@@ -275,7 +281,10 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
         if os.path.exists(yaml_path):
             shutil.copy2(yaml_path, f"{yaml_path}.bak")
 
-        parent_dir = os.path.dirname(novel_path)
+        basename = (
+            Path(novel_path).stem.replace("_formatted", "").replace("_findings", "")
+        )
+        output_dir = project_paths.get_output_dir(basename)
         script_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "apply_findings.py"
         )
@@ -286,7 +295,7 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
             "-u",
             script_path,
             "--dir",
-            parent_dir,
+            output_dir,
             "--auto",
         ]
 
@@ -550,9 +559,21 @@ async def get_data(file: str = Query(..., description="Novel filename")):
 
     has_backup = os.path.exists(f"{novel_path}.bak")
 
+    # Read backup list
+    backups = []
+    basename = Path(novel_path).stem
+    output_dir = project_paths.get_output_dir(basename)
+    history_dir = os.path.join(output_dir, "history")
+    if os.path.exists(history_dir):
+        for d in os.listdir(history_dir):
+            if os.path.isdir(os.path.join(history_dir, d)) and re.match(r"^v\d+$", d):
+                backups.append(d)
+        backups.sort(key=lambda x: int(x[1:]))
+
     return {
         "novel_lines": novel_lines,
         "findings": findings,
         "novel_filename": os.path.basename(novel_path),
         "has_backup": has_backup,
+        "backups": backups,
     }

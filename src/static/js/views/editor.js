@@ -23,6 +23,29 @@ export async function loadEditorData() {
         if (rollbackBtn) {
             rollbackBtn.style.display = data.has_backup ? 'inline-block' : 'none';
         }
+
+        // Render versioned history list
+        const selectHistory = document.getElementById('select-history');
+        const historyContainer = document.getElementById('history-restore-container');
+        if (selectHistory && historyContainer) {
+            if (data.backups && data.backups.length > 0) {
+                selectHistory.innerHTML = '';
+                const versions = data.backups.filter(b => b.startsWith('v'));
+                if (versions.length > 0) {
+                    versions.forEach(ver => {
+                        const opt = document.createElement('option');
+                        opt.value = ver;
+                        opt.textContent = `バージョン ${ver.substring(1)}`;
+                        selectHistory.appendChild(opt);
+                    });
+                    historyContainer.style.display = 'flex';
+                } else {
+                    historyContainer.style.display = 'none';
+                }
+            } else {
+                historyContainer.style.display = 'none';
+            }
+        }
         
         // If in edit mode, ensure textarea has the latest content
         const textarea = document.getElementById('novel-editor-textarea');
@@ -432,4 +455,43 @@ export async function executeRollback() {
 export function closeApplyProgressModal() {
     closeModal('apply-progress-modal');
     loadEditorData();
+}
+
+export function confirmRestoreHistory() {
+    const selectHistory = document.getElementById('select-history');
+    if (!selectHistory) return;
+    const version = selectHistory.value;
+    if (!version) return;
+    if (confirm(`本当にバージョン ${version.substring(1)} の状態に復元しますか？\n（小説本文と指摘の反映ステータスがその時点のものに戻ります）`)) {
+        executeRestoreHistory(version);
+    }
+}
+
+export async function executeRestoreHistory(version) {
+    const restoreBtn = document.getElementById('btn-restore-history');
+    if (restoreBtn) restoreBtn.disabled = true;
+
+    try {
+        if (!state.selectedNovelFile) {
+            showToast('小説ファイルが選択されていません。');
+            if (restoreBtn) restoreBtn.disabled = false;
+            return;
+        }
+        const response = await fetch(`/api/rollback?file=${encodeURIComponent(state.selectedNovelFile)}&version=${encodeURIComponent(version)}`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+
+        if (response.ok && data.status === 'success') {
+            showToast(`バージョン ${version.substring(1)} に復元しました`);
+            await loadEditorData();
+        } else {
+            showToast('復元処理に失敗しました: ' + (data.detail || ''));
+        }
+    } catch (err) {
+        console.error(err);
+        showToast('通信エラーが発生しました');
+    } finally {
+        if (restoreBtn) restoreBtn.disabled = false;
+    }
 }

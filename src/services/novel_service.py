@@ -20,7 +20,7 @@ def resolve_paths(novel_name: str) -> tuple[str, str]:
         raise HTTPException(status_code=400, detail="Novel filename is required.")
 
     safe_name = os.path.basename(novel_name)
-    basename = Path(safe_name).stem
+    basename = Path(safe_name).stem.replace("_formatted", "").replace("_findings", "")
 
     output_dir = project_paths.get_output_dir(basename)
     formatted_path = os.path.abspath(
@@ -80,8 +80,64 @@ def stream_process_output(cmd: list[str]) -> StreamingResponse:
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-def rollback_backup(novel_path: str, yaml_path: str) -> dict[str, str]:
+def _rollback_versioned(output_dir: str, yaml_path: str, version: str) -> None:
+    version_dir = os.path.join(output_dir, "history", version)
+    if not os.path.exists(version_dir):
+        raise HTTPException(
+            status_code=404, detail=f"Backup version '{version}' not found."
+        )
+
+    basename = Path(yaml_path).stem.replace("_findings", "")
+    bak_yaml = os.path.join(version_dir, f"{basename}_findings.yaml")
+    if os.path.exists(bak_yaml):
+        shutil.copy2(bak_yaml, yaml_path)
+
+    formatted_txt_path = os.path.abspath(
+        project_paths.resolve_formatted_draft_path(output_dir, basename)
+    )
+    bak_formatted = os.path.join(version_dir, f"{basename}_formatted.txt")
+    if os.path.exists(bak_formatted):
+        shutil.copy2(bak_formatted, formatted_txt_path)
+
+    bak_report = os.path.join(version_dir, f"{basename}_report.md")
+    report_path = os.path.join(output_dir, f"{basename}_report.md")
+    if os.path.exists(bak_report):
+        shutil.copy2(bak_report, report_path)
+
+    bak_ctx = os.path.join(version_dir, "01_filtered_context.txt")
+    ctx_path = os.path.join(output_dir, "01_filtered_context.txt")
+    if os.path.exists(bak_ctx):
+        shutil.copy2(bak_ctx, ctx_path)
+
+    for fname in os.listdir(version_dir):
+        if fname.endswith(".txt") and not fname.endswith("_formatted.txt"):
+            original_bak_path = os.path.join(version_dir, fname)
+            original_dest_path = os.path.abspath(
+                os.path.join(project_paths.NOVELS_DIR, fname)
+            )
+            shutil.copy2(original_bak_path, original_dest_path)
+
+
+def rollback_backup(
+    novel_path: str, yaml_path: str, version: str | None = None
+) -> dict[str, str]:
     """Restores the backup for a given novel and yaml path."""
+    if version:
+        output_dir = os.path.dirname(yaml_path)
+        try:
+            _rollback_versioned(output_dir, yaml_path, version)
+            return {
+                "status": "success",
+                "message": f"Rollback to version '{version}' completed successfully.",
+            }
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to rollback version '{version}': {str(e)}",
+            )
+
     novel_bak = f"{novel_path}.bak"
     yaml_bak = f"{yaml_path}.bak" if yaml_path else None
 

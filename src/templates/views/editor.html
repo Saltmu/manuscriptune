@@ -10,6 +10,10 @@
             <div class="stats-counter">
                 採用: <span id="accepted-count">0</span> / <span id="total-count">0</span> 件
             </div>
+            <div id="history-restore-container" style="display: none; align-items: center; gap: 8px;">
+                <select id="select-history" style="background: var(--bg-card); color: var(--text-normal); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; font-size: 0.8rem; height: 32px;"></select>
+                <button class="btn-secondary btn-sm" id="btn-restore-history" onclick="confirmRestoreHistory()" style="background-color: rgba(59, 130, 246, 0.1); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">↩️ 履歴から復元</button>
+            </div>
             <button class="btn-secondary btn-sm" id="btn-rollback" onclick="confirmRollback()" style="display: none; background-color: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">↩️ 元に戻す</button>
             <button class="btn-primary btn-sm" onclick="confirmApply()">小説へ反映</button>
         </div>

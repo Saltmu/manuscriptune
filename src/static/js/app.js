@@ -16,7 +16,9 @@ import {
     toggleEditMode,
     saveNovel,
     confirmRollback,
-    executeRollback
+    executeRollback,
+    confirmRestoreHistory,
+    executeRestoreHistory
 } from './views/editor.js';
 
 // Parse URL hash to view and file resources
@@ -193,6 +195,8 @@ window.toggleEditMode = toggleEditMode;
 window.saveNovel = saveNovel;
 window.confirmRollback = confirmRollback;
 window.executeRollback = executeRollback;
+window.confirmRestoreHistory = confirmRestoreHistory;
+window.executeRestoreHistory = executeRestoreHistory;
 window.shutdownServerGlobal = shutdownServerGlobal;
 window.toggleConsole = toggleConsole;
 window.closeModal = closeModal;

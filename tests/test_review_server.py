@@ -233,6 +233,35 @@ def test_novel_service_rollback_backup_exception(tmp_path):
         assert excinfo.value.status_code == 500
 
 
+def test_novel_service_rollback_backup_versioned(tmp_path):
+    # Setup paths
+    novels_dir = tmp_path / "novels"
+    os.makedirs(novels_dir, exist_ok=True)
+
+    novel_path = novels_dir / "novel.txt"
+    yaml_path = tmp_path / "novel_findings.yaml"
+
+    # Setup history/v1/
+    history_dir = tmp_path / "history" / "v1"
+    os.makedirs(history_dir, exist_ok=True)
+
+    bak_novel = history_dir / "novel.txt"
+    bak_yaml = history_dir / "novel_findings.yaml"
+
+    bak_novel.write_text("v1 novel original content", encoding="utf-8")
+    bak_yaml.write_text("findings: []", encoding="utf-8")
+
+    with patch("src.utils.project_paths.NOVELS_DIR", str(novels_dir)):
+        # Run versioned rollback
+        res = novel_service.rollback_backup(
+            str(novel_path), str(yaml_path), version="v1"
+        )
+        assert res["status"] == "success"
+
+        assert novel_path.read_text(encoding="utf-8") == "v1 novel original content"
+        assert yaml_path.read_text(encoding="utf-8") == "findings: []"
+
+
 def test_novel_service_build_writer_cmd():
     params = WriteParams(
         episode="1",
