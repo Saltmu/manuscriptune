@@ -201,6 +201,13 @@ def test_find_target_line_stripped_match():
     assert find_target_line(text_lines, finding) == 1
 
 
+def test_find_target_line_fuzzy_match():
+    # Test matching where spaces, indents, or newline types might differ slightly
+    text_lines = ["Chapter 1\n", "  This is a   long text\n", "with different spacing.\n"]
+    finding = {"original": "This is a long text\nwith different spacing.", "location": "2"}
+    assert find_target_line(text_lines, finding) == 2
+
+
 def test_query_llm_for_block_replacement_generic_exception():
     mock_task = MagicMock()
     mock_task.execute.side_effect = Exception("Generic LLM failure")

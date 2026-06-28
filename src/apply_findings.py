@@ -49,12 +49,12 @@ def find_target_line(text_lines, finding):
     Looks near specified location first, then falls back to full scan.
     Returns 1-based index or None.
     """
-    original = finding.get("original", "").strip()
+    original = finding.get("original", "").strip().replace("\r\n", "\n")
     if not original:
         return None
 
-    # Check using full text (handles multi-line matching)
-    raw_text = "".join(text_lines)
+    # Check using full text (normalising newlines)
+    raw_text = "".join(text_lines).replace("\r\n", "\n")
     if original in raw_text:
         offset = raw_text.find(original)
         line_no = raw_text[:offset].count("\n") + 1
@@ -67,12 +67,30 @@ def find_target_line(text_lines, finding):
         target_idx = line_no - 1
         for idx in range(target_idx - 5, target_idx + 6):
             if 0 <= idx < len(text_lines):
-                if original in text_lines[idx].strip():
+                normalized_line = text_lines[idx].replace("\r\n", "\n").strip()
+                if original in normalized_line:
                     return idx + 1
 
     for idx, line in enumerate(text_lines):
-        if original in line.strip():
+        normalized_line = line.replace("\r\n", "\n").strip()
+        if original in normalized_line:
             return idx + 1
+
+    # Fuzzy match: ignore all whitespace/newlines (normalise completely)
+    import re
+    def clean_spacing(text):
+        return re.sub(r"\s+", "", text)
+
+    clean_original = clean_spacing(original)
+    if clean_original:
+        clean_raw = clean_spacing(raw_text)
+        if clean_original in clean_raw:
+            start_char_idx = clean_raw.find(clean_original)
+            char_count = 0
+            for idx, line in enumerate(text_lines):
+                char_count += len(clean_spacing(line))
+                if char_count > start_char_idx:
+                    return idx + 1
 
     return None
 
