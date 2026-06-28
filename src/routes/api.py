@@ -281,7 +281,8 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
         if os.path.exists(yaml_path):
             shutil.copy2(yaml_path, f"{yaml_path}.bak")
 
-        parent_dir = os.path.dirname(novel_path)
+        basename = Path(novel_path).stem
+        output_dir = project_paths.get_output_dir(basename)
         script_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "apply_findings.py"
         )
@@ -292,7 +293,7 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
             "-u",
             script_path,
             "--dir",
-            parent_dir,
+            output_dir,
             "--auto",
         ]
 
