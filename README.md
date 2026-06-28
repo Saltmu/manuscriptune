@@ -75,7 +75,7 @@ agy
 ```
 novel_tools/
 ├── novels/                   # 執筆済み小説テキスト（章-話.txt 形式）
-├── novel_check_results/      # レビュー結果の保存先（章-話ごとのサブフォルダ）
+├── reviews/                   # レビュー結果の保存先（章-話ごとのサブフォルダ）
 ├── data/sources/             # 執筆参照資料（設定資料集・プロット・キャラ概要）※Git管理外
 ├── src/                      # Pythonスクリプト群（レビューパイプライン・WebUIサーバー等）
 ├── skills/                   # エージェントスキル群
@@ -208,16 +208,16 @@ WebUIを使わずに、コマンドラインから直接反映を実行したい
 
 ```bash
 # ターミナル上で1件ずつ確認しながら反映する（手動修正入力も可能）
-poetry run apply-findings --dir novel_check_results/1_12 --interactive
+poetry run apply-findings --dir reviews/1_12 --interactive
 
 # 手動でYAMLを編集して accepted: "y" にしたものを一括自動反映する
-poetry run apply-findings --dir novel_check_results/1_12 --auto
+poetry run apply-findings --dir reviews/1_12 --auto
 
 # 特定の指摘ID（カンマ区切り）だけを指定して反映する
-poetry run apply-findings --dir novel_check_results/1_12 --accept-ids INT-001,INT-003
+poetry run apply-findings --dir reviews/1_12 --accept-ids INT-001,INT-003
 
 # LLMを使用せず、指摘内容の「suggestion」から修正文字列を抽出して単純置換する
-poetry run apply-findings --dir novel_check_results/1_12 --auto --no-llm
+poetry run apply-findings --dir reviews/1_12 --auto --no-llm
 ```
 
 #### レビュー結果のYAML構造

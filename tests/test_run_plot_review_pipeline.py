@@ -9,11 +9,12 @@ from src.run_plot_review_pipeline import (
     run_single_review_skill,
 )
 from src.utils.ai_client import AgyClientError
+from src.utils.project_paths import DEFAULT_RESULTS_DIR
 
 
 def test_archive_previous_plot_review(tmp_path):
     basename = "plot1"
-    output_dir = tmp_path / "novel_check_results" / basename
+    output_dir = tmp_path / DEFAULT_RESULTS_DIR / basename
     os.makedirs(output_dir, exist_ok=True)
 
     findings_yaml = output_dir / f"{basename}_plot_findings.yaml"

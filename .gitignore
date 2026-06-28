@@ -30,7 +30,7 @@ index/
 .DS_Store
 Thumbs.db
 novels/
-novel_check_results/
+reviews/
 
 # Test and Coverage
 .coverage

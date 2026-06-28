@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from src.services import novel_service
 from src.utils import project_config as writer_helper
+from src.utils import project_paths
 from src.utils.ai_client import AgyClient
 
 router = APIRouter()
@@ -318,7 +319,9 @@ async def list_plots():
         if "プロット" in name or "plot" in name.lower() or name == "第1幕概要.txt":
             plot_stem = f.stem
             yaml_path = os.path.join(
-                "novel_check_results", plot_stem, f"{plot_stem}_plot_findings.yaml"
+                project_paths.DEFAULT_RESULTS_DIR,
+                plot_stem,
+                f"{plot_stem}_plot_findings.yaml",
             )
             has_findings = os.path.exists(yaml_path)
 
@@ -350,9 +353,8 @@ async def get_plot(
 
     plot_stem = Path(plot_path).stem
     yaml_path = os.path.join(
-        "novel_check_results", plot_stem, f"{plot_stem}_plot_findings.yaml"
+        project_paths.DEFAULT_RESULTS_DIR, plot_stem, f"{plot_stem}_plot_findings.yaml"
     )
-
     findings = []
     if os.path.exists(yaml_path):
         try:

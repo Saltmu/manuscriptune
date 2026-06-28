@@ -1,6 +1,6 @@
 import os
 
-DEFAULT_RESULTS_DIR = "novel_check_results"
+DEFAULT_RESULTS_DIR = "reviews"
 
 
 def get_output_dir(basename: str, results_dir: str = DEFAULT_RESULTS_DIR) -> str:

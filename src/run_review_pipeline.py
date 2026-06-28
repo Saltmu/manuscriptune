@@ -139,15 +139,19 @@ def _resolve_output_dir(target_path: Path, args_dir: str | None) -> tuple[str, s
     """
     Resolves basename and output directory.
     """
-    if "novel_check_results" in target_path.parts:
-        idx = target_path.parts.index("novel_check_results")
+    if project_paths.DEFAULT_RESULTS_DIR in target_path.parts:
+        idx = target_path.parts.index(project_paths.DEFAULT_RESULTS_DIR)
         if idx + 1 < len(target_path.parts):
             basename = target_path.parts[idx + 1]
-            output_dir = os.path.join("novel_check_results", basename)
+            output_dir = os.path.join(project_paths.DEFAULT_RESULTS_DIR, basename)
             return basename, output_dir
 
     basename = target_path.stem
-    output_dir = args_dir if args_dir else os.path.join("novel_check_results", basename)
+    output_dir = (
+        args_dir
+        if args_dir
+        else os.path.join(project_paths.DEFAULT_RESULTS_DIR, basename)
+    )
     return basename, output_dir
 
 
@@ -289,7 +293,7 @@ def main():
     )
     parser.add_argument(
         "--dir",
-        help="Output directory path (defaults to novel_check_results/[basename])",
+        help=f"Output directory path (defaults to {project_paths.DEFAULT_RESULTS_DIR}/[basename])",
     )
     parser.add_argument(
         "--workers", type=int, default=2, help="Number of parallel worker threads."

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src import integrate_plot_findings
+from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import ReviewSkillInput, ReviewSkillTask
 from src.utils.file_io import read_file
@@ -96,7 +97,7 @@ def main():
     )
     parser.add_argument(
         "--dir",
-        help="Output directory path (defaults to novel_check_results/[basename])",
+        help=f"Output directory path (defaults to {project_paths.DEFAULT_RESULTS_DIR}/[basename])",
     )
     parser.add_argument(
         "--workers", type=int, default=2, help="Number of parallel worker threads."
@@ -105,7 +106,11 @@ def main():
 
     target_path = Path(args.target_file)
     basename = target_path.stem
-    output_dir = args.dir if args.dir else os.path.join("novel_check_results", basename)
+    output_dir = (
+        args.dir
+        if args.dir
+        else os.path.join(project_paths.DEFAULT_RESULTS_DIR, basename)
+    )
 
     os.makedirs(output_dir, exist_ok=True)
 

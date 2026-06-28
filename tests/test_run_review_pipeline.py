@@ -23,6 +23,7 @@ from src.run_review_pipeline import (
     run_single_review_skill,
 )
 from src.utils.ai_client import AgyClientError
+from src.utils.project_paths import DEFAULT_RESULTS_DIR
 
 
 def test_resolve_output_dir(tmp_path):
@@ -30,10 +31,10 @@ def test_resolve_output_dir(tmp_path):
     os.makedirs(target_file.parent, exist_ok=True)
     target_file.touch()
 
-    # Case 1: dir is None, output directory defaults to novel_check_results/{basename}
+    # Case 1: dir is None, output directory defaults to DEFAULT_RESULTS_DIR/{basename}
     basename, output_dir = _resolve_output_dir(target_file, None)
     assert basename == "episode_1"
-    assert output_dir == os.path.join("novel_check_results", "episode_1")
+    assert output_dir == os.path.join(DEFAULT_RESULTS_DIR, "episode_1")
 
     # Case 2: dir is specified
     custom_dir = str(tmp_path / "custom_results")
@@ -44,7 +45,7 @@ def test_resolve_output_dir(tmp_path):
 
 def test_archive_previous_review(tmp_path):
     basename = "episode_1"
-    output_dir = tmp_path / "novel_check_results" / basename
+    output_dir = tmp_path / DEFAULT_RESULTS_DIR / basename
     os.makedirs(output_dir, exist_ok=True)
 
     # Place mock files to archive
