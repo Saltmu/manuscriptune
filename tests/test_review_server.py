@@ -59,6 +59,8 @@ def test_save_novel():
     finally:
         if os.path.exists(tmp_name):
             os.remove(tmp_name)
+        if os.path.exists(f"{tmp_name}.bak"):
+            os.remove(f"{tmp_name}.bak")
 
 
 def test_backup_and_rollback():
