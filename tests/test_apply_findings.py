@@ -306,3 +306,66 @@ def test_save_outputs_yaml_exception(tmp_path):
         _save_outputs_and_print_summary(
             str(tmp_path / "dummy.txt"), "dummy.yaml", [], [], stats
         )
+
+
+def test_find_target_line_robust_multi_line_and_fuzzy():
+    text_lines = [
+        "泥と汗で硬くなった作業着が、歩くたびに太ももを擦る。\n",
+        "入り口に立ちはだかったのは、分厚い獣皮の外套をまとった二人の男だ。\n",
+        "胸元には天秤の紋章が揺れている。\n",
+        "男は蔑むように鼻で笑うと、汚れた指先でカップの縁を小突く。\n",
+    ]
+
+    # 複数行かつ一部が「カップ of 縁」になっているケース
+    finding = {
+        "original": "入り口に立ちはだかったのは、分厚い獣皮の外套をまとった二人の男だ。\n蔑むように鼻で笑うと、汚れた指先でカップ of 縁を小突く。",
+        "location": "2行目、4行目",
+    }
+
+    line_no = find_target_line(text_lines, finding)
+    assert line_no == 2
+    assert "_matched_lines" in finding
+    assert finding["_matched_lines"] == [2, 4]
+
+
+def test_apply_grouped_findings_context_extension():
+    # _apply_grouped_findings が _matched_lines を考慮することを確認
+    from src.apply_findings import _apply_grouped_findings
+
+    text_lines = [
+        "L1\n",
+        "L2\n",
+        "L3\n",
+        "L4\n",
+        "L5\n",
+        "L6\n",
+    ]
+
+    finding = {
+        "id": "INT-001",
+        "original": "L2\nL5",
+        "suggestion": "「L2」を「L2改」に、「L5」を「L5改」に",
+        "_matched_lines": [2, 5],
+    }
+
+    # group: list[list[tuple[int, dict]]]
+    # 各 tuple は (line_no, finding)
+    groups = [[(2, finding)]]
+
+    args = MagicMock()
+    args.no_llm = True  # fallback to block をトリガーさせる
+
+    # apply_fallback_to_block をパッチして、引数 context_lines をアサートする
+    expected_context = list(text_lines)
+    with patch(
+        "src.apply_findings.apply_fallback_to_block", return_value=("", [], [])
+    ) as mock_fallback:
+        _apply_grouped_findings(text_lines, groups, args)
+        mock_fallback.assert_called_once()
+        context_lines = mock_fallback.call_args[0][0]
+        # L_min = 2, L_max = 5 (from _matched_lines)
+        # C = 4
+        # start_idx = max(0, 2 - 1 - 4) = 0
+        # end_idx = min(6, 5 + 4) = 6
+        assert len(context_lines) == 6
+        assert context_lines == expected_context

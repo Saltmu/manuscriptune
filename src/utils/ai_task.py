@@ -301,7 +301,7 @@ class FindingsIntegrationTask(AgyTask[FindingsIntegrationInput, str]):
    - 各 finding の構造は以下のキーを厳密に保持してください：
      - `id` (INT-XXX)
      - `location` (元の指摘の行数)
-     - `original` (該当箇所のテキスト抜粋)
+     - `original` (該当箇所のテキスト抜粋。元の指摘リストにある `original` や【校閲対象の小説テキスト】から、一切の改変（文字の追加、削除、表現の翻訳、誤植の修正、勝手な省略など）をせず、一字一句違わずにそのままコピーして抽出してください。「カップの縁」を「カップ of 縁」と表現を変えるなどの改変は絶対に禁止します)
      - `category` (カテゴリ名)
      - `severity` (high / medium / low / info)
      - `analysis` (統合・競合解決された分析内容)
@@ -369,7 +369,7 @@ class PlotFindingsIntegrationTask(AgyTask[PlotFindingsIntegrationInput, str]):
    - 各 finding の構造は以下のキーを厳密に保持してください：
      - `id` (PINT-XXX)
      - `location` (元の指摘の場所・シーン名等)
-     - `original` (該当箇所のテキスト抜粋)
+     - `original` (該当箇所のテキスト抜粋。元の指摘リストにある `original` や【校閲対象 of プロットテキスト】から、一切の改変（文字の追加、削除、表現の翻訳、誤植の修正、勝手な省略など）をせず、一字一句違わずにそのままコピーして抽出してください)
      - `category` (カテゴリ名)
      - `severity` (high / medium / low / info)
      - `analysis` (統合・競合解決された分析内容)
