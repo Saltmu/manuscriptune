@@ -5,6 +5,7 @@ import sys
 
 import yaml
 
+from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import PlotFindingsIntegrationInput, PlotFindingsIntegrationTask
 from src.utils.file_io import read_file
@@ -145,13 +146,13 @@ def integrate_plot_findings_in_dir(output_dir, plot_filepath, model):
 
     if not all_findings:
         print("No plot findings to merge. Writing empty integrated findings.")
-        integrated_yaml_path = os.path.join(
-            output_dir, f"{plot_stem}_plot_findings.yaml"
+        integrated_yaml_path = project_paths.get_plot_findings_yaml_path(
+            output_dir, plot_stem
         )
         with open(integrated_yaml_path, "w", encoding="utf-8") as f:
             f.write("findings: []\n")
         generate_markdown_report(
-            [], os.path.join(output_dir, f"{plot_stem}_plot_report.md")
+            [], project_paths.get_plot_report_md_path(output_dir, plot_stem)
         )
         print("Done.")
         return True
@@ -171,7 +172,9 @@ def integrate_plot_findings_in_dir(output_dir, plot_filepath, model):
         merged_yaml_content = _fallback_merge(all_findings)
 
     # Write output
-    integrated_yaml_path = os.path.join(output_dir, f"{plot_stem}_plot_findings.yaml")
+    integrated_yaml_path = project_paths.get_plot_findings_yaml_path(
+        output_dir, plot_stem
+    )
     with open(integrated_yaml_path, "w", encoding="utf-8") as f:
         f.write(merged_yaml_content + "\n")
     print(f"Saved integrated findings to {integrated_yaml_path}")
@@ -188,7 +191,7 @@ def integrate_plot_findings_in_dir(output_dir, plot_filepath, model):
             "Warning: Could not parse merged YAML back for Markdown report generation."
         )
 
-    report_md_path = os.path.join(output_dir, f"{plot_stem}_plot_report.md")
+    report_md_path = project_paths.get_plot_report_md_path(output_dir, plot_stem)
     generate_markdown_report(merged_findings_list, report_md_path)
     print(f"Saved Markdown report to {report_md_path}")
     return True

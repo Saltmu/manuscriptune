@@ -18,7 +18,7 @@ def archive_previous_review(output_dir, basename, target_path=None):
     Archives the current [basename]_formatted.txt, [basename]_findings.yaml,
     [basename]_report.md, and the original target file into a history/v{version}/ directory.
     """
-    history_dir = os.path.join(output_dir, "history")
+    history_dir = project_paths.get_history_dir(output_dir)
     findings_file = project_paths.get_findings_yaml_path(output_dir, basename)
 
     if not os.path.exists(findings_file):
@@ -38,7 +38,7 @@ def archive_previous_review(output_dir, basename, target_path=None):
 
     next_version = max(existing_versions) + 1 if existing_versions else 1
     v_prefix = f"v{next_version}"
-    version_dir = os.path.join(history_dir, v_prefix)
+    version_dir = project_paths.get_version_dir(output_dir, v_prefix)
     os.makedirs(version_dir, exist_ok=True)
 
     print(
@@ -71,8 +71,10 @@ def archive_previous_review(output_dir, basename, target_path=None):
             )
 
     # Clean up current findings and report so they are regenerated
-    for src_name in [f"{basename}_findings.yaml", f"{basename}_report.md"]:
-        src_path = os.path.join(output_dir, src_name)
+    for src_path in [
+        project_paths.get_findings_yaml_path(output_dir, basename),
+        project_paths.get_report_md_path(output_dir, basename),
+    ]:
         if os.path.exists(src_path):
             os.remove(src_path)
 
@@ -82,7 +84,10 @@ def run_formatter(input_file, output_file):
     Runs the novel mechanical formatter on the input file.
     """
     formatter_script = os.path.join(
-        "skills", "novel-formatter", "scripts", "novel_formatter_helper.py"
+        project_paths.get_skills_dir(),
+        "novel-formatter",
+        "scripts",
+        "novel_formatter_helper.py",
     )
     if not os.path.exists(formatter_script):
         print(
@@ -106,7 +111,7 @@ def run_filter_context(formatted_file, output_file):
     """
     Runs the filter_context script to extract relevant settings.
     """
-    filter_script = os.path.join("src", "filter_context.py")
+    filter_script = project_paths.get_src_path("filter_context.py")
     if not os.path.exists(filter_script):
         print("Warning: filter_context.py not found. Skipping context filtering.")
         return False
@@ -156,15 +161,11 @@ def _resolve_output_dir(target_path: Path, args_dir: str | None) -> tuple[str, s
         idx = target_path.parts.index(project_paths.DEFAULT_RESULTS_DIR)
         if idx + 1 < len(target_path.parts):
             basename = target_path.parts[idx + 1]
-            output_dir = os.path.join(project_paths.DEFAULT_RESULTS_DIR, basename)
+            output_dir = project_paths.get_output_dir(basename)
             return basename, output_dir
 
     basename = target_path.stem
-    output_dir = (
-        args_dir
-        if args_dir
-        else os.path.join(project_paths.DEFAULT_RESULTS_DIR, basename)
-    )
+    output_dir = args_dir if args_dir else project_paths.get_output_dir(basename)
     return basename, output_dir
 
 
@@ -174,7 +175,7 @@ def _run_step_format(
     """
     Executes Step 1: mechanical formatter and archiving if needed.
     """
-    findings_file = os.path.join(output_dir, f"{basename}_findings.yaml")
+    findings_file = project_paths.get_findings_yaml_path(output_dir, basename)
     is_rereview = os.path.exists(findings_file)
 
     if is_rereview:
@@ -250,10 +251,10 @@ def _run_step_integration(output_dir: str, basename: str, model: str) -> None:
         if success:
             print("[OK] Reports integrated successfully.")
             print(
-                f"Consolidated Report: {os.path.join(output_dir, f'{basename}_report.md')}"
+                f"Consolidated Report: {project_paths.get_report_md_path(output_dir, basename)}"
             )
             print(
-                f"Consolidated YAML  : {os.path.join(output_dir, f'{basename}_findings.yaml')}"
+                f"Consolidated YAML  : {project_paths.get_findings_yaml_path(output_dir, basename)}"
             )
         else:
             print(
@@ -275,7 +276,7 @@ def _run_step_server(
     """
     if not no_server:
         print("\nStarting Interactive Review Editor UI...")
-        server_script = os.path.join("src", "review_server.py")
+        server_script = project_paths.get_src_path("review_server.py")
         if os.path.exists(server_script):
             cmd = [
                 "poetry",
@@ -283,7 +284,7 @@ def _run_step_server(
                 "python",
                 server_script,
                 formatted_draft,
-                os.path.join(output_dir, f"{basename}_findings.yaml"),
+                project_paths.get_findings_yaml_path(output_dir, basename),
             ]
             print(f"Running: {' '.join(cmd)}")
             subprocess.run(cmd)

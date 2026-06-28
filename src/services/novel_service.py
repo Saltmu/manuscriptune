@@ -30,7 +30,7 @@ def resolve_paths(novel_name: str) -> tuple[str, str]:
     if os.path.exists(formatted_path):
         novel_path = formatted_path
     else:
-        novel_path = os.path.abspath(os.path.join(project_paths.NOVELS_DIR, safe_name))
+        novel_path = project_paths.get_novel_path(safe_name)
 
     yaml_path = os.path.abspath(
         project_paths.resolve_findings_yaml_path(output_dir, basename)
@@ -40,7 +40,7 @@ def resolve_paths(novel_name: str) -> tuple[str, str]:
 
 def render_html_template(template_name: str) -> str:
     """Recursively resolves <!--#include file="filename.html"--> placeholders."""
-    template_dir = Path(__file__).parent.parent / "templates"
+    template_dir = Path(project_paths.get_templates_dir())
     template_path = template_dir / template_name
     if not template_path.exists():
         raise FileNotFoundError(f"Template '{template_name}' not found.")

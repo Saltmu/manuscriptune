@@ -101,7 +101,7 @@ async def list_available_models():
 
 @router.get("/api/novels")
 async def list_novels():
-    novel_dir = Path(project_paths.NOVELS_DIR)
+    novel_dir = Path(project_paths.get_novels_dir())
     if not novel_dir.exists():
         return {"novels": []}
 
@@ -155,10 +155,12 @@ async def get_novel(file: str = Query(..., description="Novel filename")):
     backups = []
     basename = Path(novel_path).stem
     output_dir = project_paths.get_output_dir(basename)
-    history_dir = os.path.join(output_dir, "history")
+    history_dir = project_paths.get_history_dir(output_dir)
     if os.path.exists(history_dir):
         for d in os.listdir(history_dir):
-            if os.path.isdir(os.path.join(history_dir, d)) and re.match(r"^v\d+$", d):
+            if os.path.isdir(project_paths.get_version_dir(output_dir, d)) and re.match(
+                r"^v\d+$", d
+            ):
                 backups.append(d)
         backups.sort(key=lambda x: int(x[1:]))
 
@@ -298,9 +300,7 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
             Path(novel_path).stem.replace("_formatted", "").replace("_findings", "")
         )
         output_dir = project_paths.get_output_dir(basename)
-        script_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "apply_findings.py"
-        )
+        script_path = project_paths.get_src_path("apply_findings.py")
         cmd = [
             "poetry",
             "run",
@@ -333,7 +333,7 @@ async def stream_sync():
 
 @router.get("/api/plots")
 async def list_plots():
-    sources_dir = Path(project_paths.DATA_SOURCES_DIR)
+    sources_dir = Path(project_paths.get_sources_dir())
     if not sources_dir.exists():
         return {"plots": []}
 
@@ -342,10 +342,8 @@ async def list_plots():
         name = f.name
         if "プロット" in name or "plot" in name.lower() or name == "第1幕概要.txt":
             plot_stem = f.stem
-            yaml_path = os.path.join(
-                project_paths.DEFAULT_RESULTS_DIR,
-                plot_stem,
-                f"{plot_stem}_plot_findings.yaml",
+            yaml_path = project_paths.get_plot_findings_yaml_path(
+                project_paths.get_output_dir(plot_stem), plot_stem
             )
             has_findings = os.path.exists(yaml_path)
 
@@ -370,7 +368,7 @@ async def get_plot(
     ),
 ):
     safe_file = os.path.basename(file)
-    plot_path = os.path.join(project_paths.DATA_SOURCES_DIR, safe_file)
+    plot_path = project_paths.get_source_path(safe_file)
     if not os.path.exists(plot_path):
         raise HTTPException(status_code=404, detail="Plot file not found.")
 
@@ -378,8 +376,8 @@ async def get_plot(
         content = f.read()
 
     plot_stem = Path(plot_path).stem
-    yaml_path = os.path.join(
-        project_paths.DEFAULT_RESULTS_DIR, plot_stem, f"{plot_stem}_plot_findings.yaml"
+    yaml_path = project_paths.get_plot_findings_yaml_path(
+        project_paths.get_output_dir(plot_stem), plot_stem
     )
     findings = []
     if os.path.exists(yaml_path):
@@ -406,7 +404,7 @@ async def stream_plot_review(
     model: str | None = Query(None),
 ):
     safe_file = os.path.basename(file)
-    plot_path = os.path.join(project_paths.DATA_SOURCES_DIR, safe_file)
+    plot_path = project_paths.get_source_path(safe_file)
     if not os.path.exists(plot_path):
         raise HTTPException(status_code=404, detail="Plot file not found.")
 
@@ -432,7 +430,7 @@ async def stream_review(
     model: str | None = Query(None),
 ):
     safe_file = os.path.basename(file)
-    novel_path = os.path.join(project_paths.NOVELS_DIR, safe_file)
+    novel_path = project_paths.get_novel_path(safe_file)
     if not os.path.exists(novel_path):
         raise HTTPException(status_code=404, detail="Novel file not found.")
 
@@ -484,7 +482,7 @@ async def get_write_prompt(params: WriteParams = Depends()):  # noqa: B008
 
 @router.get("/api/sync/status")
 async def sync_status():
-    sources_dir = Path(project_paths.DATA_SOURCES_DIR)
+    sources_dir = Path(project_paths.get_sources_dir())
     if not sources_dir.exists():
         return {"sources": []}
 
@@ -505,7 +503,7 @@ async def preview_novel(
     ),
 ):
     safe_file = os.path.basename(file)
-    novel_path = os.path.abspath(os.path.join(project_paths.NOVELS_DIR, safe_file))
+    novel_path = project_paths.get_novel_path(safe_file)
     print(
         f"[DEBUG] preview_novel: file={repr(file)}, safe_file={repr(safe_file)}, novel_path={repr(novel_path)}, exists={os.path.exists(novel_path)}, cwd={os.getcwd()}"
     )
@@ -578,10 +576,12 @@ async def get_data(file: str = Query(..., description="Novel filename")):
     backups = []
     basename = Path(novel_path).stem
     output_dir = project_paths.get_output_dir(basename)
-    history_dir = os.path.join(output_dir, "history")
+    history_dir = project_paths.get_history_dir(output_dir)
     if os.path.exists(history_dir):
         for d in os.listdir(history_dir):
-            if os.path.isdir(os.path.join(history_dir, d)) and re.match(r"^v\d+$", d):
+            if os.path.isdir(project_paths.get_version_dir(output_dir, d)) and re.match(
+                r"^v\d+$", d
+            ):
                 backups.append(d)
         backups.sort(key=lambda x: int(x[1:]))
 
