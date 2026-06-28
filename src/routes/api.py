@@ -98,7 +98,7 @@ async def list_available_models():
 
 @router.get("/api/novels")
 async def list_novels():
-    novel_dir = Path("novels")
+    novel_dir = Path(project_paths.NOVELS_DIR)
     if not novel_dir.exists():
         return {"novels": []}
 
@@ -180,10 +180,10 @@ async def save_novel(req: SaveNovelRequest):
         raise he
 
     # Check protection
-    if "data/sources/" in novel_path.replace("\\", "/"):
+    if f"{project_paths.DATA_SOURCES_DIR}/" in novel_path.replace("\\", "/"):
         raise HTTPException(
             status_code=403,
-            detail="Writing to source files in data/sources/ is strictly prohibited by AI guardrails.",
+            detail=f"Writing to source files in {project_paths.DATA_SOURCES_DIR}/ is strictly prohibited by AI guardrails.",
         )
 
     try:
@@ -309,7 +309,7 @@ async def stream_sync():
 
 @router.get("/api/plots")
 async def list_plots():
-    sources_dir = Path("data/sources")
+    sources_dir = Path(project_paths.DATA_SOURCES_DIR)
     if not sources_dir.exists():
         return {"plots": []}
 
@@ -341,10 +341,12 @@ async def list_plots():
 
 @router.get("/api/plot")
 async def get_plot(
-    file: str = Query(..., description="Plot filename in data/sources/"),
+    file: str = Query(
+        ..., description=f"Plot filename in {project_paths.DATA_SOURCES_DIR}/"
+    ),
 ):
     safe_file = os.path.basename(file)
-    plot_path = os.path.join("data/sources", safe_file)
+    plot_path = os.path.join(project_paths.DATA_SOURCES_DIR, safe_file)
     if not os.path.exists(plot_path):
         raise HTTPException(status_code=404, detail="Plot file not found.")
 
@@ -374,11 +376,13 @@ async def get_plot(
 
 @router.get("/api/stream/plot_review")
 async def stream_plot_review(
-    file: str = Query(..., description="Plot filename in data/sources/"),
+    file: str = Query(
+        ..., description=f"Plot filename in {project_paths.DATA_SOURCES_DIR}/"
+    ),
     model: str | None = Query(None),
 ):
     safe_file = os.path.basename(file)
-    plot_path = os.path.join("data/sources", safe_file)
+    plot_path = os.path.join(project_paths.DATA_SOURCES_DIR, safe_file)
     if not os.path.exists(plot_path):
         raise HTTPException(status_code=404, detail="Plot file not found.")
 
@@ -398,11 +402,13 @@ async def stream_plot_review(
 
 @router.get("/api/stream/review")
 async def stream_review(
-    file: str = Query(..., description="Novel text filename in novels/"),
+    file: str = Query(
+        ..., description=f"Novel text filename in {project_paths.NOVELS_DIR}/"
+    ),
     model: str | None = Query(None),
 ):
     safe_file = os.path.basename(file)
-    novel_path = os.path.join("novels", safe_file)
+    novel_path = os.path.join(project_paths.NOVELS_DIR, safe_file)
     if not os.path.exists(novel_path):
         raise HTTPException(status_code=404, detail="Novel file not found.")
 
@@ -454,7 +460,7 @@ async def get_write_prompt(params: WriteParams = Depends()):  # noqa: B008
 
 @router.get("/api/sync/status")
 async def sync_status():
-    sources_dir = Path("data/sources")
+    sources_dir = Path(project_paths.DATA_SOURCES_DIR)
     if not sources_dir.exists():
         return {"sources": []}
 
@@ -470,10 +476,12 @@ async def sync_status():
 
 @router.get("/api/preview")
 async def preview_novel(
-    file: str = Query(..., description="Novel text filename in novels/"),
+    file: str = Query(
+        ..., description=f"Novel text filename in {project_paths.NOVELS_DIR}/"
+    ),
 ):
     safe_file = os.path.basename(file)
-    novel_path = os.path.abspath(os.path.join("novels", safe_file))
+    novel_path = os.path.abspath(os.path.join(project_paths.NOVELS_DIR, safe_file))
     print(
         f"[DEBUG] preview_novel: file={repr(file)}, safe_file={repr(safe_file)}, novel_path={repr(novel_path)}, exists={os.path.exists(novel_path)}, cwd={os.getcwd()}"
     )

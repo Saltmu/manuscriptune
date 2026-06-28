@@ -6,7 +6,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-from src.utils import project_config
+from src.utils import project_config, project_paths
 
 
 def _check_lock_and_cache(cache_file: str, lock_file: str, cache_duration: int) -> bool:
@@ -85,7 +85,7 @@ def main():
         else os.path.join(root_dir, creds_path_rel)
     )
 
-    output_dir = os.path.join(root_dir, "data/sources")
+    output_dir = os.path.join(root_dir, project_paths.DATA_SOURCES_DIR)
 
     try:
         # Create lock

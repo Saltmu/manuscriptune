@@ -75,3 +75,17 @@ def test_get_report_md_path() -> None:
     assert get_report_md_path("out_dir", "test_novel") == os.path.join(
         "out_dir", "test_novel_report.md"
     )
+
+
+def test_directory_constants() -> None:
+    from src.utils.project_paths import (
+        DATA_DIR,
+        DATA_SOURCES_DIR,
+        NOVELS_DIR,
+        SOURCES_DIR,
+    )
+
+    assert NOVELS_DIR == "novels"
+    assert DATA_DIR == "data"
+    assert SOURCES_DIR == "sources"
+    assert DATA_SOURCES_DIR == os.path.join("data", "sources")

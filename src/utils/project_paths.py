@@ -1,5 +1,11 @@
 import os
 
+# Project Directory Constants
+NOVELS_DIR = "novels"
+DATA_DIR = "data"
+SOURCES_DIR = "sources"
+DATA_SOURCES_DIR = os.path.join(DATA_DIR, SOURCES_DIR)
+
 DEFAULT_RESULTS_DIR = "reviews"
 
 

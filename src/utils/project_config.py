@@ -74,10 +74,12 @@ def get_novel_setting(key, default=None):
 
 
 def resolve_novel_file_by_pattern(pattern_key, default_pattern, default_fallback=None):
+    from src.utils.project_paths import DATA_DIR, DATA_SOURCES_DIR, SOURCES_DIR
+
     file_patterns = get_novel_setting("file_patterns", {})
     pattern = file_patterns.get(pattern_key, default_pattern)
-    if not pattern.startswith("data/sources/"):
-        pattern = os.path.join("data", "sources", pattern)
+    if not pattern.startswith(f"{DATA_SOURCES_DIR}/"):
+        pattern = os.path.join(DATA_DIR, SOURCES_DIR, pattern)
     return resolve_latest_file(pattern, default_fallback)
 
 

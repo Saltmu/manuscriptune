@@ -5,6 +5,7 @@ import re
 import sys
 
 from src.utils import project_config as writer_helper
+from src.utils import project_paths
 
 
 # Load stopwords from external resource file
@@ -309,7 +310,7 @@ def main():
 
     # Find sources directory
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sources_dir = os.path.join(root_dir, "data", "sources")
+    sources_dir = os.path.join(root_dir, project_paths.DATA_SOURCES_DIR)
 
     if not os.path.exists(sources_dir):
         print(

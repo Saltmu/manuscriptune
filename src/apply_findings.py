@@ -187,12 +187,15 @@ def _validate_output_dir(output_dir: str) -> None:
         path_parts = norm_path.split(os.sep)
         is_source_path = False
         for i in range(len(path_parts) - 1):
-            if path_parts[i] == "data" and path_parts[i + 1] == "sources":
+            if (
+                path_parts[i] == project_paths.DATA_DIR
+                and path_parts[i + 1] == project_paths.SOURCES_DIR
+            ):
                 is_source_path = True
                 break
         if is_source_path:
             print(
-                "Error: Writing to source files in data/sources/ is strictly prohibited by AI guardrails.",
+                f"Error: Writing to source files in {project_paths.DATA_SOURCES_DIR}/ is strictly prohibited by AI guardrails.",
                 file=sys.stderr,
             )
             sys.exit(1)

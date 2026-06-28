@@ -30,7 +30,7 @@ def resolve_paths(novel_name: str) -> tuple[str, str]:
     if os.path.exists(formatted_path):
         novel_path = formatted_path
     else:
-        novel_path = os.path.abspath(os.path.join("novels", safe_name))
+        novel_path = os.path.abspath(os.path.join(project_paths.NOVELS_DIR, safe_name))
 
     yaml_path = os.path.abspath(
         project_paths.resolve_findings_yaml_path(output_dir, basename)
@@ -130,13 +130,25 @@ def build_writer_cmd(params: Any) -> list[str]:
     if params.novel_title:
         cmd.extend(["--title", params.novel_title])
     if params.policy_global:
-        cmd.extend(["--policy-global", f"data/sources/{params.policy_global}"])
+        cmd.extend(
+            [
+                "--policy-global",
+                f"{project_paths.DATA_SOURCES_DIR}/{params.policy_global}",
+            ]
+        )
     if params.policy_chapter:
-        cmd.extend(["--policy-chapter", f"data/sources/{params.policy_chapter}"])
+        cmd.extend(
+            [
+                "--policy-chapter",
+                f"{project_paths.DATA_SOURCES_DIR}/{params.policy_chapter}",
+            ]
+        )
     if params.character:
-        cmd.extend(["--character", f"data/sources/{params.character}"])
+        cmd.extend(
+            ["--character", f"{project_paths.DATA_SOURCES_DIR}/{params.character}"]
+        )
     if params.plot:
-        cmd.extend(["--plot-file", f"data/sources/{params.plot}"])
+        cmd.extend(["--plot-file", f"{project_paths.DATA_SOURCES_DIR}/{params.plot}"])
     if params.step_by_step:
         cmd.append("--step-by-step")
     if params.self_check:
