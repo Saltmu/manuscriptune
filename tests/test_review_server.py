@@ -1,6 +1,7 @@
 import os
 import signal
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -546,3 +547,68 @@ def test_routes_api_get_write_prompt():
         cmd_arg = mock_exec.call_args
         # The first argument tuple to create_subprocess_exec has command parts
         assert any("--prompt-only" in str(arg) for arg in cmd_arg[0])
+
+
+def test_routes_api_list_plots(tmp_path):
+    sources_dir = Path("data/sources")
+    os.makedirs(sources_dir, exist_ok=True)
+    
+    mock_plot = sources_dir / "04_1_01_プロット.txt"
+    mock_plot.write_text("プロットの中身", encoding="utf-8")
+    
+    try:
+        response = client.get("/api/plots")
+        assert response.status_code == 200
+        data = response.json()
+        assert "plots" in data
+        assert any(p["name"] == "04_1_01_プロット.txt" for p in data["plots"])
+    finally:
+        if mock_plot.exists():
+            mock_plot.unlink()
+
+
+def test_routes_api_get_plot_not_found():
+    response = client.get("/api/plot?file=non_existent_plot.txt")
+    assert response.status_code == 404
+
+
+def test_routes_api_get_plot_success():
+    sources_dir = Path("data/sources")
+    os.makedirs(sources_dir, exist_ok=True)
+    
+    mock_plot = sources_dir / "test_get_plot.txt"
+    mock_plot.write_text("プロットテスト本文", encoding="utf-8")
+    
+    try:
+        response = client.get("/api/plot?file=test_get_plot.txt")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["plot_name"] == "test_get_plot.txt"
+        assert data["content"] == "プロットテスト本文"
+        assert "findings" in data
+    finally:
+        if mock_plot.exists():
+            mock_plot.unlink()
+
+
+def test_routes_api_stream_plot_review_not_found():
+    response = client.get("/api/stream/plot_review?file=non_existent.txt")
+    assert response.status_code == 404
+
+
+def test_routes_api_stream_plot_review_success():
+    sources_dir = Path("data/sources")
+    os.makedirs(sources_dir, exist_ok=True)
+    
+    mock_plot = sources_dir / "test_stream_plot.txt"
+    mock_plot.write_text("プロットテスト本文", encoding="utf-8")
+    
+    try:
+        with patch("src.services.novel_service.stream_process_output") as mock_stream:
+            mock_stream.return_value = StreamingResponse(iter([b"data: success\n\n"]))
+            response = client.get("/api/stream/plot_review?file=test_stream_plot.txt&model=test-model")
+            assert response.status_code == 200
+            assert mock_stream.called
+    finally:
+        if mock_plot.exists():
+            mock_plot.unlink()
