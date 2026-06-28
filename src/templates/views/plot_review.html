@@ -1,0 +1,102 @@
+<!-- VIEW 6: Plot Review -->
+<div class="view-content split-view-content" id="view-plot_review">
+    <div class="split-container">
+        <!-- 左ペイン: 設定・操作・指摘一覧 -->
+        <div class="left-panel">
+            <div class="left-panel-content">
+                <div class="view-title-area">
+                    <h2>🗺️ プロット構成レビュー</h2>
+                    <p>プロット内のGMCOフレームワーク（目標・障害・葛藤・結果）の検証、および三幕構成や感情の波（山場）を監査し、構成上の弱点と具体的な改善案を提示します。</p>
+                </div>
+
+                <!-- 設定カード -->
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3>校閲パラメーター設定</h3>
+                    <div class="form-grid" style="margin-bottom: 16px;">
+                        <div class="form-group">
+                            <label for="plot-review-model">使用するAIモデル</label>
+                            <select id="plot-review-model">
+                                <option value="Gemini 3.5 Flash (High)">Gemini 3.5 Flash (High)</option>
+                                <option value="Gemini 3.5 Flash (Medium)">Gemini 3.5 Flash (Medium)</option>
+                                <option value="Gemini 3.5 Flash (Low)">Gemini 3.5 Flash (Low)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <h3>対象のプロットファイルを選択</h3>
+                    <div style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center;">
+                        <button class="btn-primary" id="btn-run-plot-review" onclick="runPlotReviewPipeline()">
+                            🔍 プロットレビューを実行
+                        </button>
+                        <button class="console-toggle-btn" id="plot-review-console-toggle" onclick="toggleConsole('view-plot_review')">
+                            🖥️ コンソール表示
+                        </button>
+                    </div>
+                    <div class="form-group">
+                        <div class="draft-cards-container" id="plot-cards-container">
+                            <!-- Populated via API -->
+                            <div style="text-align: center; color: var(--text-muted); padding: 20px;">読み込み中...</div>
+                        </div>
+                        <input type="hidden" id="plot-file-select" value="">
+                    </div>
+                </div>
+
+                <!-- 指摘事項表示カード（レビュー完了後に表示） -->
+                <div class="card" id="plot-findings-card" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h3 style="margin: 0;">📋 検出された構成指摘事項 (<span id="plot-findings-count">0</span>件)</h3>
+                    </div>
+
+                    <!-- フィルタツールバー -->
+                    <div class="filter-toolbar" style="margin-bottom: 16px; display: flex; gap: 12px; background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 6px;">
+                        <div class="form-group" style="margin: 0; flex: 1;">
+                            <label for="plot-filter-severity" style="font-size: 0.75rem; margin-bottom: 4px;">重要度で絞り込み</label>
+                            <select id="plot-filter-severity" onchange="filterPlotFindings()" style="padding: 4px 8px; font-size: 0.85rem;">
+                                <option value="all">すべて表示</option>
+                                <option value="high">🚨 重大 (High)</option>
+                                <option value="medium">⚠️ 中程度 (Medium)</option>
+                                <option value="low">💡 軽微 (Low)</option>
+                                <option value="info">ℹ️ 参考 (Info)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin: 0; flex: 1;">
+                            <label for="plot-filter-category" style="font-size: 0.75rem; margin-bottom: 4px;">カテゴリで絞り込み</label>
+                            <select id="plot-filter-category" onchange="filterPlotFindings()" style="padding: 4px 8px; font-size: 0.85rem;">
+                                <option value="all">すべて表示</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 指摘リストコンテナ -->
+                    <div id="plot-findings-list" style="display: flex; flex-direction: column; gap: 12px; max-height: 450px; overflow-y: auto; padding-right: 4px;">
+                        <!-- JSで動的に追加 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右ペイン: プレビュー＆リアルタイムコンソール -->
+        <div class="right-panel" id="plot_review-right-panel">
+            <!-- プレビューモードのヘッダー -->
+            <div class="console-header" id="plot_review-preview-header">
+                <span>📄 プロット本文プレビュー: <span id="plot-preview-filename">-</span></span>
+                <span style="font-size: 0.8rem; color: var(--text-muted)">プレビュー表示中</span>
+            </div>
+            <!-- コンソールモードのヘッダー -->
+            <div class="console-header" id="plot_review-console-header" style="display: none;">
+                <span>Plot Review Pipeline Console</span>
+                <span id="plot-console-status">READY</span>
+            </div>
+
+            <!-- プレビュー表示ボディ -->
+            <div id="plot-preview-body" style="flex: 1; padding: 20px; overflow-y: auto; white-space: pre-wrap; font-family: 'Sawarabi Mincho', serif; line-height: 1.8; color: #cbd5e1; font-size: 0.95rem; background-color: #0b0f19;">
+                プロットファイルを選択するとプレビューが表示されます。
+            </div>
+            <!-- コンソールログ表示ボディ -->
+            <div class="console-log" id="plot_review-console-log" style="display: none;">--- 待機中 ---</div>
+        </div>
+
+        <!-- ドラッグリサイザー -->
+        <div class="resizer-bar" id="plot_review-resizer"></div>
+    </div>
+</div>

@@ -306,6 +306,94 @@ async def stream_sync():
     return novel_service.stream_process_output(cmd)
 
 
+@router.get("/api/plots")
+async def list_plots():
+    sources_dir = Path("data/sources")
+    if not sources_dir.exists():
+        return {"plots": []}
+
+    plots_list = []
+    for f in sorted(sources_dir.glob("*.txt"), key=writer_helper.natural_sort_key):
+        name = f.name
+        if "プロット" in name or "plot" in name.lower() or name == "第1幕概要.txt":
+            plot_stem = f.stem
+            yaml_path = os.path.join(
+                "novel_check_results", plot_stem, f"{plot_stem}_plot_findings.yaml"
+            )
+            has_findings = os.path.exists(yaml_path)
+
+            mtime = os.path.getmtime(f)
+            dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+            plots_list.append(
+                {
+                    "name": name,
+                    "size": f.stat().st_size,
+                    "mtime": dt,
+                    "has_findings": has_findings,
+                }
+            )
+    return {"plots": plots_list}
+
+
+@router.get("/api/plot")
+async def get_plot(
+    file: str = Query(..., description="Plot filename in data/sources/"),
+):
+    safe_file = os.path.basename(file)
+    plot_path = os.path.join("data/sources", safe_file)
+    if not os.path.exists(plot_path):
+        raise HTTPException(status_code=404, detail="Plot file not found.")
+
+    with open(plot_path, encoding="utf-8") as f:
+        content = f.read()
+
+    plot_stem = Path(plot_path).stem
+    yaml_path = os.path.join(
+        "novel_check_results", plot_stem, f"{plot_stem}_plot_findings.yaml"
+    )
+
+    findings = []
+    if os.path.exists(yaml_path):
+        try:
+            with open(yaml_path, encoding="utf-8") as f_yaml:
+                data = yaml.safe_load(f_yaml)
+                if data and "findings" in data:
+                    findings = data["findings"]
+        except Exception as e:
+            print(f"Error reading plot YAML findings: {e}")
+
+    return {
+        "plot_name": safe_file,
+        "content": content,
+        "findings": findings,
+    }
+
+
+@router.get("/api/stream/plot_review")
+async def stream_plot_review(
+    file: str = Query(..., description="Plot filename in data/sources/"),
+    model: str | None = Query(None),
+):
+    safe_file = os.path.basename(file)
+    plot_path = os.path.join("data/sources", safe_file)
+    if not os.path.exists(plot_path):
+        raise HTTPException(status_code=404, detail="Plot file not found.")
+
+    cmd = [
+        "poetry",
+        "run",
+        "python",
+        "-u",
+        "src/run_plot_review_pipeline.py",
+        plot_path,
+    ]
+    if model:
+        cmd.extend(["--model", model])
+
+    return novel_service.stream_process_output(cmd)
+
+
 @router.get("/api/stream/review")
 async def stream_review(
     file: str = Query(..., description="Novel text filename in novels/"),

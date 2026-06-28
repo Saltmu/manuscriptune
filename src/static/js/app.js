@@ -4,6 +4,7 @@ import { loadDashboardData, selectDraftCard, loadPreview, selectAndEditNovel, se
 import { runDriveSync } from './views/sync.js';
 import { loadSourcesForWrite, runAiWriting, copyWritingPrompt } from './views/write.js';
 import { runReviewPipeline } from './views/review.js';
+import { loadPlotsData, runPlotReviewPipeline, filterPlotFindings } from './views/plot_review.js';
 import {
     loadEditorData,
     filterCategory,
@@ -46,7 +47,7 @@ async function handleRouting() {
     const { view, file } = parseHash();
     lastHash = window.location.hash || '#/dashboard';
 
-    const validViews = ['dashboard', 'sync', 'write', 'review', 'editor'];
+    const validViews = ['dashboard', 'sync', 'write', 'review', 'editor', 'plot_review'];
     if (!validViews.includes(view)) {
         window.location.hash = '#/dashboard';
         return;
@@ -106,6 +107,8 @@ async function handleRouting() {
             return;
         }
         await loadDashboardData();
+    } else if (view === 'plot_review') {
+        await loadPlotsData();
     }
 }
 
@@ -167,6 +170,7 @@ window.addEventListener('DOMContentLoaded', () => {
     initPanelResizer('write-resizer', 'write-right-panel');
     initPanelResizer('review-resizer', 'review-right-panel');
     initPanelResizer('sync-resizer', 'sync-right-panel');
+    initPanelResizer('plot_review-resizer', 'plot_review-right-panel');
 });
 
 // HTML のインラインイベントハンドラからアクセスできるように global 公開する
@@ -175,6 +179,8 @@ window.runDriveSync = runDriveSync;
 window.runAiWriting = runAiWriting;
 window.copyWritingPrompt = copyWritingPrompt;
 window.runReviewPipeline = runReviewPipeline;
+window.runPlotReviewPipeline = runPlotReviewPipeline;
+window.filterPlotFindings = filterPlotFindings;
 window.selectAndEditNovel = selectAndEditNovel;
 window.selectAndReviewNovel = selectAndReviewNovel;
 window.filterCategory = filterCategory;
