@@ -224,7 +224,7 @@ def integrate_findings_in_dir(output_dir, model):
             "Warning: Could not parse merged YAML back for Markdown report generation."
         )
 
-    report_md_path = os.path.join(output_dir, f"{basename}_report.md")
+    report_md_path = project_paths.get_report_md_path(output_dir, basename)
     generate_markdown_report(merged_findings_list, report_md_path)
     print(f"Saved Markdown report to {report_md_path}")
     return True

@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from src.routes.api import router as api_router
+from src.utils import project_paths
 from src.utils.logger import get_logger
 
 logger = get_logger("review_server")
@@ -41,7 +42,7 @@ async def disable_static_cache(request: Request, call_next):
 # Mount static directory for CSS/JS
 app.mount(
     "/static",
-    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
+    StaticFiles(directory=project_paths.get_src_path("static")),
     name="static",
 )
 

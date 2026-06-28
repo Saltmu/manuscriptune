@@ -10,9 +10,7 @@ from src.utils import project_paths
 
 # Load stopwords from external resource file
 def _load_stopwords() -> set[str]:
-    stopwords_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "utils", "resources", "stopwords.json")
-    )
+    stopwords_path = project_paths.get_stopwords_path()
     try:
         with open(stopwords_path, encoding="utf-8") as f:
             words = json.load(f)
@@ -309,8 +307,7 @@ def main():
         sys.exit(1)
 
     # Find sources directory
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sources_dir = os.path.join(root_dir, project_paths.DATA_SOURCES_DIR)
+    sources_dir = project_paths.get_sources_dir()
 
     if not os.path.exists(sources_dir):
         print(

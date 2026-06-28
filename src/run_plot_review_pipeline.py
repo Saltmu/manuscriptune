@@ -18,8 +18,8 @@ def archive_previous_plot_review(output_dir, basename):
 
     into a history directory.
     """
-    history_dir = os.path.join(output_dir, "history")
-    findings_file = os.path.join(output_dir, f"{basename}_plot_findings.yaml")
+    history_dir = project_paths.get_history_dir(output_dir)
+    findings_file = project_paths.get_plot_findings_yaml_path(output_dir, basename)
 
     if not os.path.exists(findings_file):
         return
@@ -56,8 +56,10 @@ def archive_previous_plot_review(output_dir, basename):
             print(f"  Archived: {src_name} -> history/{dest_name}")
 
     # Clean up current findings and report so they are regenerated
-    for src_name in [f"{basename}_plot_findings.yaml", f"{basename}_plot_report.md"]:
-        src_path = os.path.join(output_dir, src_name)
+    for src_path in [
+        project_paths.get_plot_findings_yaml_path(output_dir, basename),
+        project_paths.get_plot_report_md_path(output_dir, basename),
+    ]:
         if os.path.exists(src_path):
             os.remove(src_path)
 
@@ -106,11 +108,7 @@ def main():
 
     target_path = Path(args.target_file)
     basename = target_path.stem
-    output_dir = (
-        args.dir
-        if args.dir
-        else os.path.join(project_paths.DEFAULT_RESULTS_DIR, basename)
-    )
+    output_dir = args.dir if args.dir else project_paths.get_output_dir(basename)
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -174,10 +172,10 @@ def main():
     if success:
         print("[OK] Plot reports integrated successfully.")
         print(
-            f"Consolidated Report: {os.path.join(output_dir, f'{basename}_plot_report.md')}"
+            f"Consolidated Report: {project_paths.get_plot_report_md_path(output_dir, basename)}"
         )
         print(
-            f"Consolidated YAML  : {os.path.join(output_dir, f'{basename}_plot_findings.yaml')}"
+            f"Consolidated YAML  : {project_paths.get_plot_findings_yaml_path(output_dir, basename)}"
         )
     else:
         print("[ERROR] Failed to integrate plot findings.", file=sys.stderr)

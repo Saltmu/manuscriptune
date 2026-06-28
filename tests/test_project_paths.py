@@ -89,3 +89,45 @@ def test_directory_constants() -> None:
     assert DATA_DIR == "data"
     assert SOURCES_DIR == "sources"
     assert DATA_SOURCES_DIR == os.path.join("data", "sources")
+
+
+def test_new_path_resolutions() -> None:
+    from src.utils.project_paths import (
+        PROJECT_ROOT,
+        SCRIPT_DIR,
+        get_history_dir,
+        get_novel_path,
+        get_novels_dir,
+        get_plot_findings_yaml_path,
+        get_plot_report_md_path,
+        get_skills_dir,
+        get_source_path,
+        get_sources_dir,
+        get_src_path,
+        get_stopwords_path,
+        get_templates_dir,
+        get_version_dir,
+    )
+
+    assert get_novels_dir() == os.path.join(PROJECT_ROOT, "novels")
+    assert get_sources_dir() == os.path.join(PROJECT_ROOT, "data", "sources")
+    assert get_novel_path("test.txt") == os.path.join(
+        PROJECT_ROOT, "novels", "test.txt"
+    )
+    assert get_source_path("plot.txt") == os.path.join(
+        PROJECT_ROOT, "data", "sources", "plot.txt"
+    )
+    assert get_history_dir("out") == os.path.join("out", "history")
+    assert get_version_dir("out", "v1") == os.path.join("out", "history", "v1")
+    assert get_plot_findings_yaml_path("out", "test") == os.path.join(
+        "out", "test_plot_findings.yaml"
+    )
+    assert get_plot_report_md_path("out", "test") == os.path.join(
+        "out", "test_plot_report.md"
+    )
+    assert get_stopwords_path() == os.path.join(
+        SCRIPT_DIR, "resources", "stopwords.json"
+    )
+    assert get_src_path("test.py") == os.path.join(PROJECT_ROOT, "src", "test.py")
+    assert get_skills_dir() == os.path.join(PROJECT_ROOT, "skills")
+    assert get_templates_dir() == os.path.join(PROJECT_ROOT, "src", "templates")
