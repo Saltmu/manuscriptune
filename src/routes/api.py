@@ -281,7 +281,7 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
         if os.path.exists(yaml_path):
             shutil.copy2(yaml_path, f"{yaml_path}.bak")
 
-        basename = Path(novel_path).stem
+        basename = Path(novel_path).stem.replace("_formatted", "").replace("_findings", "")
         output_dir = project_paths.get_output_dir(basename)
         script_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "apply_findings.py"

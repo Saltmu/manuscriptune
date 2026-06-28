@@ -20,7 +20,7 @@ def resolve_paths(novel_name: str) -> tuple[str, str]:
         raise HTTPException(status_code=400, detail="Novel filename is required.")
 
     safe_name = os.path.basename(novel_name)
-    basename = Path(safe_name).stem
+    basename = Path(safe_name).stem.replace("_formatted", "").replace("_findings", "")
 
     output_dir = project_paths.get_output_dir(basename)
     formatted_path = os.path.abspath(
