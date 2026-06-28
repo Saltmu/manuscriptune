@@ -4,12 +4,27 @@ import os
 import webbrowser
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from src.routes.api import router as api_router
 
 app = FastAPI(title="Novel Studio - AI Writing & Review Portal")
+
+
+# Middleware to disable caching for static files to prevent stale browser cache
+@app.middleware("http")
+async def disable_static_cache(request: Request, call_next):
+    response: Response = await call_next(request)
+    if request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 
 # Mount static directory for CSS/JS
 app.mount(

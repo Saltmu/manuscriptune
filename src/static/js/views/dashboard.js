@@ -43,7 +43,7 @@ export async function loadDashboardData() {
                             <div class="draft-card-meta">
                                 <span>${(n.size / 1024).toFixed(1)} KB</span>
                                 <span>•</span>
-                                <span>${n.last_modified}</span>
+                                <span>${n.mtime}</span>
                             </div>
                         </div>
                         <div class="draft-card-status">
