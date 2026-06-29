@@ -257,40 +257,35 @@ def query_llm_for_block_replacement(context_lines, findings_in_block, model):
         result = task.execute(input_data)
         if result is None:
             logger.warning("LLM output was rejected (too short or failed validation).")
-            print(
-                "Warning: LLM output was rejected (too short or failed validation).",
-                file=sys.stderr,
-            )
         return result
     except AgyClientError as e:
         logger.error(
             f"AgyClient failed with error during block replacement: {e}", exc_info=True
         )
-        print(f"Warning: AgyClient failed with error: {e}", file=sys.stderr)
         return None
     except Exception as e:
         logger.error(
             f"Unexpected error calling AgyClient during block replacement: {e}",
             exc_info=True,
         )
-        print(f"Warning: Unexpected error calling AgyClient: {e}", file=sys.stderr)
         return None
 
 
 def print_finding_diff(finding):
     """
-    Prints a formatted summary of the finding.
+    Logs a formatted summary of the finding.
     """
-    print("-" * 60)
-    print(f"ID      : {finding.get('id', 'N/A')}")
-    print(f"場所    : {finding.get('location', 'N/A')}")
-    print(
-        f"カテゴリ: {finding.get('category', 'N/A')} (重要度: {finding.get('severity', 'N/A')})"
-    )
-    print(f"分析    : {finding.get('analysis', 'N/A')}")
-    print(f"原文    : \033[31m{finding.get('original', 'N/A')}\033[0m")
-    print(f"修正案  : \033[32m{finding.get('suggestion', 'N/A')}\033[0m")
-    print("-" * 60)
+    lines = [
+        "-" * 60,
+        f"ID      : {finding.get('id', 'N/A')}",
+        f"場所    : {finding.get('location', 'N/A')}",
+        f"カテゴリ: {finding.get('category', 'N/A')} (重要度: {finding.get('severity', 'N/A')})",
+        f"分析    : {finding.get('analysis', 'N/A')}",
+        f"原文    : \033[31m{finding.get('original', 'N/A')}\033[0m",
+        f"修正案  : \033[32m{finding.get('suggestion', 'N/A')}\033[0m",
+        "-" * 60,
+    ]
+    logger.info("\n" + "\n".join(lines))
 
 
 def _parse_args() -> argparse.Namespace:
@@ -346,15 +341,10 @@ def _validate_output_dir(output_dir: str) -> None:
             logger.error(
                 f"Writing to source files in {project_paths.DATA_SOURCES_DIR}/ is strictly prohibited by AI guardrails."
             )
-            print(
-                f"Error: Writing to source files in {project_paths.DATA_SOURCES_DIR}/ is strictly prohibited by AI guardrails.",
-                file=sys.stderr,
-            )
             sys.exit(1)
 
     if not os.path.exists(output_dir):
         logger.error(f"Directory '{output_dir}' does not exist.")
-        print(f"Error: Directory '{output_dir}' does not exist.", file=sys.stderr)
         sys.exit(1)
 
 
@@ -367,11 +357,9 @@ def _load_inputs(output_dir: str) -> tuple[str, str, list[str], list[dict], str]
 
     if not os.path.exists(formatted_txt_path):
         logger.error(f"'{formatted_txt_path}' not found.")
-        print(f"Error: '{formatted_txt_path}' not found.", file=sys.stderr)
         sys.exit(1)
     if not os.path.exists(findings_yaml_path):
         logger.error(f"'{findings_yaml_path}' not found.")
-        print(f"Error: '{findings_yaml_path}' not found.", file=sys.stderr)
         sys.exit(1)
 
     raw_text = read_file(formatted_txt_path)
@@ -382,7 +370,6 @@ def _load_inputs(output_dir: str) -> tuple[str, str, list[str], list[dict], str]
         findings = yaml_data.get("findings", []) if isinstance(yaml_data, dict) else []
     except Exception as e:
         logger.error(f"Error parsing YAML '{findings_yaml_path}': {e}", exc_info=True)
-        print(f"Error parsing YAML '{findings_yaml_path}': {e}", file=sys.stderr)
         sys.exit(1)
 
     return formatted_txt_path, findings_yaml_path, text_lines, findings, basename
@@ -395,7 +382,7 @@ def _interactive_choice(finding: dict) -> str:
     print_finding_diff(finding)
     candidate = extract_suggestion_candidate(finding.get("suggestion", ""))
     if candidate:
-        print(f"(抽出された簡易修正案候補: 「{candidate}」)")
+        logger.info(f"(抽出された簡易修正案候補: 「{candidate}」)")
 
     choice = (
         input(
@@ -465,7 +452,7 @@ def _determine_accepted_findings_interactive(
             args.auto = True
             break
         elif choice == "q":
-            print("適用処理を終了し、これまでに確定した変更を適用します。")
+            logger.info("適用処理を終了し、これまでに確定した変更を適用します。")
             break
         elif choice not in ("y", "e"):
             finding["accepted"] = "n"
@@ -495,9 +482,8 @@ def _determine_accepted_findings(
             if line_no is not None:
                 active_findings.append((line_no, f))
             else:
-                print(
-                    f"[FAIL] {fid} の適用に失敗しました: 原文が見つかりません。",
-                    file=sys.stderr,
+                logger.error(
+                    f"[FAIL] {fid} の適用に失敗しました: 原文が見つかりません。"
                 )
                 f["apply_status"] = "failed"
                 f["apply_result"] = "原文が見つかりませんでした。"
@@ -570,7 +556,9 @@ def _apply_grouped_findings(
 
             for f in findings_in_block:
                 fid = f.get("id")
-                print(f"[SUCCESS] {fid} を適用しました (LLMコンテキスト一括方式)。")
+                logger.info(
+                    f"[SUCCESS] {fid} を適用しました (LLMコンテキスト一括方式)。"
+                )
                 applied_count += 1
                 f["apply_status"] = "success"
                 f["apply_result"] = "LLMコンテキスト一括方式"
@@ -585,17 +573,17 @@ def _apply_grouped_findings(
 
             for f, replacement, m in success_findings:
                 fid = f.get("id")
-                print(f"[SUCCESS] {fid} を適用しました (フォールバック・{m}方式)。")
-                print(f"  -> 置換後: '{replacement}'")
+                logger.info(
+                    f"[SUCCESS] {fid} を適用しました (フォールバック・{m}方式)。"
+                )
+                logger.info(f"  -> 置換後: '{replacement}'")
                 applied_count += 1
                 f["apply_status"] = "success"
                 f["apply_result"] = f"フォールバック({m}方式): {replacement}"
 
             for f, error_msg in failed_findings:
                 fid = f.get("id")
-                print(
-                    f"[FAIL] {fid} の適用に失敗しました: {error_msg}", file=sys.stderr
-                )
+                logger.error(f"[FAIL] {fid} の適用に失敗しました: {error_msg}")
                 failed_count += 1
                 f["apply_status"] = "failed"
                 f["apply_result"] = error_msg
@@ -611,18 +599,18 @@ def _save_outputs_and_print_summary(
     stats: tuple[int, int, int],
 ) -> None:
     write_file(formatted_txt_path, "".join(text_lines))
-    print(f"\n小説テキストを更新しました: {formatted_txt_path}")
+    logger.info(f"小説テキストを更新しました: {formatted_txt_path}")
 
     updated_yaml_data = {"findings": findings}
     try:
         YamlHandler.dump(updated_yaml_data, findings_yaml_path)
-        print(f"指摘YAMLを更新しました: {findings_yaml_path}")
+        logger.info(f"指摘YAMLを更新しました: {findings_yaml_path}")
     except Exception as e:
-        print(f"Error saving updated YAML '{findings_yaml_path}': {e}", file=sys.stderr)
+        logger.error(f"Error saving updated YAML '{findings_yaml_path}': {e}")
 
     applied_count, skipped_count, failed_count = stats
-    print("\n=== 反映処理完了 ===")
-    print(
+    logger.info("=== 反映処理完了 ===")
+    logger.info(
         f"適用: {applied_count} 件, スキップ: {skipped_count} 件, 失敗: {failed_count} 件"
     )
 
@@ -639,12 +627,10 @@ def main():
 
     if not findings:
         logger.info("No findings to apply.")
-        print("No findings to apply.")
         sys.exit(0)
 
     if not args.interactive and not args.accept_ids and not args.auto:
         logger.warning("No mode specified. Defaulting to interactive mode.")
-        print("Warning: No mode specified. Defaulting to interactive mode.")
         args.interactive = True
 
     active_findings = _determine_accepted_findings(findings, text_lines, args)
