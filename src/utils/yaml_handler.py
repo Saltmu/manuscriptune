@@ -1,13 +1,15 @@
 import os
 import re
+from typing import Any, cast
 
 import yaml
 
 
 class YamlHandler:
+
     @staticmethod
-    def load(filepath: str) -> dict | list:
-        """YAMLファイルを読み込み、Pythonオブジェクト（dict または list）として返します。
+    def load(filepath: str) -> Any:
+        """YAMLファイルを読み込み、Pythonオブジェクトとして返します。
 
         ファイルが存在しない、あるいはパースに失敗した場合は例外を送出します。
         """
@@ -15,7 +17,7 @@ class YamlHandler:
             return yaml.safe_load(f)
 
     @staticmethod
-    def load_safe(filepath: str, default=None) -> dict | list:
+    def load_safe(filepath: str, default: Any = None) -> Any:
         """安全にYAMLファイルを読み込みます。
 
         ファイルが存在しない、またはパースに失敗した場合はデフォルト値を返します。
@@ -31,7 +33,7 @@ class YamlHandler:
             return default
 
     @staticmethod
-    def load_findings(filepath_or_content: str) -> list[dict]:
+    def load_findings(filepath_or_content: str) -> list[dict[Any, Any]]:
         """ファイルパスまたはYAML文字列から指摘のリストをロードします。
 
         Markdownのコードブロック (```yaml ... ```)
@@ -54,14 +56,14 @@ class YamlHandler:
 
             if isinstance(data, dict):
                 if "findings" in data:
-                    return data["findings"]
+                    return cast(list[dict[Any, Any]], data["findings"])
                 # 辞書の中で値がリストになっている最初の要素を返す
                 for v in data.values():
                     if isinstance(v, list):
-                        return v
+                        return cast(list[dict[Any, Any]], v)
                 return []
             elif isinstance(data, list):
-                return data
+                return cast(list[dict[Any, Any]], data)
         except Exception as e:
             import sys
 

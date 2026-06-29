@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -550,7 +551,7 @@ async def get_data(file: str = Query(..., description="Novel filename")):
     with open(novel_path, encoding="utf-8") as f:
         novel_lines = [line.rstrip("\r\n") for line in f.readlines()]
 
-    findings = []
+    findings: list[Any] = []
     # Findings YAML might not exist yet if review hasn't run
     if yaml_path and os.path.exists(yaml_path):
         try:
