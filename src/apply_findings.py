@@ -235,12 +235,32 @@ def apply_fallback_to_block(context_lines, findings_in_block):
             )
             continue
 
+        # 1. Exact match
         if original in modified_block_text:
-            # We replace only the first occurrence to avoid messing up other parts of the block
             modified_block_text = modified_block_text.replace(original, replacement, 1)
             success_findings.append((f, replacement, "extracted"))
-        else:
-            failed_findings.append((f, f"Could not find original text: '{original}'"))
+            continue
+
+        # 2. Fuzzy match with space/newline tolerance
+        def clean_spacing(t):
+            return re.sub(r"\s+", "", t)
+
+        clean_original = clean_spacing(original)
+        clean_block = clean_spacing(modified_block_text)
+
+        if clean_original in clean_block:
+            escaped_chars = [re.escape(c) for c in original if not c.isspace()]
+            pattern_str = r"[\s\u3000]*".join(escaped_chars)
+            match = re.search(pattern_str, modified_block_text)
+            if match:
+                matched_text = match.group(0)
+                modified_block_text = modified_block_text.replace(
+                    matched_text, replacement, 1
+                )
+                success_findings.append((f, replacement, "fuzzy"))
+                continue
+
+        failed_findings.append((f, f"Could not find original text: '{original}'"))
 
     return modified_block_text, success_findings, failed_findings
 
@@ -269,6 +289,78 @@ def query_llm_for_block_replacement(context_lines, findings_in_block, model):
             exc_info=True,
         )
         return None
+
+
+def query_llm_for_single_replacement(context_lines, finding, model):
+    """
+    Uses BlockReplacementTask to generate the rewritten block based on context and a single finding.
+    """
+    task = BlockReplacementTask(model=model)
+    input_data = BlockReplacementInput(
+        context_lines=context_lines, findings_in_block=[finding]
+    )
+    try:
+        result = task.execute(input_data)
+        if result is None:
+            logger.warning(
+                f"LLM output was rejected for single finding {finding.get('id')}."
+            )
+        return result
+    except AgyClientError as e:
+        logger.error(
+            f"AgyClient failed with error during single replacement ({finding.get('id')}): {e}",
+            exc_info=True,
+        )
+        return None
+    except Exception as e:
+        logger.error(
+            f"Unexpected error calling AgyClient during single replacement ({finding.get('id')}): {e}",
+            exc_info=True,
+        )
+        return None
+
+
+def apply_fallback_to_single_finding(context_lines, finding):
+    """
+    Applies rule-based fallback replacement to a single finding.
+    Returns (success, result_block_text, status_message).
+    """
+    original = finding.get("original", "").strip()
+    suggestion = finding.get("suggestion", "").strip()
+    replacement = extract_suggestion_candidate(suggestion)
+
+    if not replacement:
+        return (
+            False,
+            "".join(context_lines),
+            "Could not extract replacement text from suggestion.",
+        )
+
+    block_text = "".join(context_lines)
+
+    # 1. Exact match
+    if original in block_text:
+        new_text = block_text.replace(original, replacement, 1)
+        return True, new_text, "extracted"
+
+    # 2. Fuzzy match with space/newline tolerance
+    def clean_spacing(t):
+        return re.sub(r"\s+", "", t)
+
+    clean_original = clean_spacing(original)
+    clean_block = clean_spacing(block_text)
+
+    if clean_original in clean_block:
+        escaped_chars = [re.escape(c) for c in original if not c.isspace()]
+        # Matches matching characters with optional fullwidth/halfwidth spaces or newlines in between
+        pattern_str = r"[\s\u3000]*".join(escaped_chars)
+        match = re.search(pattern_str, block_text)
+        if match:
+            matched_text = match.group(0)
+            new_text = block_text.replace(matched_text, replacement, 1)
+            return True, new_text, "fuzzy"
+
+    return False, block_text, f"Could not find original text: '{original}'"
 
 
 def print_finding_diff(finding):
@@ -515,6 +607,200 @@ def _group_findings(
     return groups
 
 
+def _apply_single_group_bulk(
+    text_lines: list[str],
+    group: list[tuple[int, dict]],
+    args: argparse.Namespace,
+    context_lines: list[str],
+    start_idx: int,
+    end_idx: int,
+) -> tuple[bool, int]:
+    """
+    Attempts bulk block replacement using LLM.
+    Returns (success_boolean, applied_count).
+    """
+    findings_in_block = [item[1] for item in group]
+    result_block_text = query_llm_for_block_replacement(
+        context_lines, findings_in_block, args.model
+    )
+    if not result_block_text:
+        return False, 0
+
+    if not result_block_text.endswith("\n") and len(result_block_text) > 0:
+        result_block_text += "\n"
+
+    text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
+
+    applied_count = 0
+    for f in findings_in_block:
+        fid = f.get("id")
+        logger.info(f"[SUCCESS] {fid} を適用しました (LLMコンテキスト一括方式)。")
+        applied_count += 1
+        f["apply_status"] = "success"
+        f["apply_result"] = "LLMコンテキスト一括方式"
+
+    return True, applied_count
+
+
+def _apply_single_group_fallback_bulk(
+    text_lines: list[str],
+    group: list[tuple[int, dict]],
+    context_lines: list[str],
+    start_idx: int,
+    end_idx: int,
+) -> tuple[int, int]:
+    """
+    Applies bulk fallback replacement.
+    """
+    findings_in_block = [item[1] for item in group]
+    result_block_text, success_findings, failed_findings = apply_fallback_to_block(
+        context_lines, findings_in_block
+    )
+    if not result_block_text.endswith("\n") and len(result_block_text) > 0:
+        result_block_text += "\n"
+
+    text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
+
+    applied_count = 0
+    failed_count = 0
+    for f, replacement, m in success_findings:
+        fid = f.get("id")
+        logger.info(f"[SUCCESS] {fid} を適用しました (フォールバック・{m}方式)。")
+        applied_count += 1
+        f["apply_status"] = "success"
+        f["apply_result"] = f"フォールバック({m}方式): {replacement}"
+
+    for f, error_msg in failed_findings:
+        fid = f.get("id")
+        logger.error(f"[FAIL] {fid} の適用に失敗しました: {error_msg}")
+        failed_count += 1
+        f["apply_status"] = "failed"
+        f["apply_result"] = error_msg
+
+    return applied_count, failed_count
+
+
+def _apply_single_finding_sequential(
+    text_lines: list[str],
+    f: dict,
+    args: argparse.Namespace,
+    C: int,
+) -> tuple[int, int]:
+    """
+    Applies a single finding sequentially using LLM or rule-based fallback.
+    Returns (applied_count, failed_count).
+    """
+    fid = f.get("id")
+    curr_line_no = find_target_line(text_lines, f)
+    if curr_line_no is None:
+        logger.error(f"[FAIL] {fid} の適用に失敗しました: 原文が見つかりません。")
+        f["apply_status"] = "failed"
+        f["apply_result"] = "原文が見つかりませんでした。"
+        return 0, 1
+
+    line_nos = [curr_line_no]
+    if "_matched_lines" in f:
+        line_nos.extend(f["_matched_lines"])
+    curr_L_min = min(line_nos)
+    curr_L_max = max(line_nos)
+
+    curr_start_idx = max(0, curr_L_min - 1 - C)
+    curr_end_idx = min(len(text_lines), curr_L_max + C)
+    curr_context_lines = text_lines[curr_start_idx:curr_end_idx]
+
+    single_success = False
+    single_result_block_text = None
+
+    if not args.no_llm:
+        single_result_block_text = query_llm_for_single_replacement(
+            curr_context_lines, f, args.model
+        )
+        if single_result_block_text:
+            single_success = True
+
+    if single_success and single_result_block_text:
+        if (
+            not single_result_block_text.endswith("\n")
+            and len(single_result_block_text) > 0
+        ):
+            single_result_block_text += "\n"
+
+        text_lines[curr_start_idx:curr_end_idx] = single_result_block_text.splitlines(
+            keepends=True
+        )
+        logger.info(f"[SUCCESS] {fid} を適用しました (LLM個別方式)。")
+        f["apply_status"] = "success"
+        f["apply_result"] = "LLM個別方式"
+        return 1, 0
+
+    # Fallback to rule-based fuzzy replacement if LLM fails
+    fb_success, fb_result_block, fb_msg = apply_fallback_to_single_finding(
+        curr_context_lines, f
+    )
+    if fb_success:
+        if not fb_result_block.endswith("\n") and len(fb_result_block) > 0:
+            fb_result_block += "\n"
+
+        text_lines[curr_start_idx:curr_end_idx] = fb_result_block.splitlines(
+            keepends=True
+        )
+        logger.info(f"[SUCCESS] {fid} を適用しました (フォールバック・{fb_msg}方式)。")
+        f["apply_status"] = "success"
+        f["apply_result"] = f"フォールバック({fb_msg}方式)"
+        return 1, 0
+    else:
+        logger.error(f"[FAIL] {fid} の適用に失敗しました: {fb_msg}")
+        f["apply_status"] = "failed"
+        f["apply_result"] = fb_msg
+        return 0, 1
+
+
+def _apply_single_group(
+    text_lines: list[str],
+    group: list[tuple[int, dict]],
+    args: argparse.Namespace,
+) -> tuple[int, int]:
+    """
+    Applies findings within a single group to text_lines.
+    Returns (applied_count, failed_count).
+    """
+    line_nos = []
+    for line_no, f in group:
+        line_nos.append(line_no)
+        if "_matched_lines" in f:
+            line_nos.extend(f["_matched_lines"])
+    L_min = min(line_nos)
+    L_max = max(line_nos)
+
+    C = 4
+    start_idx = max(0, L_min - 1 - C)
+    end_idx = min(len(text_lines), L_max + C)
+    context_lines = text_lines[start_idx:end_idx]
+
+    if not args.no_llm:
+        success, app = _apply_single_group_bulk(
+            text_lines, group, args, context_lines, start_idx, end_idx
+        )
+        if success:
+            return app, 0
+
+    if args.no_llm:
+        return _apply_single_group_fallback_bulk(
+            text_lines, group, context_lines, start_idx, end_idx
+        )
+
+    # Sequential retry loop for individual findings when bulk replacement fails
+    applied_count = 0
+    failed_count = 0
+    sorted_group = sorted(group, key=lambda x: x[0], reverse=True)
+    for line_no, f in sorted_group:
+        app, fail = _apply_single_finding_sequential(text_lines, f, args, C)
+        applied_count += app
+        failed_count += fail
+
+    return applied_count, failed_count
+
+
 def _apply_grouped_findings(
     text_lines: list[str],
     groups: list[list[tuple[int, dict]]],
@@ -524,69 +810,9 @@ def _apply_grouped_findings(
     failed_count = 0
 
     for group in groups:
-        findings_in_block = [item[1] for item in group]
-        line_nos = []
-        for line_no, f in group:
-            line_nos.append(line_no)
-            if "_matched_lines" in f:
-                line_nos.extend(f["_matched_lines"])
-        L_min = min(line_nos)
-        L_max = max(line_nos)
-
-        C = 4
-        start_idx = max(0, L_min - 1 - C)
-        end_idx = min(len(text_lines), L_max + C)
-        context_lines = text_lines[start_idx:end_idx]
-
-        success = False
-        result_block_text = None
-
-        if not args.no_llm:
-            result_block_text = query_llm_for_block_replacement(
-                context_lines, findings_in_block, args.model
-            )
-            if result_block_text:
-                success = True
-
-        if success and result_block_text:
-            if not result_block_text.endswith("\n") and len(result_block_text) > 0:
-                result_block_text += "\n"
-
-            text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
-
-            for f in findings_in_block:
-                fid = f.get("id")
-                logger.info(
-                    f"[SUCCESS] {fid} を適用しました (LLMコンテキスト一括方式)。"
-                )
-                applied_count += 1
-                f["apply_status"] = "success"
-                f["apply_result"] = "LLMコンテキスト一括方式"
-        else:
-            result_block_text, success_findings, failed_findings = (
-                apply_fallback_to_block(context_lines, findings_in_block)
-            )
-            if not result_block_text.endswith("\n") and len(result_block_text) > 0:
-                result_block_text += "\n"
-
-            text_lines[start_idx:end_idx] = result_block_text.splitlines(keepends=True)
-
-            for f, replacement, m in success_findings:
-                fid = f.get("id")
-                logger.info(
-                    f"[SUCCESS] {fid} を適用しました (フォールバック・{m}方式)。"
-                )
-                logger.info(f"  -> 置換後: '{replacement}'")
-                applied_count += 1
-                f["apply_status"] = "success"
-                f["apply_result"] = f"フォールバック({m}方式): {replacement}"
-
-            for f, error_msg in failed_findings:
-                fid = f.get("id")
-                logger.error(f"[FAIL] {fid} の適用に失敗しました: {error_msg}")
-                failed_count += 1
-                f["apply_status"] = "failed"
-                f["apply_result"] = error_msg
+        app, fail = _apply_single_group(text_lines, group, args)
+        applied_count += app
+        failed_count += fail
 
     return applied_count, failed_count
 
