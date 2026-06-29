@@ -1,36 +1,16 @@
 import argparse
 import os
-import re
 import sys
-
-import yaml
 
 from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import FindingsIntegrationInput, FindingsIntegrationTask
 from src.utils.file_io import read_file
+from src.utils.yaml_handler import YamlHandler
 
 
 def parse_yaml_file(filepath):
-    content = read_file(filepath)
-    if not content:
-        return []
-    try:
-        # Some YAML might have formatting issues, try sanitizing code blocks first
-        sanitized = re.sub(r"```yaml\s*([\s\S]*?)```", r"\1", content).strip()
-        data = yaml.safe_load(sanitized)
-        if isinstance(data, dict) and "findings" in data:
-            return data["findings"]
-        elif isinstance(data, list):
-            return data
-        elif isinstance(data, dict):
-            # Maybe the top-level has other keys
-            for k, v in data.items():
-                if isinstance(v, list):
-                    return v
-    except Exception as e:
-        print(f"Warning: Failed to parse YAML file '{filepath}': {e}", file=sys.stderr)
-    return []
+    return YamlHandler.load_findings(filepath)
 
 
 def generate_markdown_report(findings, output_md):
@@ -149,9 +129,7 @@ def _fallback_merge(all_findings: list[dict]) -> str:
         if "_source_file" in f_copy:
             del f_copy["_source_file"]
         merged_findings.append(f_copy)
-    return yaml.dump(
-        {"findings": merged_findings}, allow_unicode=True, default_flow_style=False
-    )
+    return YamlHandler.dump({"findings": merged_findings})
 
 
 def integrate_findings_in_dir(output_dir, model):
@@ -192,10 +170,7 @@ def integrate_findings_in_dir(output_dir, model):
         print("Done.")
         return True
 
-    # Serialize all findings into a structured format for LLM input
-    raw_findings_text = yaml.dump(
-        {"findings": all_findings}, allow_unicode=True, default_flow_style=False
-    )
+    raw_findings_text = YamlHandler.dump({"findings": all_findings})
 
     # Run integration via LLM
     merged_yaml_content = run_integration_llm(
@@ -214,10 +189,7 @@ def integrate_findings_in_dir(output_dir, model):
 
     # Parse back the merged findings to generate Markdown report
     try:
-        parsed_merged = yaml.safe_load(merged_yaml_content)
-        merged_findings_list = (
-            parsed_merged.get("findings", []) if isinstance(parsed_merged, dict) else []
-        )
+        merged_findings_list = YamlHandler.load_findings(merged_yaml_content)
     except Exception:
         merged_findings_list = []
         print(

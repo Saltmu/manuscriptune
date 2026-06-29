@@ -2,7 +2,7 @@ import glob
 import os
 import re
 
-import yaml
+from src.utils.yaml_handler import YamlHandler
 
 
 def natural_sort_key(s):
@@ -19,26 +19,14 @@ def natural_sort_key(s):
 
 def load_project_config(config_path: str | None = None):
     if config_path:
-        if not os.path.exists(config_path):
-            return {}
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-        except Exception:
-            return {}
+        return YamlHandler.load_safe(config_path)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(script_dir))
     config_path = os.path.join(project_root, "antigravity.yaml")
     if not os.path.exists(config_path):
         config_path = "antigravity.yaml"
-        if not os.path.exists(config_path):
-            return {}
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception:
-        return {}
+    return YamlHandler.load_safe(config_path)
 
 
 def get_gdrive_config(config: dict | None = None) -> tuple[str | None, str | None]:

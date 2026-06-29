@@ -7,11 +7,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import yaml
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from src.utils import project_paths
+from src.utils.yaml_handler import YamlHandler
 
 
 def resolve_paths(novel_name: str) -> tuple[str, str]:
@@ -151,19 +151,12 @@ def rollback_backup(
         if yaml_bak and os.path.exists(yaml_bak):
             shutil.copy2(yaml_bak, yaml_path)
         elif yaml_path and os.path.exists(yaml_path):
-            with open(yaml_path, encoding="utf-8") as file_handle:
-                data = yaml.safe_load(file_handle) or {}
+            data = YamlHandler.load_safe(yaml_path)
             findings = data.get("findings", [])
             for finding in findings:  # Fixed variable collision (f -> finding)
                 finding["apply_status"] = None
                 finding["apply_result"] = None
-            with open(yaml_path, "w", encoding="utf-8") as file_handle:
-                yaml.dump(
-                    {"findings": findings},
-                    file_handle,
-                    allow_unicode=True,
-                    default_flow_style=False,
-                )
+            YamlHandler.dump({"findings": findings}, yaml_path)
         return {"status": "success", "message": "Rollback completed successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to rollback: {str(e)}")

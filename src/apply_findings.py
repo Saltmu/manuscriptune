@@ -3,13 +3,12 @@ import os
 import re
 import sys
 
-import yaml
-
 from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import BlockReplacementInput, BlockReplacementTask
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
+from src.utils.yaml_handler import YamlHandler
 
 logger = get_logger(__name__)
 
@@ -379,8 +378,7 @@ def _load_inputs(output_dir: str) -> tuple[str, str, list[str], list[dict], str]
     text_lines = raw_text.splitlines(keepends=True)
 
     try:
-        with open(findings_yaml_path, encoding="utf-8") as f:
-            yaml_data = yaml.safe_load(f)
+        yaml_data = YamlHandler.load(findings_yaml_path)
         findings = yaml_data.get("findings", []) if isinstance(yaml_data, dict) else []
     except Exception as e:
         logger.error(f"Error parsing YAML '{findings_yaml_path}': {e}", exc_info=True)
@@ -617,10 +615,7 @@ def _save_outputs_and_print_summary(
 
     updated_yaml_data = {"findings": findings}
     try:
-        with open(findings_yaml_path, "w", encoding="utf-8") as f:
-            yaml.dump(
-                updated_yaml_data, f, allow_unicode=True, default_flow_style=False
-            )
+        YamlHandler.dump(updated_yaml_data, findings_yaml_path)
         print(f"指摘YAMLを更新しました: {findings_yaml_path}")
     except Exception as e:
         print(f"Error saving updated YAML '{findings_yaml_path}': {e}", file=sys.stderr)

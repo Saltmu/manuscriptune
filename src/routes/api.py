@@ -4,7 +4,6 @@ import re
 import shutil
 from pathlib import Path
 
-import yaml
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -14,6 +13,7 @@ from src.utils import project_config as writer_helper
 from src.utils import project_paths
 from src.utils.ai_client import AgyClient
 from src.utils.logger import get_logger
+from src.utils.yaml_handler import YamlHandler
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -144,10 +144,9 @@ async def get_novel(file: str = Query(..., description="Novel filename")):
     findings = []
     if yaml_path and os.path.exists(yaml_path):
         try:
-            with open(yaml_path, encoding="utf-8") as f_yaml:
-                data = yaml.safe_load(f_yaml)
-                if data and "findings" in data:
-                    findings = data["findings"]
+            data = YamlHandler.load_safe(yaml_path)
+            if data and "findings" in data:
+                findings = data["findings"]
         except Exception as e:
             logger.error(f"Error reading YAML findings: {e}", exc_info=True)
 
@@ -229,13 +228,7 @@ async def save_findings(req: SaveFindingsRequest):
             shutil.copy2(yaml_path, yaml_bak)
 
         findings_data = [f.model_dump() for f in req.findings]
-        with open(yaml_path, "w", encoding="utf-8") as f:
-            yaml.dump(
-                {"findings": findings_data},
-                f,
-                allow_unicode=True,
-                default_flow_style=False,
-            )
+        YamlHandler.dump({"findings": findings_data}, yaml_path)
         logger.info(f"Successfully saved findings YAML: {req.novel_name}")
         return {"status": "success", "message": "Findings saved successfully."}
     except Exception as e:
@@ -382,10 +375,9 @@ async def get_plot(
     findings = []
     if os.path.exists(yaml_path):
         try:
-            with open(yaml_path, encoding="utf-8") as f_yaml:
-                data = yaml.safe_load(f_yaml)
-                if data and "findings" in data:
-                    findings = data["findings"]
+            data = YamlHandler.load_safe(yaml_path)
+            if data and "findings" in data:
+                findings = data["findings"]
         except Exception as e:
             logger.error(f"Error reading plot YAML findings: {e}", exc_info=True)
 
@@ -561,14 +553,13 @@ async def get_data(file: str = Query(..., description="Novel filename")):
     findings = []
     # Findings YAML might not exist yet if review hasn't run
     if yaml_path and os.path.exists(yaml_path):
-        with open(yaml_path, encoding="utf-8") as f:
-            try:
-                data = yaml.safe_load(f) or {}
-                findings = data.get("findings", [])
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500, detail=f"Failed to parse YAML: {str(e)}"
-                )
+        try:
+            data = YamlHandler.load(yaml_path)
+            findings = data.get("findings", []) if isinstance(data, dict) else []
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to parse YAML: {str(e)}"
+            )
 
     has_backup = os.path.exists(f"{novel_path}.bak")
 
