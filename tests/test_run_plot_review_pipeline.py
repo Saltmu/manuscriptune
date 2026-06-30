@@ -9,6 +9,7 @@ from src.run_plot_review_pipeline import (
     run_single_review_skill,
 )
 from src.utils.ai_client import AgyClientError
+from src.utils.ai_exceptions import ReviewSkillExecutionError
 from src.utils.project_paths import DEFAULT_RESULTS_DIR
 
 
@@ -60,12 +61,12 @@ def test_run_single_review_skill_agy_error(tmp_path):
     mock_task.return_value.execute.side_effect = AgyClientError("Agy error")
 
     with patch("src.run_plot_review_pipeline.ReviewSkillTask", mock_task):
-        skill, success, msg = run_single_review_skill(
-            "plot-reviewer-conflict", "plot text", str(output_file), "model", "dir"
-        )
-        assert skill == "plot-reviewer-conflict"
-        assert success is False
-        assert "Agy error" in msg
+        with pytest.raises(ReviewSkillExecutionError) as excinfo:
+            run_single_review_skill(
+                "plot-reviewer-conflict", "plot text", str(output_file), "model", "dir"
+            )
+        assert "plot-reviewer-conflict" in str(excinfo.value)
+        assert "Agy error" in str(excinfo.value.__cause__)
 
 
 def test_run_single_review_skill_unexpected_error(tmp_path):
@@ -75,12 +76,12 @@ def test_run_single_review_skill_unexpected_error(tmp_path):
     mock_task.return_value.execute.side_effect = Exception("Unexpected")
 
     with patch("src.run_plot_review_pipeline.ReviewSkillTask", mock_task):
-        skill, success, msg = run_single_review_skill(
-            "plot-reviewer-conflict", "plot text", str(output_file), "model", "dir"
-        )
-        assert skill == "plot-reviewer-conflict"
-        assert success is False
-        assert "Unexpected" in msg
+        with pytest.raises(ReviewSkillExecutionError) as excinfo:
+            run_single_review_skill(
+                "plot-reviewer-conflict", "plot text", str(output_file), "model", "dir"
+            )
+        assert "plot-reviewer-conflict" in str(excinfo.value)
+        assert "Unexpected" in str(excinfo.value.__cause__)
 
 
 def test_main_read_plot_failed(tmp_path):
