@@ -3,13 +3,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.run_plot_review_pipeline import (
-    archive_previous_plot_review,
-    main,
-    run_single_review_skill,
-)
+from src.run_plot_review_pipeline import main
+from src.services.pipeline_service import PlotReviewPipeline
 from src.utils.ai_client import AgyClientError
-from src.utils.ai_exceptions import ReviewSkillExecutionError
+from src.utils.ai_exceptions import (
+    ReviewSkillExecutionError,
+)
 from src.utils.project_paths import DEFAULT_RESULTS_DIR
 
 
@@ -24,8 +23,11 @@ def test_archive_previous_plot_review(tmp_path):
     findings_yaml.write_text("findings yaml contents", encoding="utf-8")
     report_md.write_text("report markdown contents", encoding="utf-8")
 
+    pipeline = PlotReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = basename
+
     # Perform first archive
-    archive_previous_plot_review(str(output_dir), basename)
+    pipeline.archive_previous_review()
 
     history_dir = output_dir / "history"
     assert os.path.exists(history_dir)
@@ -34,7 +36,7 @@ def test_archive_previous_plot_review(tmp_path):
 
     # Perform second archive
     findings_yaml.write_text("findings yaml contents v2", encoding="utf-8")
-    archive_previous_plot_review(str(output_dir), basename)
+    pipeline.archive_previous_review()
     assert os.path.exists(history_dir / f"v2_{basename}_plot_findings.yaml")
 
 
@@ -44,9 +46,11 @@ def test_run_single_review_skill_success(tmp_path):
     mock_task = MagicMock()
     mock_task.return_value.execute.return_value = "findings: []"
 
-    with patch("src.run_plot_review_pipeline.ReviewSkillTask", mock_task):
-        skill, success, msg = run_single_review_skill(
-            "plot-reviewer-conflict", "plot text", str(output_file), "model", "dir"
+    pipeline = PlotReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
+
+    with patch("src.services.pipeline_service.ReviewSkillTask", mock_task):
+        skill, success, msg = pipeline.run_single_review_skill(
+            "plot-reviewer-conflict", "plot text", str(output_file)
         )
         assert skill == "plot-reviewer-conflict"
         assert success is True
@@ -60,10 +64,12 @@ def test_run_single_review_skill_agy_error(tmp_path):
     mock_task = MagicMock()
     mock_task.return_value.execute.side_effect = AgyClientError("Agy error")
 
-    with patch("src.run_plot_review_pipeline.ReviewSkillTask", mock_task):
+    pipeline = PlotReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
+
+    with patch("src.services.pipeline_service.ReviewSkillTask", mock_task):
         with pytest.raises(ReviewSkillExecutionError) as excinfo:
-            run_single_review_skill(
-                "plot-reviewer-conflict", "plot text", str(output_file), "model", "dir"
+            pipeline.run_single_review_skill(
+                "plot-reviewer-conflict", "plot text", str(output_file)
             )
         assert "plot-reviewer-conflict" in str(excinfo.value)
         assert "Agy error" in str(excinfo.value.__cause__)
@@ -75,10 +81,12 @@ def test_run_single_review_skill_unexpected_error(tmp_path):
     mock_task = MagicMock()
     mock_task.return_value.execute.side_effect = Exception("Unexpected")
 
-    with patch("src.run_plot_review_pipeline.ReviewSkillTask", mock_task):
+    pipeline = PlotReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
+
+    with patch("src.services.pipeline_service.ReviewSkillTask", mock_task):
         with pytest.raises(ReviewSkillExecutionError) as excinfo:
-            run_single_review_skill(
-                "plot-reviewer-conflict", "plot text", str(output_file), "model", "dir"
+            pipeline.run_single_review_skill(
+                "plot-reviewer-conflict", "plot text", str(output_file)
             )
         assert "plot-reviewer-conflict" in str(excinfo.value)
         assert "Unexpected" in str(excinfo.value.__cause__)
@@ -105,18 +113,19 @@ def test_main_success(tmp_path):
         str(tmp_path / "out"),
     ]
 
-    mock_run_skill = MagicMock(return_value=("plot-reviewer-conflict", True, "success"))
-    mock_integrate = MagicMock(return_value=True)
+    mock_pipeline_execute = MagicMock()
 
     with patch("sys.argv", test_args):
         with patch(
-            "src.run_plot_review_pipeline.run_single_review_skill", mock_run_skill
-        ):
-            with patch(
-                "src.integrate_plot_findings.integrate_plot_findings_in_dir",
-                mock_integrate,
-            ):
-                main()
+            "src.run_plot_review_pipeline.PlotReviewPipeline"
+        ) as mock_pipeline_class:
+            mock_pipeline_class.return_value.execute = mock_pipeline_execute
+            main()
 
-    assert mock_run_skill.call_count == 2
-    assert mock_integrate.call_count == 1
+    mock_pipeline_class.assert_called_once_with(
+        target_file=str(plot_file),
+        model="Gemini 3.5 Flash (High)",
+        output_dir_override=str(tmp_path / "out"),
+        workers=2,
+    )
+    mock_pipeline_execute.assert_called_once()
