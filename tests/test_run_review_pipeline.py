@@ -23,6 +23,12 @@ from src.run_review_pipeline import (
     run_single_review_skill,
 )
 from src.utils.ai_client import AgyClientError
+from src.utils.ai_exceptions import (
+    ContextFilteringError,
+    FormattingError,
+    IntegrationError,
+    ReviewSkillExecutionError,
+)
 from src.utils.project_paths import DEFAULT_RESULTS_DIR
 
 
@@ -145,8 +151,8 @@ def test_run_filter_context_fail(tmp_path):
     ):
         mock_run.return_value.returncode = 1
         mock_run.return_value.stderr = "error info"
-        res = run_filter_context("formatted.txt", "output.txt")
-        assert res is False
+        with pytest.raises(ContextFilteringError):
+            run_filter_context("formatted.txt", "output.txt")
 
 
 def test_run_single_review_skill_success(tmp_path):
@@ -173,11 +179,12 @@ def test_run_single_review_skill_client_error(tmp_path):
     with patch(
         "src.run_review_pipeline.ReviewSkillTask", return_value=mock_task_instance
     ):
-        skill, success, msg = run_single_review_skill(
-            "dummy-skill", "text", str(output_file), "model", str(tmp_path)
-        )
-        assert success is False
-        assert "API failed" in msg
+        with pytest.raises(ReviewSkillExecutionError) as excinfo:
+            run_single_review_skill(
+                "dummy-skill", "text", str(output_file), "model", str(tmp_path)
+            )
+        assert "dummy-skill" in str(excinfo.value)
+        assert "API failed" in str(excinfo.value.__cause__)
 
 
 def test_run_single_review_skill_generic_error(tmp_path):
@@ -188,11 +195,12 @@ def test_run_single_review_skill_generic_error(tmp_path):
     with patch(
         "src.run_review_pipeline.ReviewSkillTask", return_value=mock_task_instance
     ):
-        skill, success, msg = run_single_review_skill(
-            "dummy-skill", "text", str(output_file), "model", str(tmp_path)
-        )
-        assert success is False
-        assert "Unexpected error" in msg
+        with pytest.raises(ReviewSkillExecutionError) as excinfo:
+            run_single_review_skill(
+                "dummy-skill", "text", str(output_file), "model", str(tmp_path)
+            )
+        assert "dummy-skill" in str(excinfo.value)
+        assert "Unexpected error" in str(excinfo.value.__cause__)
 
 
 def test_run_step_format_rereview(tmp_path):
@@ -226,13 +234,12 @@ def test_run_step_format_not_exists_error(tmp_path):
     formatted_draft = output_dir / "formatted.txt"
 
     with patch(
-        "src.run_review_pipeline.run_formatter", side_effect=Exception("Failed")
+        "src.run_review_pipeline.run_formatter", side_effect=FormattingError("Failed")
     ):
-        with pytest.raises(SystemExit) as excinfo:
+        with pytest.raises(FormattingError):
             _run_step_format(
                 Path("dummy.txt"), str(formatted_draft), str(output_dir), "episode"
             )
-        assert excinfo.value.code == 1
 
 
 def test_run_step_format_already_exists(tmp_path):
@@ -274,7 +281,8 @@ def test_run_step_integration_fail(tmp_path):
     with patch(
         "integrate_findings.integrate_findings_in_dir", return_value=False
     ) as mock_integrate:
-        _run_step_integration(str(tmp_path), "episode", "model")
+        with pytest.raises(IntegrationError):
+            _run_step_integration(str(tmp_path), "episode", "model")
         mock_integrate.assert_called_once_with(str(tmp_path), "model")
 
 
@@ -282,7 +290,8 @@ def test_run_step_integration_error(tmp_path):
     with patch(
         "integrate_findings.integrate_findings_in_dir", side_effect=Exception("Error")
     ) as mock_integrate:
-        _run_step_integration(str(tmp_path), "episode", "model")
+        with pytest.raises(IntegrationError):
+            _run_step_integration(str(tmp_path), "episode", "model")
         mock_integrate.assert_called_once_with(str(tmp_path), "model")
 
 

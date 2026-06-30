@@ -9,6 +9,13 @@ from pathlib import Path
 
 from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
+from src.utils.ai_exceptions import (
+    ContextFilteringError,
+    FormattingError,
+    IntegrationError,
+    PipelineError,
+    ReviewSkillExecutionError,
+)
 from src.utils.ai_task import ReviewSkillInput, ReviewSkillTask
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
@@ -111,7 +118,16 @@ def run_formatter(input_file, output_file):
 
     cmd = ["poetry", "run", "python", formatter_script, input_file, "-o", output_file]
     logger.info(f"Running mechanical formatter: {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(
+            f"Formatter process failed with exit code {e.returncode}. Stderr: {e.stderr}"
+        )
+        raise FormattingError(f"Mechanical formatter failed: {e.stderr}") from e
+    except Exception as e:
+        logger.error(f"Unexpected error running formatter: {e}")
+        raise FormattingError(f"Unexpected formatting error: {e}") from e
 
 
 def run_filter_context(formatted_file, output_file):
@@ -125,12 +141,17 @@ def run_filter_context(formatted_file, output_file):
 
     cmd = ["poetry", "run", "python", filter_script, formatted_file, output_file]
     logger.info(f"Running context filter: {' '.join(cmd)}")
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    if res.returncode == 0:
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise ContextFilteringError(
+                f"Context filter failed with exit code {res.returncode}. Stderr: {res.stderr}"
+            )
         return True
-    else:
-        logger.warning(f"Context filter failed with error:\n{res.stderr}")
-        return False
+    except subprocess.SubprocessError as e:
+        raise ContextFilteringError(
+            f"Failed to execute context filter subprocess: {e}"
+        ) from e
 
 
 def run_single_review_skill(skill_name, target_text, output_file, model, output_dir):
@@ -153,9 +174,13 @@ def run_single_review_skill(skill_name, target_text, output_file, model, output_
         return skill_name, True, f"Saved to {output_file}"
 
     except AgyClientError as e:
-        return skill_name, False, str(e)
+        logger.error(f"[{skill_name}] AgyClientError: {e}")
+        raise ReviewSkillExecutionError(
+            f"Review skill {skill_name} failed via AgyClient: {e}"
+        ) from e
     except Exception as e:
-        return skill_name, False, f"Unexpected error: {str(e)}"
+        logger.error(f"[{skill_name}] Unexpected exception: {e}")
+        raise ReviewSkillExecutionError(f"Unexpected error in {skill_name}: {e}") from e
 
 
 def _resolve_output_dir(target_path: Path, args_dir: str | None) -> tuple[str, str]:
@@ -190,9 +215,9 @@ def _run_step_format(
         try:
             run_formatter(str(target_path), formatted_draft)
             logger.info(f"Format completed: {formatted_draft}")
-        except Exception as e:
+        except FormattingError as e:
             logger.error(f"Formatting failed: {e}")
-            sys.exit(1)
+            raise
     else:
         logger.info(
             f"Formatted draft already exists. Skipping formatting: {formatted_draft}"
@@ -233,8 +258,11 @@ def _run_step_parallel_reviews(
                     logger.info(f"[OK] {skill_name}: {msg}")
                 else:
                     logger.error(f"[FAIL] {skill_name}: {msg}")
+            except ReviewSkillExecutionError as exc:
+                logger.error(f"[FAIL] {skill} execution failed: {exc}")
+                results.append((skill, False, str(exc)))
             except Exception as exc:
-                logger.error(f"[FAIL] {skill} generated an exception: {exc}")
+                logger.error(f"[FAIL] {skill} generated an unexpected exception: {exc}")
                 results.append((skill, False, str(exc)))
 
 
@@ -250,18 +278,21 @@ def _run_step_integration(output_dir: str, basename: str, model: str) -> None:
             f"Calling: integrate_findings.integrate_findings_in_dir(output_dir='{output_dir}', model='{model}')"
         )
         success = integrate_findings.integrate_findings_in_dir(output_dir, model)
-        if success:
-            logger.info("Reports integrated successfully.")
-            logger.info(
-                f"Consolidated Report: {project_paths.get_report_md_path(output_dir, basename)}"
-            )
-            logger.info(
-                f"Consolidated YAML  : {project_paths.get_findings_yaml_path(output_dir, basename)}"
-            )
-        else:
-            logger.error("Failed to integrate findings.")
+        if not success:
+            raise IntegrationError("Failed to integrate findings in directory.")
+        logger.info("Reports integrated successfully.")
+        logger.info(
+            f"Consolidated Report: {project_paths.get_report_md_path(output_dir, basename)}"
+        )
+        logger.info(
+            f"Consolidated YAML  : {project_paths.get_findings_yaml_path(output_dir, basename)}"
+        )
+    except IntegrationError as e:
+        logger.error(f"Integration error: {e}")
+        raise
     except Exception as e:
         logger.error(f"Unexpected error while calling integrate_findings: {e}")
+        raise IntegrationError(f"Unexpected integration error: {e}") from e
 
 
 def _run_step_server(
@@ -324,25 +355,33 @@ def main():
     logger.info(f"Output Directory: {output_dir}")
     logger.info(f"Model: {args.model}")
 
-    # Step 1: Run Formatter (or Skip if it's a re-review)
-    formatted_draft = project_paths.get_formatted_draft_path(output_dir, basename)
-    _run_step_format(target_path, formatted_draft, output_dir, basename)
+    try:
+        # Step 1: Run Formatter (or Skip if it's a re-review)
+        formatted_draft = project_paths.get_formatted_draft_path(output_dir, basename)
+        _run_step_format(target_path, formatted_draft, output_dir, basename)
 
-    # Step 2: Run Context Filter
-    filtered_context = project_paths.get_filtered_context_path(output_dir)
-    run_filter_context(formatted_draft, filtered_context)
+        # Step 2: Run Context Filter
+        filtered_context = project_paths.get_filtered_context_path(output_dir)
+        run_filter_context(formatted_draft, filtered_context)
 
-    # Read formatted draft text
-    target_text = read_file(formatted_draft)
+        # Read formatted draft text
+        target_text = read_file(formatted_draft)
 
-    # Step 3: Run parallel reviews
-    _run_step_parallel_reviews(target_text, output_dir, args.model, args.workers)
+        # Step 3: Run parallel reviews
+        _run_step_parallel_reviews(target_text, output_dir, args.model, args.workers)
 
-    # Step 4: Run integration report
-    _run_step_integration(output_dir, basename, args.model)
+        # Step 4: Run integration report
+        _run_step_integration(output_dir, basename, args.model)
 
-    # Step 5: Start Review Editor Server
-    _run_step_server(formatted_draft, output_dir, basename, args.no_server)
+        # Step 5: Start Review Editor Server
+        _run_step_server(formatted_draft, output_dir, basename, args.no_server)
+
+    except PipelineError as e:
+        logger.error(f"Pipeline execution failed: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Unhandled critical error in pipeline: {e}")
+        sys.exit(1)
 
     logger.info("=== Review Pipeline Finished ===")
 

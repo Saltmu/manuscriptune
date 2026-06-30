@@ -9,6 +9,11 @@ from pathlib import Path
 from src import integrate_plot_findings
 from src.utils import project_paths
 from src.utils.ai_client import AgyClientError
+from src.utils.ai_exceptions import (
+    IntegrationError,
+    PipelineError,
+    ReviewSkillExecutionError,
+)
 from src.utils.ai_task import ReviewSkillInput, ReviewSkillTask
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
@@ -89,9 +94,79 @@ def run_single_review_skill(skill_name, target_text, output_file, model, output_
         return skill_name, True, f"Saved to {output_file}"
 
     except AgyClientError as e:
-        return skill_name, False, str(e)
+        logger.error(f"[{skill_name}] AgyClientError: {e}")
+        raise ReviewSkillExecutionError(
+            f"Plot review skill {skill_name} failed via AgyClient: {e}"
+        ) from e
     except Exception as e:
-        return skill_name, False, f"Unexpected error: {str(e)}"
+        logger.error(f"[{skill_name}] Unexpected exception: {e}")
+        raise ReviewSkillExecutionError(f"Unexpected error in {skill_name}: {e}") from e
+
+
+def _run_step_parallel_reviews(
+    target_text: str, output_dir: str, model: str, workers: int
+) -> None:
+    """Executes Step 2: parallel execution of review skills."""
+    review_skills = project_paths.PLOT_REVIEW_SKILLS
+    results = []
+
+    logger.info(f"Spawning {len(review_skills)} plot review skills in parallel...")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for skill, yaml_name in review_skills.items():
+            output_yaml = os.path.join(output_dir, yaml_name)
+            futures[
+                executor.submit(
+                    run_single_review_skill,
+                    skill,
+                    target_text,
+                    output_yaml,
+                    model,
+                    output_dir,
+                )
+            ] = skill
+
+        for future in as_completed(futures):
+            skill = futures[future]
+            try:
+                skill_name, success, msg = future.result()
+                results.append((skill_name, success, msg))
+                if success:
+                    logger.info(f"[OK] {skill_name}: {msg}")
+                else:
+                    logger.error(f"[FAIL] {skill_name}: {msg}")
+            except ReviewSkillExecutionError as exc:
+                logger.error(f"[FAIL] {skill} execution failed: {exc}")
+                results.append((skill, False, str(exc)))
+            except Exception as exc:
+                logger.error(f"[FAIL] {skill} generated an unexpected exception: {exc}")
+                results.append((skill, False, str(exc)))
+
+
+def _run_step_integration(
+    output_dir: str, target_path: str, model: str, basename: str
+) -> None:
+    """Executes Step 3: integrates plot findings into a final report."""
+    logger.info("Integrating plot review results...")
+    try:
+        success = integrate_plot_findings.integrate_plot_findings_in_dir(
+            output_dir, target_path, model
+        )
+        if not success:
+            raise IntegrationError("Failed to integrate plot findings in directory.")
+        logger.info("Plot reports integrated successfully.")
+        logger.info(
+            f"Consolidated Report: {project_paths.get_plot_report_md_path(output_dir, basename)}"
+        )
+        logger.info(
+            f"Consolidated YAML  : {project_paths.get_plot_findings_yaml_path(output_dir, basename)}"
+        )
+    except IntegrationError as e:
+        logger.error(f"Integration error: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error while calling integrate_plot_findings: {e}")
+        raise IntegrationError(f"Unexpected plot integration error: {e}") from e
 
 
 def main():
@@ -124,63 +199,26 @@ def main():
     logger.info(f"Output Directory: {output_dir}")
     logger.info(f"Model: {args.model}")
 
-    # Step 1: Archive previous review if exists
-    archive_previous_plot_review(output_dir, basename)
+    try:
+        # Step 1: Archive previous review if exists
+        archive_previous_plot_review(output_dir, basename)
 
-    # Read plot text
-    target_text = read_file(str(target_path))
-    if not target_text:
-        logger.error(f"Could not read target plot file: {target_path}")
+        # Read plot text
+        target_text = read_file(str(target_path))
+        if not target_text:
+            raise PipelineError(f"Could not read target plot file: {target_path}")
+
+        # Step 2: Run parallel review skills
+        _run_step_parallel_reviews(target_text, output_dir, args.model, args.workers)
+
+        # Step 3: Run integration report
+        _run_step_integration(output_dir, str(target_path), args.model, basename)
+
+    except PipelineError as e:
+        logger.error(f"Plot review pipeline failed: {e}")
         sys.exit(1)
-
-    # Step 2: Run parallel review skills
-    review_skills = project_paths.PLOT_REVIEW_SKILLS
-    results = []
-
-    logger.info(f"Spawning {len(review_skills)} plot review skills in parallel...")
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = {}
-        for skill, yaml_name in review_skills.items():
-            output_yaml = os.path.join(output_dir, yaml_name)
-            futures[
-                executor.submit(
-                    run_single_review_skill,
-                    skill,
-                    target_text,
-                    output_yaml,
-                    args.model,
-                    output_dir,
-                )
-            ] = skill
-
-        for future in as_completed(futures):
-            skill = futures[future]
-            try:
-                skill_name, success, msg = future.result()
-                results.append((skill_name, success, msg))
-                if success:
-                    logger.info(f"[OK] {skill_name}: {msg}")
-                else:
-                    logger.error(f"[FAIL] {skill_name}: {msg}")
-            except Exception as exc:
-                logger.error(f"[FAIL] {skill} generated an exception: {exc}")
-                results.append((skill, False, str(exc)))
-
-    # Step 3: Run integration report
-    logger.info("Integrating plot review results...")
-    success = integrate_plot_findings.integrate_plot_findings_in_dir(
-        output_dir, str(target_path), args.model
-    )
-    if success:
-        logger.info("Plot reports integrated successfully.")
-        logger.info(
-            f"Consolidated Report: {project_paths.get_plot_report_md_path(output_dir, basename)}"
-        )
-        logger.info(
-            f"Consolidated YAML  : {project_paths.get_plot_findings_yaml_path(output_dir, basename)}"
-        )
-    else:
-        logger.error("Failed to integrate plot findings.")
+    except Exception as e:
+        logger.error(f"Unhandled critical error in plot pipeline: {e}")
         sys.exit(1)
 
     logger.info("=== Plot Review Pipeline Finished ===")
