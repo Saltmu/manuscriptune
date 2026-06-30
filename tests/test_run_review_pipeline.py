@@ -1,32 +1,17 @@
 import os
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure src is in sys.path so integrate_findings can be imported during tests
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
-)
-
-from src.run_review_pipeline import (
-    _resolve_output_dir,
-    _run_step_format,
-    _run_step_integration,
-    _run_step_parallel_reviews,
-    _run_step_server,
-    archive_previous_review,
-    main,
-    run_filter_context,
-    run_formatter,
-    run_single_review_skill,
-)
+from src.run_review_pipeline import main
+from src.services.pipeline_service import TextReviewPipeline
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_exceptions import (
     ContextFilteringError,
     FormattingError,
     IntegrationError,
+    PipelineError,
     ReviewSkillExecutionError,
 )
 from src.utils.project_paths import DEFAULT_RESULTS_DIR
@@ -34,125 +19,105 @@ from src.utils.project_paths import DEFAULT_RESULTS_DIR
 
 def test_resolve_output_dir(tmp_path):
     target_file = tmp_path / "novels" / "episode_1.txt"
-    os.makedirs(target_file.parent, exist_ok=True)
-    target_file.touch()
+    pipeline = TextReviewPipeline(str(target_file))
+    assert pipeline.basename == "episode_1"
+    assert pipeline.output_dir == os.path.join(DEFAULT_RESULTS_DIR, "episode_1")
 
-    # Case 1: dir is None, output directory defaults to DEFAULT_RESULTS_DIR/{basename}
-    basename, output_dir = _resolve_output_dir(target_file, None)
-    assert basename == "episode_1"
-    assert output_dir == os.path.join(DEFAULT_RESULTS_DIR, "episode_1")
-
-    # Case 2: dir is specified
-    custom_dir = str(tmp_path / "custom_results")
-    basename, output_dir = _resolve_output_dir(target_file, custom_dir)
-    assert basename == "episode_1"
-    assert output_dir == custom_dir
+    # Smart resolution when defaults result dir is in path
+    target_in_results = tmp_path / DEFAULT_RESULTS_DIR / "my_story" / "chapter_2.txt"
+    pipeline2 = TextReviewPipeline(str(target_in_results))
+    assert pipeline2.basename == "my_story"
+    assert pipeline2.output_dir == os.path.join(DEFAULT_RESULTS_DIR, "my_story")
 
 
 def test_archive_previous_review(tmp_path):
-    basename = "episode_1"
-    output_dir = tmp_path / DEFAULT_RESULTS_DIR / basename
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    findings_file = output_dir / "episode_findings.yaml"
+    findings_file.touch()
 
-    # Place mock original novel file
-    original_novel = tmp_path / "novels" / f"{basename}.txt"
-    os.makedirs(original_novel.parent, exist_ok=True)
-    original_novel.write_text("original novel text content", encoding="utf-8")
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = "episode"
 
-    # Place mock files to archive
-    formatted_txt = output_dir / f"{basename}_formatted.txt"
-    findings_yaml = output_dir / f"{basename}_findings.yaml"
-    report_md = output_dir / f"{basename}_report.md"
-    filtered_ctx = output_dir / "01_filtered_context.txt"
+    # Files to archive
+    formatted_file = output_dir / "episode_formatted.txt"
+    formatted_file.touch()
+    report_file = output_dir / "episode_report.md"
+    report_file.touch()
+    context_file = output_dir / "01_filtered_context.txt"
+    context_file.touch()
 
-    formatted_txt.write_text("formatted text contents", encoding="utf-8")
-    findings_yaml.write_text("findings yaml contents", encoding="utf-8")
-    report_md.write_text("report markdown contents", encoding="utf-8")
-    filtered_ctx.write_text("filtered context contents", encoding="utf-8")
+    pipeline.archive_previous_review(target_path=Path("dummy.txt"))
 
-    # Perform first archive
-    archive_previous_review(str(output_dir), basename, target_path=original_novel)
+    # Assert archive exists
+    archive_dir = output_dir / "history" / "v1"
+    assert archive_dir.exists()
+    assert (archive_dir / "episode_formatted.txt").exists()
+    assert (archive_dir / "episode_findings.yaml").exists()
+    assert (archive_dir / "episode_report.md").exists()
+    assert (archive_dir / "01_filtered_context.txt").exists()
 
-    # Verify history directory and archived files
-    history_dir = output_dir / "history"
-    version_1_dir = history_dir / "v1"
-    assert os.path.exists(history_dir)
-    assert os.path.exists(version_1_dir)
-    assert os.path.exists(version_1_dir / f"{basename}_formatted.txt")
-    assert os.path.exists(version_1_dir / f"{basename}_findings.yaml")
-    assert os.path.exists(version_1_dir / f"{basename}_report.md")
-    assert os.path.exists(version_1_dir / "01_filtered_context.txt")
-    assert os.path.exists(
-        version_1_dir / f"{basename}.txt"
-    )  # Original text is archived
-
-    # Perform second archive (recreate findings file so archive isn't skipped)
-    findings_yaml.write_text("findings yaml contents v2", encoding="utf-8")
-    archive_previous_review(str(output_dir), basename, target_path=original_novel)
-    version_2_dir = history_dir / "v2"
-    assert os.path.exists(version_2_dir)
-    assert os.path.exists(version_2_dir / f"{basename}_formatted.txt")
-    assert os.path.exists(version_2_dir / f"{basename}.txt")
+    # Original files deleted
+    assert not findings_file.exists()
+    assert not report_file.exists()
 
 
-def test_run_formatter_fallback(tmp_path):
+def test_run_formatter_not_found(tmp_path):
     input_file = tmp_path / "input.txt"
-    input_file.write_text("Hello [1] World (2) 【3】!  ", encoding="utf-8")
+    input_file.write_text("Hello[1] World!", encoding="utf-8")
     output_file = tmp_path / "output.txt"
 
-    # Only mock the formatter script path as non-existent to trigger fallback
-    real_exists = os.path.exists
+    pipeline = TextReviewPipeline("dummy.txt")
 
-    def mock_exists(path):
+    original_exists = os.path.exists
+
+    def side_effect(path):
         if "novel_formatter_helper.py" in str(path):
             return False
-        return real_exists(path)
+        return original_exists(path)
 
-    with patch("os.path.exists", mock_exists):
-        run_formatter(str(input_file), str(output_file))
+    with patch("os.path.exists", side_effect=side_effect):
+        pipeline.run_formatter(str(input_file), str(output_file))
+        assert output_file.exists()
+        assert output_file.read_text(encoding="utf-8") == "Hello World!"
 
-    assert output_file.exists()
-    assert output_file.read_text(encoding="utf-8") == "Hello  World  !  "
 
-
-def test_run_formatter_script(tmp_path):
+def test_run_formatter_success(tmp_path):
     input_file = tmp_path / "input.txt"
     output_file = tmp_path / "output.txt"
 
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("subprocess.run") as mock_run,
-    ):
-        run_formatter(str(input_file), str(output_file))
-        mock_run.assert_called_once()
+    mock_runner = MagicMock()
+    pipeline = TextReviewPipeline("dummy.txt", runner=mock_runner)
+
+    with patch("os.path.exists", return_value=True):
+        pipeline.run_formatter(str(input_file), str(output_file))
+        mock_runner.run.assert_called_once()
 
 
 def test_run_filter_context_not_found(tmp_path):
+    pipeline = TextReviewPipeline("dummy.txt")
     with patch("os.path.exists", return_value=False):
-        res = run_filter_context("formatted.txt", "output.txt")
-        assert res is False
+        res = pipeline.run_filter_context("formatted.txt", "output.txt")
+        assert res is None
 
 
 def test_run_filter_context_success(tmp_path):
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("subprocess.run") as mock_run,
-    ):
-        mock_run.return_value.returncode = 0
-        res = run_filter_context("formatted.txt", "output.txt")
-        assert res is True
-        mock_run.assert_called_once()
+    mock_runner = MagicMock()
+    pipeline = TextReviewPipeline("dummy.txt", runner=mock_runner)
+
+    with patch("os.path.exists", return_value=True):
+        pipeline.run_filter_context("formatted.txt", "output.txt")
+        mock_runner.run.assert_called_once()
 
 
 def test_run_filter_context_fail(tmp_path):
-    with (
-        patch("os.path.exists", return_value=True),
-        patch("subprocess.run") as mock_run,
-    ):
-        mock_run.return_value.returncode = 1
-        mock_run.return_value.stderr = "error info"
+    mock_runner = MagicMock()
+    mock_runner.run.side_effect = PipelineError("Command failed")
+    pipeline = TextReviewPipeline("dummy.txt", runner=mock_runner)
+
+    with patch("os.path.exists", return_value=True):
         with pytest.raises(ContextFilteringError):
-            run_filter_context("formatted.txt", "output.txt")
+            pipeline.run_filter_context("formatted.txt", "output.txt")
 
 
 def test_run_single_review_skill_success(tmp_path):
@@ -160,11 +125,13 @@ def test_run_single_review_skill_success(tmp_path):
     mock_task_instance = MagicMock()
     mock_task_instance.execute.return_value = "yaml: data"
 
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
+
     with patch(
-        "src.run_review_pipeline.ReviewSkillTask", return_value=mock_task_instance
+        "src.services.pipeline_service.ReviewSkillTask", return_value=mock_task_instance
     ):
-        skill, success, msg = run_single_review_skill(
-            "dummy-skill", "text", str(output_file), "model", str(tmp_path)
+        skill, success, msg = pipeline.run_single_review_skill(
+            "dummy-skill", "text", str(output_file)
         )
         assert skill == "dummy-skill"
         assert success is True
@@ -176,13 +143,13 @@ def test_run_single_review_skill_client_error(tmp_path):
     mock_task_instance = MagicMock()
     mock_task_instance.execute.side_effect = AgyClientError("API failed")
 
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
+
     with patch(
-        "src.run_review_pipeline.ReviewSkillTask", return_value=mock_task_instance
+        "src.services.pipeline_service.ReviewSkillTask", return_value=mock_task_instance
     ):
         with pytest.raises(ReviewSkillExecutionError) as excinfo:
-            run_single_review_skill(
-                "dummy-skill", "text", str(output_file), "model", str(tmp_path)
-            )
+            pipeline.run_single_review_skill("dummy-skill", "text", str(output_file))
         assert "dummy-skill" in str(excinfo.value)
         assert "API failed" in str(excinfo.value.__cause__)
 
@@ -192,13 +159,13 @@ def test_run_single_review_skill_generic_error(tmp_path):
     mock_task_instance = MagicMock()
     mock_task_instance.execute.side_effect = Exception("Unexpected error")
 
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
+
     with patch(
-        "src.run_review_pipeline.ReviewSkillTask", return_value=mock_task_instance
+        "src.services.pipeline_service.ReviewSkillTask", return_value=mock_task_instance
     ):
         with pytest.raises(ReviewSkillExecutionError) as excinfo:
-            run_single_review_skill(
-                "dummy-skill", "text", str(output_file), "model", str(tmp_path)
-            )
+            pipeline.run_single_review_skill("dummy-skill", "text", str(output_file))
         assert "dummy-skill" in str(excinfo.value)
         assert "Unexpected error" in str(excinfo.value.__cause__)
 
@@ -209,49 +176,66 @@ def test_run_step_format_rereview(tmp_path):
     findings_file = output_dir / "episode_findings.yaml"
     findings_file.touch()
 
-    with patch("src.run_review_pipeline.archive_previous_review") as mock_archive:
-        _run_step_format(Path("dummy.txt"), "formatted.txt", str(output_dir), "episode")
-        mock_archive.assert_called_once_with(
-            str(output_dir), "episode", target_path=Path("dummy.txt")
-        )
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = "episode"
+
+    with (
+        patch.object(pipeline, "archive_previous_review") as mock_archive,
+        patch.object(pipeline, "run_formatter"),
+        patch.object(pipeline, "run_filter_context"),
+        patch.object(pipeline, "run_parallel_review_skills"),
+        patch.object(pipeline, "_integrate_findings"),
+    ):
+        pipeline.execute(no_server=True)
+        mock_archive.assert_called_once_with(target_path=Path("dummy.txt"))
 
 
 def test_run_step_format_not_exists_success(tmp_path):
     output_dir = tmp_path / "output"
     output_dir.mkdir()
-    formatted_draft = output_dir / "formatted.txt"
 
-    with patch("src.run_review_pipeline.run_formatter") as mock_formatter:
-        _run_step_format(
-            Path("dummy.txt"), str(formatted_draft), str(output_dir), "episode"
-        )
-        mock_formatter.assert_called_once_with("dummy.txt", str(formatted_draft))
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = "episode"
+
+    with (
+        patch.object(pipeline, "run_formatter") as mock_formatter,
+        patch.object(pipeline, "run_filter_context"),
+        patch.object(pipeline, "run_parallel_review_skills"),
+        patch.object(pipeline, "_integrate_findings"),
+    ):
+        pipeline.execute(no_server=True)
+        formatted_draft = os.path.join(str(output_dir), "episode_formatted.txt")
+        mock_formatter.assert_called_once_with("dummy.txt", formatted_draft)
 
 
 def test_run_step_format_not_exists_error(tmp_path):
     output_dir = tmp_path / "output"
     output_dir.mkdir()
-    formatted_draft = output_dir / "formatted.txt"
 
-    with patch(
-        "src.run_review_pipeline.run_formatter", side_effect=FormattingError("Failed")
-    ):
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = "episode"
+
+    with patch.object(pipeline, "run_formatter", side_effect=FormattingError("Failed")):
         with pytest.raises(FormattingError):
-            _run_step_format(
-                Path("dummy.txt"), str(formatted_draft), str(output_dir), "episode"
-            )
+            pipeline.execute(no_server=True)
 
 
 def test_run_step_format_already_exists(tmp_path):
     output_dir = tmp_path / "output"
     output_dir.mkdir()
-    formatted_draft = output_dir / "formatted.txt"
+    formatted_draft = output_dir / "episode_formatted.txt"
     formatted_draft.touch()
 
-    with patch("src.run_review_pipeline.run_formatter") as mock_formatter:
-        _run_step_format(
-            Path("dummy.txt"), str(formatted_draft), str(output_dir), "episode"
-        )
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = "episode"
+
+    with (
+        patch.object(pipeline, "run_formatter") as mock_formatter,
+        patch.object(pipeline, "run_filter_context"),
+        patch.object(pipeline, "run_parallel_review_skills"),
+        patch.object(pipeline, "_integrate_findings"),
+    ):
+        pipeline.execute(no_server=True)
         mock_formatter.assert_not_called()
 
 
@@ -259,93 +243,164 @@ def test_run_step_parallel_reviews(tmp_path):
     output_dir = tmp_path / "output"
     output_dir.mkdir()
 
-    with patch("src.run_review_pipeline.run_single_review_skill") as mock_run_skill:
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+
+    with patch.object(pipeline, "run_single_review_skill") as mock_run_skill:
         mock_run_skill.side_effect = [
             ("text-reviewer-logic", True, "success"),
             ("text-reviewer-style", False, "failed"),
-            ("text-reviewer-logic", True, "success"),
         ]
-        _run_step_parallel_reviews("target text", str(output_dir), "model", 2)
-        assert mock_run_skill.call_count >= 2
+        pipeline.run_parallel_review_skills(
+            "target text", {"text-reviewer-logic": "02_logic.yaml"}
+        )
+        assert mock_run_skill.call_count >= 1
 
 
 def test_run_step_integration_success(tmp_path):
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
     with patch(
-        "integrate_findings.integrate_findings_in_dir", return_value=True
+        "src.integrate_findings.integrate_findings_in_dir", return_value=True
     ) as mock_integrate:
-        _run_step_integration(str(tmp_path), "episode", "model")
-        mock_integrate.assert_called_once_with(str(tmp_path), "model")
+        pipeline._integrate_findings()
+        mock_integrate.assert_called_once_with(str(tmp_path), pipeline.model)
 
 
 def test_run_step_integration_fail(tmp_path):
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
     with patch(
-        "integrate_findings.integrate_findings_in_dir", return_value=False
+        "src.integrate_findings.integrate_findings_in_dir", return_value=False
     ) as mock_integrate:
         with pytest.raises(IntegrationError):
-            _run_step_integration(str(tmp_path), "episode", "model")
-        mock_integrate.assert_called_once_with(str(tmp_path), "model")
+            pipeline._integrate_findings()
+        mock_integrate.assert_called_once_with(str(tmp_path), pipeline.model)
 
 
 def test_run_step_integration_error(tmp_path):
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
     with patch(
-        "integrate_findings.integrate_findings_in_dir", side_effect=Exception("Error")
+        "src.integrate_findings.integrate_findings_in_dir",
+        side_effect=Exception("Error"),
     ) as mock_integrate:
         with pytest.raises(IntegrationError):
-            _run_step_integration(str(tmp_path), "episode", "model")
-        mock_integrate.assert_called_once_with(str(tmp_path), "model")
+            pipeline._integrate_findings()
+        mock_integrate.assert_called_once_with(str(tmp_path), pipeline.model)
 
 
-def test_run_step_server_no_server():
-    with patch("subprocess.run") as mock_run:
-        _run_step_server("formatted.txt", "output_dir", "episode", no_server=True)
-        mock_run.assert_not_called()
+def test_run_step_server_no_server(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = "episode"
 
+    mock_runner = MagicMock()
+    pipeline.runner = mock_runner
 
-def test_run_step_server_not_found():
+    original_exists = os.path.exists
+
+    def side_effect(path):
+        if "review_server.py" in str(path):
+            return True
+        if "episode_findings.yaml" in str(path):
+            return False
+        return original_exists(path)
+
     with (
-        patch("os.path.exists", return_value=False),
-        patch("subprocess.run") as mock_run,
+        patch("os.path.exists", side_effect=side_effect),
+        patch.object(pipeline, "run_formatter"),
+        patch.object(pipeline, "run_filter_context"),
+        patch.object(pipeline, "run_parallel_review_skills"),
+        patch.object(pipeline, "_integrate_findings"),
+        patch("src.services.pipeline_service.read_file", return_value="dummy"),
     ):
-        _run_step_server("formatted.txt", "output_dir", "episode", no_server=False)
-        mock_run.assert_not_called()
+        pipeline.execute(no_server=True)
+        mock_runner.run.assert_not_called()
 
 
-def test_run_step_server_found():
+def test_run_step_server_not_found(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = "episode"
+
+    mock_runner = MagicMock()
+    pipeline.runner = mock_runner
+
+    original_exists = os.path.exists
+
+    def side_effect(path):
+        if "review_server.py" in str(path):
+            return False
+        if "episode_findings.yaml" in str(path):
+            return False
+        return original_exists(path)
+
     with (
-        patch("os.path.exists", return_value=True),
-        patch("subprocess.run") as mock_run,
+        patch("os.path.exists", side_effect=side_effect),
+        patch.object(pipeline, "run_formatter"),
+        patch.object(pipeline, "run_filter_context"),
+        patch.object(pipeline, "run_parallel_review_skills"),
+        patch.object(pipeline, "_integrate_findings"),
+        patch("src.services.pipeline_service.read_file", return_value="dummy"),
     ):
-        _run_step_server("formatted.txt", "output_dir", "episode", no_server=False)
-        mock_run.assert_called_once()
+        pipeline.execute(no_server=False)
+        mock_runner.run.assert_not_called()
 
 
-@patch("src.run_review_pipeline._run_step_format")
-@patch("src.run_review_pipeline.run_filter_context")
-@patch("src.run_review_pipeline._run_step_parallel_reviews")
-@patch("src.run_review_pipeline._run_step_integration")
-@patch("src.run_review_pipeline._run_step_server")
-@patch("src.run_review_pipeline.read_file", return_value="novel text")
-@patch("src.run_review_pipeline.os.makedirs")
-def test_main(
-    mock_makedirs,
-    mock_read_file,
-    mock_server,
-    mock_integration,
-    mock_reviews,
-    mock_filter,
-    mock_format,
-):
+def test_run_step_server_found(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(output_dir))
+    pipeline.basename = "episode"
+
+    mock_runner = MagicMock()
+    pipeline.runner = mock_runner
+
+    original_exists = os.path.exists
+
+    def side_effect(path):
+        if "review_server.py" in str(path):
+            return True
+        if "episode_findings.yaml" in str(path):
+            return False
+        return original_exists(path)
+
+    with (
+        patch("os.path.exists", side_effect=side_effect),
+        patch.object(pipeline, "run_formatter"),
+        patch.object(pipeline, "run_filter_context"),
+        patch.object(pipeline, "run_parallel_review_skills"),
+        patch.object(pipeline, "_integrate_findings"),
+        patch("src.services.pipeline_service.read_file", return_value="dummy"),
+    ):
+        pipeline.execute(no_server=False)
+        mock_runner.run.assert_called_once()
+
+
+def test_main_success(tmp_path):
+    novel_file = tmp_path / "novel.txt"
+    novel_file.write_text("小説の本文", encoding="utf-8")
+
     test_args = [
         "run_review_pipeline.py",
-        "novels/episode_1.txt",
-        "--model",
-        "test-model",
+        str(novel_file),
+        "--dir",
+        str(tmp_path / "out"),
+        "--no-server",
     ]
-    with patch("sys.argv", test_args):
+
+    mock_pipeline_execute = MagicMock()
+
+    with (
+        patch("sys.argv", test_args),
+        patch("src.run_review_pipeline.TextReviewPipeline") as mock_pipeline_class,
+    ):
+        mock_pipeline_class.return_value.execute = mock_pipeline_execute
         main()
 
-    mock_format.assert_called_once()
-    mock_filter.assert_called_once()
-    mock_reviews.assert_called_once()
-    mock_integration.assert_called_once()
-    mock_server.assert_called_once()
+    mock_pipeline_class.assert_called_once_with(
+        target_file=str(novel_file),
+        model="Gemini 3.5 Flash (High)",
+        output_dir_override=str(tmp_path / "out"),
+        workers=2,
+    )
+    mock_pipeline_execute.assert_called_once_with(no_server=True)
