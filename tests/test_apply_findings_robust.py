@@ -53,10 +53,10 @@ def test_main_sequential_llm_fallback(tmp_path):
 
     with (
         patch(
-            "src.apply_findings.query_llm_for_block_replacement", return_value=None
+            "src.findings.applier.query_llm_for_block_replacement", return_value=None
         ) as mock_block,
         patch(
-            "src.apply_findings.query_llm_for_single_replacement",
+            "src.findings.applier.query_llm_for_single_replacement",
             side_effect=mock_query_single,
         ) as mock_single,
     ):

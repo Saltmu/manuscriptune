@@ -4,16 +4,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from src.apply_findings import (
+from src.apply_findings import main
+from src.findings.applier import (
     _determine_accepted_findings,
     _interactive_choice,
     _save_outputs_and_print_summary,
+)
+from src.findings.replacer import (
     extract_suggestion_candidate,
-    find_target_line,
-    main,
-    parse_line_number,
     query_llm_for_block_replacement,
 )
+from src.findings.text_matcher import find_target_line, parse_line_number
 
 
 def test_parse_line_number():
@@ -123,7 +124,7 @@ def test_main_block_merging_auto_llm(tmp_path):
     )
 
     with patch(
-        "src.apply_findings.query_llm_for_block_replacement", return_value=llm_output
+        "src.findings.applier.query_llm_for_block_replacement", return_value=llm_output
     ) as mock_llm:
         test_args = ["apply_findings.py", "--dir", str(tmp_path), "--auto"]
         with patch("sys.argv", test_args):
@@ -219,7 +220,7 @@ def test_query_llm_for_block_replacement_generic_exception():
     mock_task = MagicMock()
     mock_task.execute.side_effect = Exception("Generic LLM failure")
 
-    with patch("src.apply_findings.BlockReplacementTask", return_value=mock_task):
+    with patch("src.findings.replacer.BlockReplacementTask", return_value=mock_task):
         res = query_llm_for_block_replacement(["line1"], [], "model")
         assert res is None
 
@@ -330,7 +331,7 @@ def test_find_target_line_robust_multi_line_and_fuzzy():
 
 def test_apply_grouped_findings_context_extension():
     # _apply_grouped_findings が _matched_lines を考慮することを確認
-    from src.apply_findings import _apply_grouped_findings
+    from src.findings.applier import _apply_grouped_findings
 
     text_lines = [
         "L1\n",
@@ -358,7 +359,7 @@ def test_apply_grouped_findings_context_extension():
     # apply_fallback_to_block をパッチして、引数 context_lines をアサートする
     expected_context = list(text_lines)
     with patch(
-        "src.apply_findings.apply_fallback_to_block", return_value=("", [], [])
+        "src.findings.applier.apply_fallback_to_block", return_value=("", [], [])
     ) as mock_fallback:
         _apply_grouped_findings(text_lines, groups, args)
         mock_fallback.assert_called_once()
