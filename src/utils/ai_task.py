@@ -52,6 +52,13 @@ class AgyTask(ABC, Generic[InputT, OutputT]):
 # 1. ReviewSkillTask
 # =====================================================================
 
+_CONTEXT_BUILDERS = {
+    "text-reviewer-logic": "_get_text_logic_context",
+    "text-reviewer-style": "_get_text_style_context",
+    "plot-reviewer-conflict": "_get_plot_conflict_context",
+    "plot-reviewer-structure": "_get_plot_structure_context",
+}
+
 
 class ReviewSkillInput:
     """Input structure for ReviewSkillTask."""
@@ -83,14 +90,10 @@ class ReviewSkillTask(AgyTask[ReviewSkillInput, str]):
                 pattern_key, default_pattern, None
             )
 
-        if skill_name == "text-reviewer-logic":
-            context_text = self._get_text_logic_context(get_latest_file, output_dir)
-        elif skill_name == "text-reviewer-style":
-            context_text = self._get_text_style_context(get_latest_file)
-        elif skill_name == "plot-reviewer-conflict":
-            context_text = self._get_plot_conflict_context(get_latest_file)
-        elif skill_name == "plot-reviewer-structure":
-            context_text = self._get_plot_structure_context(get_latest_file)
+        method_name = _CONTEXT_BUILDERS.get(skill_name)
+        if method_name:
+            builder = getattr(self, method_name)
+            context_text = builder(get_latest_file, output_dir)
         else:
             context_text = ""
 
@@ -140,7 +143,7 @@ findings: []
                 context_text += f"\n【プロット】\n{read_file(plot_file)}\n"
         return context_text
 
-    def _get_text_style_context(self, get_latest_file) -> str:
+    def _get_text_style_context(self, get_latest_file, output_dir: str) -> str:
         context_text = ""
         char_file = get_latest_file("character", "*キャラクター概要*.txt")
         policy_file = get_latest_file("policy_global", "*執筆ポリシー_全体*.txt")
@@ -150,7 +153,7 @@ findings: []
             context_text += f"\n【執筆ポリシー】\n{read_file(policy_file)}\n"
         return context_text
 
-    def _get_plot_conflict_context(self, get_latest_file) -> str:
+    def _get_plot_conflict_context(self, get_latest_file, output_dir: str) -> str:
         context_text = ""
         char_file = get_latest_file("character", "*キャラクター概要*.txt")
         policy_file = get_latest_file("policy_global", "*執筆ポリシー_全体*.txt")
@@ -160,7 +163,7 @@ findings: []
             context_text += f"\n【執筆ポリシー】\n{read_file(policy_file)}\n"
         return context_text
 
-    def _get_plot_structure_context(self, get_latest_file) -> str:
+    def _get_plot_structure_context(self, get_latest_file, output_dir: str) -> str:
         context_text = ""
         char_file = get_latest_file("character", "*キャラクター概要*.txt")
         setting_file = get_latest_file("settings", "*設定資料集*.txt")

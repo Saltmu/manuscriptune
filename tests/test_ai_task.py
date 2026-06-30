@@ -112,3 +112,83 @@ def test_findings_integration_task(mock_client):
     mock_client.generate.return_value = "```yaml\nfindings:\n  - id: INT-001\n```"
     result = task.execute(input_data)
     assert result == "findings:\n  - id: INT-001"
+
+
+def test_review_skill_task_contexts(tmp_path, mock_client):
+    skills = [
+        "text-reviewer-logic",
+        "text-reviewer-style",
+        "plot-reviewer-conflict",
+        "plot-reviewer-structure",
+    ]
+    for skill in skills:
+        skills_dir = tmp_path / "skills" / skill
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        skill_md = skills_dir / "SKILL.md"
+        skill_md.write_text(f"Instruction for {skill}", encoding="utf-8")
+
+    task = ReviewSkillTask(client=mock_client)
+
+    # We patch os.path.exists to return True for dummy SKILL.md paths
+    original_exists = os.path.exists
+
+    def mock_exists(path):
+        normalized = path.replace("\\", "/")
+        if any(f"skills/{skill}/SKILL.md" in normalized for skill in skills):
+            return True
+        return original_exists(path)
+
+    with (
+        patch("os.path.exists", mock_exists),
+        patch(
+            "src.utils.ai_task.read_file",
+            side_effect=lambda path: f"Instruction for {os.path.basename(os.path.dirname(path))}",
+        ),
+        patch(
+            "src.utils.ai_task.ReviewSkillTask._get_text_logic_context",
+            return_value="Logic Context Block",
+        ) as mock_logic,
+        patch(
+            "src.utils.ai_task.ReviewSkillTask._get_text_style_context",
+            return_value="Style Context Block",
+        ) as mock_style,
+        patch(
+            "src.utils.ai_task.ReviewSkillTask._get_plot_conflict_context",
+            return_value="Conflict Context Block",
+        ) as mock_conflict,
+        patch(
+            "src.utils.ai_task.ReviewSkillTask._get_plot_structure_context",
+            return_value="Structure Context Block",
+        ) as mock_structure,
+    ):
+        # 1. logic
+        input_data = ReviewSkillInput(
+            "text-reviewer-logic", "Target Content", str(tmp_path)
+        )
+        prompt = task.render_prompt(input_data)
+        assert "Logic Context Block" in prompt
+        mock_logic.assert_called_once()
+
+        # 2. style
+        input_data = ReviewSkillInput(
+            "text-reviewer-style", "Target Content", str(tmp_path)
+        )
+        prompt = task.render_prompt(input_data)
+        assert "Style Context Block" in prompt
+        mock_style.assert_called_once()
+
+        # 3. conflict
+        input_data = ReviewSkillInput(
+            "plot-reviewer-conflict", "Target Content", str(tmp_path)
+        )
+        prompt = task.render_prompt(input_data)
+        assert "Conflict Context Block" in prompt
+        mock_conflict.assert_called_once()
+
+        # 4. structure
+        input_data = ReviewSkillInput(
+            "plot-reviewer-structure", "Target Content", str(tmp_path)
+        )
+        prompt = task.render_prompt(input_data)
+        assert "Structure Context Block" in prompt
+        mock_structure.assert_called_once()
