@@ -40,6 +40,7 @@ def test_writer_cli_prompt_only():
             "writer_cli.writer_helper.get_novel_setting", return_value="重天の調律師"
         ),
         patch("writer_cli.read_file", return_value="dummy content"),
+        patch("src.utils.ai_task.read_file", return_value="dummy content"),
         patch("writer_cli.get_previous_episode_file", return_value=None),
         patch("builtins.print") as mock_print,
         pytest.raises(SystemExit) as exc_info,
@@ -158,6 +159,7 @@ def test_writer_cli_with_neighbor_plots():
             "writer_cli.writer_helper.get_novel_setting", return_value="重天の調律師"
         ),
         patch("writer_cli.read_file", return_value="dummy content"),
+        patch("src.utils.ai_task.read_file", return_value="dummy content"),
         patch("writer_cli.get_previous_episode_file", return_value=None),
         patch("builtins.print") as mock_print,
         pytest.raises(SystemExit) as exc_info,

@@ -5,7 +5,17 @@ import sys
 
 # 既存のヘルパーからプロット情報を取得するため、パスを追加してインポート
 from src.utils import plot_parser, project_config
-from src.utils.ai_client import AgyClient, AgyClientError
+from src.utils.ai_client import AgyClientError
+from src.utils.ai_task import (
+    NovelPolicyCheckInput,
+    NovelPolicyCheckTask,
+    NovelRewriteInput,
+    NovelRewriteTask,
+    NovelSceneWritingInput,
+    NovelSceneWritingTask,
+    NovelWritingInput,
+    NovelWritingTask,
+)
 
 
 class WriterHelperMock:
@@ -197,51 +207,15 @@ def run_self_check(novel_content, policy_text, policy_macro_text, plot_content, 
     """LLMを用いて執筆された本文のポリシー自己チェックと自動リライトを行う"""
     print("Starting self-verification for policy compliance...")
 
-    check_prompt = f"""あなたは小説の厳しい校閲編集者です。
-提示された小説本文が、「執筆ポリシー」および「演出指示・禁止事項」を満たしているか厳密にチェックしてください。
-
-==============================
-【執筆ポリシー】
-{policy_text}
-
-{policy_macro_text}
-==============================
-
-==============================
-【プロットと演出指示・禁止事項】
-{plot_content}
-==============================
-
-==============================
-【小説本文】
-{novel_content}
-==============================
-
-【指示】
-上記の小説本文をポリシーおよび禁止事項と照らし合わせ、違反している箇所を検出してください。
-出力は必ず ```yaml で始まるYAMLコードブロックのみにしてください。
-メタな解説や挨拶は一切含めないでください。
-
-指摘事項がある場合は、以下のように出力してください：
-```yaml
-violations:
-  - original: "（違反のある原文の抜粋）"
-    reason: "（違反の理由。例：禁止語『ネフェス』が使用されています）"
-    suggestion: "（どのように修正すべきかの具体的な提案。例：『重力制御』または『調律』と書き換えてください）"
-```
-
-もし違反が一切ない場合は、空のリストを出力してください：
-```yaml
-violations: []
-```
-"""
-
-    # AgyClientの呼び出し
-    client = AgyClient(model=model)
     try:
-        result_text = client.generate(check_prompt).strip()
-        yaml_match = re.search(r"```yaml\s*([\s\S]*?)```", result_text)
-        yaml_content = yaml_match.group(1).strip() if yaml_match else result_text
+        check_task = NovelPolicyCheckTask(model=model)
+        check_input = NovelPolicyCheckInput(
+            novel_content=novel_content,
+            policy_text=policy_text,
+            policy_macro_text=policy_macro_text,
+            plot_content=plot_content,
+        )
+        yaml_content = check_task.execute(check_input)
 
         # PyYAMLを利用して違反内容を解析
         import yaml
@@ -256,30 +230,12 @@ violations: []
         print(f"[Self-Check] Found {len(violations)} violations. Starting rewrite...")
 
         # 違反がある場合、リライトを実行
-        rewrite_prompt = f"""あなたは小説の優秀な編集者です。
-以下の【小説本文】について、検出された【指摘事項】をすべて解消するように適切に書き換えてください。
-
-==============================
-【検出された指摘事項】
-{yaml_content}
-==============================
-
-==============================
-【小説本文】
-{novel_content}
-==============================
-
-【出力ルール】
-・修正・書き換え後の小説本文全体のみを出力してください。
-・解説、挨拶、マークダウン of コードブロック（```）などは一切出力しないでください。
-・指摘された問題点（語彙、設定矛盾、表現など）のみを解消し、文体やニュアンスはそのまま維持してください。
-"""
-
-        # リライト実行
-        stdout = client.generate(rewrite_prompt)
-        rewritten_text = stdout.strip()
-        rewritten_text = re.sub(r"^```[a-zA-Z]*\n", "", rewritten_text)
-        rewritten_text = re.sub(r"\n```$", "", rewritten_text).strip()
+        rewrite_task = NovelRewriteTask(model=model)
+        rewrite_input = NovelRewriteInput(
+            novel_content=novel_content,
+            yaml_content=yaml_content,
+        )
+        rewritten_text = rewrite_task.execute(rewrite_input)
         print("[Self-Check] Rewrite completed successfully.")
         return rewritten_text
 
@@ -293,21 +249,6 @@ def extract_numbers(text):
     """文字列から最初の数字を抽出する（例: '第1章' -> '1'）"""
     match = re.search(r"\d+", text)
     return match.group(0) if match else "0"
-
-
-def generate_all_at_once(prompt, model):
-    """従来の1回の呼び出しで全本文を生成するロジック"""
-    client = AgyClient(model=model)
-
-    def callback(line):
-        sys.stdout.write(line)
-        sys.stdout.flush()
-
-    try:
-        return client.generate(prompt, callback=callback)
-    except AgyClientError as e:
-        print(f"Error calling Antigravity CLI (agy): {e}", file=sys.stderr)
-        sys.exit(1)
 
 
 def _resolve_policy_paths(args) -> tuple[str, str, str]:
@@ -356,98 +297,19 @@ def generate_prompt(
     neighbor_plots_block=None,
 ):
     """geminiに渡すプロンプト（指示文とコンテキストの結合）を生成する"""
-
-    # 参照ファイルのパス（プロジェクトルートからの相対パスを想定）
-    POLICY_FILE = (
-        policy_global
-        if policy_global
-        else writer_helper.resolve_novel_file_by_pattern(
-            "policy_global",
-            "*執筆ポリシー_全体*.txt",
-            "data/sources/00_1_執筆ポリシー_全体_ver.6.0.txt",
-        )
+    task = NovelWritingTask()
+    input_data = NovelWritingInput(
+        chapter_title=chapter_title,
+        episode_title=episode_title,
+        plot_content=plot_content,
+        novel_title=novel_title,
+        policy_global=policy_global,
+        policy_chapter=policy_chapter,
+        character=character,
+        previous_episode_text=previous_episode_text,
+        neighbor_plots_block=neighbor_plots_block,
     )
-    POLICY_FILE_MACRO = (
-        policy_chapter
-        if policy_chapter
-        else writer_helper.resolve_novel_file_by_pattern(
-            "policy_chapter",
-            "*執筆ポリシー_第*.txt",
-            "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt",
-        )
-    )
-    CHARACTER_FILE = (
-        character
-        if character
-        else writer_helper.resolve_novel_file_by_pattern(
-            "character",
-            "*キャラクター概要*.txt",
-            "data/sources/03_1_第1幕キャラクター概要 ver.2.txt",
-        )
-    )
-
-    policy_text = read_file(POLICY_FILE)
-    policy_macro_text = read_file(POLICY_FILE_MACRO)
-    character_text = read_file(CHARACTER_FILE)
-
-    prev_context_block = ""
-    if previous_episode_text:
-        prev_context_block = f"""
-==============================
-【前話（直前のエピソード）の終盤描写】
-（※前話からの展開、キャラクターの状況、会話のトーン等の繋がりを維持するために参考にしてください）
-{previous_episode_text}
-==============================
-"""
-
-    actual_title = (
-        novel_title
-        if novel_title
-        else writer_helper.get_novel_setting("title", "重天の調律師")
-    )
-
-    neighbor_block = ""
-    if neighbor_plots_block:
-        neighbor_block = f"""==============================
-{neighbor_plots_block.strip()}
-"""
-
-    prompt = f"""【超重要指示：ツールの使用禁止】
-    あなたは一切のツール（ファイルの読み書き、ディレクトリの確認、コマンドの実行など）を使用してはなりません。
-    プロジェクトの調査や他のスクリプト（writer_cli.pyなど）の実行を決して試みないでください。
-    思考プロセスや挨拶、指示の確認などのメタなテキストは一切出力せず、ただちに小説の本文のみをテキスト出力してください。
-    あなたの唯一のタスクは、提示された以下の執筆ポリシー、キャラクター概要、およびプロットに基づき、小説の本文のみをただちに出力することです。
-    本文の最初の1文字目から出力を開始してください。
-
-あなたは「{actual_title}」シリーズ of 専属作家です。
-以下の「執筆ポリシー」「キャラクター概要」を完全に把握し、ポリシーを厳守して物語を綴ってください。
-
-==============================
-【執筆ポリシー】
-{policy_text}
-
-{policy_macro_text}
-==============================
-{prev_context_block}==============================
-【キャラクター概要】
-{character_text}
-==============================
-{neighbor_block}==============================
-【今回執筆する対象のプロット】
-対象: {chapter_title} {episode_title}
-
-{plot_content}
-==============================
-
-【執筆指示】
-上記のプロットに従い、「{chapter_title} {episode_title}」の本文を執筆してください。
-・指示や注釈、挨拶などのメタなテキストは一切出力しないでください。小説の本文のみを出力してください。
-・1話あたりの文字数に無理やり収めようとはせず、描写の密度を優先してください。
-・執筆ポリシー（特に文体のリズム、特殊ルビ、地の文と会話のバランス、物理と叙情の描写）を必ず守ってください。
-
-それでは、執筆を開始してください。
-"""
-    return prompt
+    return task.render_prompt(input_data)
 
 
 def _write_single_scene(
@@ -465,66 +327,32 @@ def _write_single_scene(
     """
     Writes a single scene using agy and returns the generated content.
     """
-
     policy_global, policy_chapter, character = policy_paths
 
-    scene_written_context = ""
-    if context_written:
-        scene_written_context = f"""==============================
-【既に執筆済みの本文（シーンの流れ）】
-{context_written}
-"""
-
-    neighbor_block = ""
-    if neighbor_plots_block:
-        neighbor_block = f"""==============================
-{neighbor_plots_block.strip()}
-"""
-
-    scene_prompt = f"""【超重要指示：ツールの使用禁止】
-あなたは一切のツールを使用してはなりません。
-思考プロセスやメタな解説などは一切出力せず、ただちに指定されたシーンの本文のみを出力してください。
-
-    あなたは「{title or "重天の調律師"}」の専属作家です。
-以下の「執筆ポリシー」を厳守し、「既に執筆済みの本文」の展開、口調、描写リズムを自然に引き継いだ形で、「今回執筆する対象のシーンプロット」の本文を執筆してください。
-
-==============================
-【執筆ポリシー】
-{read_file(policy_global)}
-{read_file(policy_chapter)}
-==============================
-{prev_context_block}==============================
-【キャラクター概要】
-{read_file(character)}
-==============================
-{neighbor_block}{scene_written_context}==============================
-【今回執筆する対象のシーンプロット】
-対象: {chapter_title} {episode}
-現在のシーン: {s_title}
-
-{s_plot}
-==============================
-
-【執筆指示】
-「既に執筆済みの本文」の直後からシームレスに繋がるように、今回のシーン「{s_title}」の本文のみを出力してください。
-・挨拶や解説、マークダウン of コードブロック等は一切不要です。小説の本文のみを出力してください。
-・前の文脈を繰り返さないでください。今回指定されたプロット部分のみを新しく書き足してください。
-"""
-
-    client = AgyClient(model=model)
+    task = NovelSceneWritingTask(model=model)
+    input_data = NovelSceneWritingInput(
+        chapter_title=chapter_title,
+        episode_title=episode,
+        scene_title=s_title,
+        scene_plot=s_plot,
+        context_written=context_written,
+        prev_context_block=prev_context_block,
+        novel_title=title,
+        policy_global=policy_global,
+        policy_chapter=policy_chapter,
+        character=character,
+        neighbor_plots_block=neighbor_plots_block,
+    )
 
     def callback(line):
         sys.stdout.write(line)
         sys.stdout.flush()
 
     try:
-        scene_content = client.generate(scene_prompt, callback=callback).strip()
+        scene_content = task.execute(input_data, callback=callback)
     except AgyClientError as e:
         print(f"Error generating scene: {e}", file=sys.stderr)
         sys.exit(1)
-
-    scene_content = re.sub(r"^```[a-zA-Z]*\n", "", scene_content)
-    scene_content = re.sub(r"\n```$", "", scene_content).strip()
 
     return scene_content
 
@@ -560,10 +388,11 @@ def _write_step_by_step(
             file=sys.stderr,
         )
         policy_global, policy_chapter, character = policy_paths
-        prompt = generate_prompt(
-            chapter_title,
-            episode,
-            plot_content,
+        task = NovelWritingTask(model=model)
+        input_data = NovelWritingInput(
+            chapter_title=chapter_title,
+            episode_title=episode,
+            plot_content=plot_content,
             novel_title=title,
             policy_global=policy_global,
             policy_chapter=policy_chapter,
@@ -571,7 +400,12 @@ def _write_step_by_step(
             previous_episode_text=prev_text,
             neighbor_plots_block=neighbor_plots_block,
         )
-        return generate_all_at_once(prompt, model)
+
+        def callback(line):
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+        return task.execute(input_data, callback=callback)
 
     print(f"Detected {len(scenes)} scenes. Starting step-by-step writing...")
     context_written = ""
@@ -750,10 +584,11 @@ def main():
         else:
             # 一括生成
             policy_global, policy_chapter, character = _resolve_policy_paths(args)
-            prompt = generate_prompt(
-                chapter_title,
-                args.episode,
-                plot_content,
+            task = NovelWritingTask(model=args.model)
+            input_data = NovelWritingInput(
+                chapter_title=chapter_title,
+                episode_title=args.episode,
+                plot_content=plot_content,
                 novel_title=args.title,
                 policy_global=policy_global,
                 policy_chapter=policy_chapter,
@@ -761,7 +596,12 @@ def main():
                 previous_episode_text=prev_text,
                 neighbor_plots_block=neighbor_plots_block,
             )
-            novel_content = generate_all_at_once(prompt, args.model)
+
+            def callback(line):
+                sys.stdout.write(line)
+                sys.stdout.flush()
+
+            novel_content = task.execute(input_data, callback=callback)
 
         # ポリシーの自己検知チェック & リライト
         if args.self_check and novel_content:
