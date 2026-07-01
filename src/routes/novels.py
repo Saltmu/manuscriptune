@@ -55,6 +55,7 @@ class WriteParams(BaseModel):
     model: str | None = None
     step_by_step: bool = False
     self_check: bool = False
+    include_neighbor_plots: bool = False
 
 
 @router.get("/api/novels")

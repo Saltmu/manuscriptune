@@ -1,10 +1,9 @@
 import argparse
 import os
 import re
-
-# 既存のヘルパーからプロット情報を取得するため、パスを追加してインポート
 import sys
 
+# 既存のヘルパーからプロット情報を取得するため、パスを追加してインポート
 from src.utils import plot_parser, project_config
 from src.utils.ai_client import AgyClient, AgyClientError
 
@@ -52,106 +51,6 @@ def get_episode_plot(plot_file, episode_title):
     return None, ""
 
 
-def generate_prompt(
-    chapter_title,
-    episode_title,
-    plot_content,
-    novel_title=None,
-    policy_global=None,
-    policy_chapter=None,
-    character=None,
-    previous_episode_text=None,
-):
-    """geminiに渡すプロンプト（指示文とコンテキストの結合）を生成する"""
-
-    # 参照ファイルのパス（プロジェクトルートからの相対パスを想定）
-    POLICY_FILE = (
-        policy_global
-        if policy_global
-        else writer_helper.resolve_novel_file_by_pattern(
-            "policy_global",
-            "*執筆ポリシー_全体*.txt",
-            "data/sources/00_1_執筆ポリシー_全体_ver.6.0.txt",
-        )
-    )
-    POLICY_FILE_MACRO = (
-        policy_chapter
-        if policy_chapter
-        else writer_helper.resolve_novel_file_by_pattern(
-            "policy_chapter",
-            "*執筆ポリシー_第*.txt",
-            "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt",
-        )
-    )
-    CHARACTER_FILE = (
-        character
-        if character
-        else writer_helper.resolve_novel_file_by_pattern(
-            "character",
-            "*キャラクター概要*.txt",
-            "data/sources/03_1_第1幕キャラクター概要 ver.2.txt",
-        )
-    )
-
-    policy_text = read_file(POLICY_FILE)
-    policy_macro_text = read_file(POLICY_FILE_MACRO)
-    character_text = read_file(CHARACTER_FILE)
-
-    prev_context_block = ""
-    if previous_episode_text:
-        prev_context_block = f"""
-==============================
-【前話（直前のエピソード）の終盤描写】
-（※前話からの展開、キャラクターの状況、会話のトーン等の繋がりを維持するために参考にしてください）
-{previous_episode_text}
-==============================
-"""
-
-    actual_title = (
-        novel_title
-        if novel_title
-        else writer_helper.get_novel_setting("title", "重天の調律師")
-    )
-    prompt = f"""【超重要指示：ツールの使用禁止】
-    あなたは一切のツール（ファイルの読み書き、ディレクトリの確認、コマンドの実行など）を使用してはなりません。
-    プロジェクトの調査や他のスクリプト（writer_cli.pyなど）の実行を決して試みないでください。
-    思考プロセスや挨拶、指示の確認などのメタなテキストは一切出力せず、ただちに小説の本文のみをテキスト出力してください。
-    あなたの唯一のタスクは、提示された以下の執筆ポリシー、キャラクター概要、およびプロットに基づき、小説の本文のみをただちに出力することです。
-    本文の最初の1文字目から出力を開始してください。
-
-あなたは「{actual_title}」シリーズ of 専属作家です。
-以下の「執筆ポリシー」「キャラクター概要」を完全に把握し、ポリシーを厳守して物語を綴ってください。
-
-==============================
-【執筆ポリシー】
-{policy_text}
-
-{policy_macro_text}
-==============================
-{prev_context_block}
-==============================
-【キャラクター概要】
-{character_text}
-==============================
-
-==============================
-【今回執筆する対象のプロット】
-対象: {chapter_title} {episode_title}
-
-{plot_content}
-==============================
-
-【執筆指示】
-上記のプロットに従い、「{chapter_title} {episode_title}」の本文を執筆してください。
-・指示や注釈、挨拶などのメタなテキストは一切出力しないでください。小説の本文のみを出力してください。
-・1話あたりの文字数に無理やり収めようとはせず、描写の密度を優先してください。
-・執筆ポリシー（特に文体のリズム、特殊ルビ、地の文と会話のバランス、物理と叙情の描写）を必ず守ってください。
-
-それでは、執筆を開始してください。
-"""
-    return prompt
-
-
 def get_previous_episode_file(plot_file, current_episode_title):
     """プロット情報を元に、指定されたエピソードの直前のエピソードの小説ファイルパスを取得する"""
     if not os.path.exists(plot_file):
@@ -190,6 +89,76 @@ def get_previous_episode_file(plot_file, current_episode_title):
     except Exception as e:
         print(f"Warning: Failed to resolve previous episode: {e}", file=sys.stderr)
     return None
+
+
+def get_neighboring_episodes_plots(plot_file, current_episode_title):
+    """
+    指定されたエピソードの「前話」と「後話」のプロット情報を取得する。
+    """
+    if not os.path.exists(plot_file):
+        return None, None
+
+    try:
+        plot_data = writer_helper.parse_plot(plot_file)
+        all_episodes = []
+        for chapter_data in plot_data:
+            chapter_title = chapter_data.get("title", "")
+            for ep in chapter_data.get("episodes", []):
+                all_episodes.append(
+                    {
+                        "chapter_title": chapter_title,
+                        "episode_title": ep["title"],
+                        "episode_name": ep["name"],
+                        "content": ep["content"],
+                    }
+                )
+
+        target_idx = -1
+        for idx, ep in enumerate(all_episodes):
+            if (
+                ep["episode_title"] == current_episode_title
+                or current_episode_title in ep["episode_title"]
+                or current_episode_title in ep["episode_name"]
+            ):
+                target_idx = idx
+                break
+
+        if target_idx == -1:
+            return None, None
+
+        prev_plot = None
+        next_plot = None
+
+        if target_idx > 0:
+            prev_ep = all_episodes[target_idx - 1]
+            prev_plot = {
+                "title": f"{prev_ep['chapter_title']} {prev_ep['episode_title']}（{prev_ep['episode_name']}）",
+                "content": "\n".join(prev_ep["content"]),
+            }
+
+        if target_idx < len(all_episodes) - 1:
+            next_ep = all_episodes[target_idx + 1]
+            next_plot = {
+                "title": f"{next_ep['chapter_title']} {next_ep['episode_title']}（{next_ep['episode_name']}）",
+                "content": "\n".join(next_ep["content"]),
+            }
+
+        return prev_plot, next_plot
+    except Exception as e:
+        print(f"Warning: Failed to resolve neighboring episodes: {e}", file=sys.stderr)
+        return None, None
+
+
+def build_neighbor_plots_block(prev_plot, next_plot):
+    if not prev_plot and not next_plot:
+        return ""
+
+    block = "【関連エピソードのプロット（参考情報）】\n※前後の展開の整合性を保つための参考情報です。今回の執筆対象ではありません。\n"
+    if prev_plot:
+        block += f"\n◆ 前話のプロット：{prev_plot['title']}\n{prev_plot['content']}\n"
+    if next_plot:
+        block += f"\n◆ 後話のプロット：{next_plot['title']}\n{next_plot['content']}\n"
+    return block
 
 
 def split_scenes(plot_content):
@@ -375,6 +344,112 @@ def _resolve_policy_paths(args) -> tuple[str, str, str]:
     return policy_global, policy_chapter, character
 
 
+def generate_prompt(
+    chapter_title,
+    episode_title,
+    plot_content,
+    novel_title=None,
+    policy_global=None,
+    policy_chapter=None,
+    character=None,
+    previous_episode_text=None,
+    neighbor_plots_block=None,
+):
+    """geminiに渡すプロンプト（指示文とコンテキストの結合）を生成する"""
+
+    # 参照ファイルのパス（プロジェクトルートからの相対パスを想定）
+    POLICY_FILE = (
+        policy_global
+        if policy_global
+        else writer_helper.resolve_novel_file_by_pattern(
+            "policy_global",
+            "*執筆ポリシー_全体*.txt",
+            "data/sources/00_1_執筆ポリシー_全体_ver.6.0.txt",
+        )
+    )
+    POLICY_FILE_MACRO = (
+        policy_chapter
+        if policy_chapter
+        else writer_helper.resolve_novel_file_by_pattern(
+            "policy_chapter",
+            "*執筆ポリシー_第*.txt",
+            "data/sources/00_2_執筆ポリシー_第1幕_ver1.2.txt",
+        )
+    )
+    CHARACTER_FILE = (
+        character
+        if character
+        else writer_helper.resolve_novel_file_by_pattern(
+            "character",
+            "*キャラクター概要*.txt",
+            "data/sources/03_1_第1幕キャラクター概要 ver.2.txt",
+        )
+    )
+
+    policy_text = read_file(POLICY_FILE)
+    policy_macro_text = read_file(POLICY_FILE_MACRO)
+    character_text = read_file(CHARACTER_FILE)
+
+    prev_context_block = ""
+    if previous_episode_text:
+        prev_context_block = f"""
+==============================
+【前話（直前のエピソード）の終盤描写】
+（※前話からの展開、キャラクターの状況、会話のトーン等の繋がりを維持するために参考にしてください）
+{previous_episode_text}
+==============================
+"""
+
+    actual_title = (
+        novel_title
+        if novel_title
+        else writer_helper.get_novel_setting("title", "重天の調律師")
+    )
+
+    neighbor_block = ""
+    if neighbor_plots_block:
+        neighbor_block = f"""==============================
+{neighbor_plots_block.strip()}
+"""
+
+    prompt = f"""【超重要指示：ツールの使用禁止】
+    あなたは一切のツール（ファイルの読み書き、ディレクトリの確認、コマンドの実行など）を使用してはなりません。
+    プロジェクトの調査や他のスクリプト（writer_cli.pyなど）の実行を決して試みないでください。
+    思考プロセスや挨拶、指示の確認などのメタなテキストは一切出力せず、ただちに小説の本文のみをテキスト出力してください。
+    あなたの唯一のタスクは、提示された以下の執筆ポリシー、キャラクター概要、およびプロットに基づき、小説の本文のみをただちに出力することです。
+    本文の最初の1文字目から出力を開始してください。
+
+あなたは「{actual_title}」シリーズ of 専属作家です。
+以下の「執筆ポリシー」「キャラクター概要」を完全に把握し、ポリシーを厳守して物語を綴ってください。
+
+==============================
+【執筆ポリシー】
+{policy_text}
+
+{policy_macro_text}
+==============================
+{prev_context_block}==============================
+【キャラクター概要】
+{character_text}
+==============================
+{neighbor_block}==============================
+【今回執筆する対象のプロット】
+対象: {chapter_title} {episode_title}
+
+{plot_content}
+==============================
+
+【執筆指示】
+上記のプロットに従い、「{chapter_title} {episode_title}」の本文を執筆してください。
+・指示や注釈、挨拶などのメタなテキストは一切出力しないでください。小説の本文のみを出力してください。
+・1話あたりの文字数に無理やり収めようとはせず、描写の密度を優先してください。
+・執筆ポリシー（特に文体のリズム、特殊ルビ、地の文と会話のバランス、物理と叙情の描写）を必ず守ってください。
+
+それでは、執筆を開始してください。
+"""
+    return prompt
+
+
 def _write_single_scene(
     chapter_title: str,
     episode: str,
@@ -385,6 +460,7 @@ def _write_single_scene(
     model: str,
     title: str | None,
     policy_paths: tuple[str, str, str],
+    neighbor_plots_block: str | None = None,
 ) -> str:
     """
     Writes a single scene using agy and returns the generated content.
@@ -394,18 +470,22 @@ def _write_single_scene(
 
     scene_written_context = ""
     if context_written:
-        scene_written_context = f"""
-==============================
+        scene_written_context = f"""==============================
 【既に執筆済みの本文（シーンの流れ）】
 {context_written}
-==============================
+"""
+
+    neighbor_block = ""
+    if neighbor_plots_block:
+        neighbor_block = f"""==============================
+{neighbor_plots_block.strip()}
 """
 
     scene_prompt = f"""【超重要指示：ツールの使用禁止】
 あなたは一切のツールを使用してはなりません。
 思考プロセスやメタな解説などは一切出力せず、ただちに指定されたシーンの本文のみを出力してください。
 
-あなたは「{title or "重天の調律師"}」の専属作家です。
+    あなたは「{title or "重天の調律師"}」の専属作家です。
 以下の「執筆ポリシー」を厳守し、「既に執筆済みの本文」の展開、口調、描写リズムを自然に引き継いだ形で、「今回執筆する対象のシーンプロット」の本文を執筆してください。
 
 ==============================
@@ -413,13 +493,11 @@ def _write_single_scene(
 {read_file(policy_global)}
 {read_file(policy_chapter)}
 ==============================
-{prev_context_block}
-==============================
+{prev_context_block}==============================
 【キャラクター概要】
 {read_file(character)}
 ==============================
-{scene_written_context}
-==============================
+{neighbor_block}{scene_written_context}==============================
 【今回執筆する対象のシーンプロット】
 対象: {chapter_title} {episode}
 現在のシーン: {s_title}
@@ -459,6 +537,7 @@ def _write_step_by_step(
     model: str,
     title: str | None,
     policy_paths: tuple[str, str, str],
+    neighbor_plots_block: str | None = None,
 ) -> str:
     """
     Executes scene-by-scene incremental writing.
@@ -490,6 +569,7 @@ def _write_step_by_step(
             policy_chapter=policy_chapter,
             character=character,
             previous_episode_text=prev_text,
+            neighbor_plots_block=neighbor_plots_block,
         )
         return generate_all_at_once(prompt, model)
 
@@ -508,6 +588,7 @@ def _write_step_by_step(
             model,
             title,
             policy_paths,
+            neighbor_plots_block=neighbor_plots_block,
         )
         print(f"\n[Generated Scene {s_idx} length: {len(scene_content)} chars]")
 
@@ -532,6 +613,26 @@ def _perform_self_check(novel_content: str, plot_content: str, model: str, args)
     )
 
 
+def _print_writing_info(
+    chapter_title, episode, model, step_by_step, self_check, output_filename
+):
+    print(f"Starting writing process for {chapter_title} {episode}...")
+    print(f"Model: {model}")
+    if step_by_step:
+        print("Mode: Step-by-Step (Scene-based)")
+    if self_check:
+        print("Verification: Policy Self-Check enabled")
+    print(f"Output will be saved to: {output_filename}")
+
+
+def _save_result(output_filename, novel_content):
+    # ensure output directory exists
+    os.makedirs(os.path.dirname(output_filename), exist_ok=True)
+    with open(output_filename, "w", encoding="utf-8") as f:
+        f.write(novel_content.strip() + "\n")
+    print(f"\nSuccess! Novel saved to {output_filename}")
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(
         description="Use Antigravity CLI (agy) to write a novel episode."
@@ -548,24 +649,29 @@ def _parse_args():
     parser.add_argument(
         "--model",
         default="Gemini 3.5 Flash (High)",
-        help="Model to use with Antigravity CLI (default: Gemini 3.5 Flash (High))",
+        help="Model name (Gemini 3.5 Flash (High), etc.)",
     )
-    parser.add_argument("--title", help="Novel title")
-    parser.add_argument("--policy-global", help="Path to global policy file")
-    parser.add_argument("--policy-chapter", help="Path to chapter policy file")
-    parser.add_argument("--character", help="Path to character overview file")
+    parser.add_argument("--title", help="Novel title.")
+    parser.add_argument("--policy-global", help="Path to global policy file.")
+    parser.add_argument("--policy-chapter", help="Path to chapter policy file.")
+    parser.add_argument("--character", help="Path to character overview file.")
     parser.add_argument(
         "--step-by-step", action="store_true", help="Write the episode scene by scene."
     )
     parser.add_argument(
         "--self-check",
         action="store_true",
-        help="Perform self-verification and rewrite if needed.",
+        help="Perform self-check/rewrite on output.",
     )
     parser.add_argument(
         "--prompt-only",
         action="store_true",
-        help="Only output the generated prompt and exit.",
+        help="Print the generated prompt and exit.",
+    )
+    parser.add_argument(
+        "--include-neighbor-plots",
+        action="store_true",
+        help="Include plot content of neighboring (previous and next) episodes in the prompt.",
     )
     return parser.parse_args()
 
@@ -588,6 +694,14 @@ def main():
         full_prev = read_file(prev_file)
         prev_text = "...\n" + full_prev[-1500:] if len(full_prev) > 1500 else full_prev
 
+    # 前後エピソードのプロットブロック取得
+    neighbor_plots_block = ""
+    if args.include_neighbor_plots:
+        prev_plot, next_plot = get_neighboring_episodes_plots(
+            args.plot_file, args.episode
+        )
+        neighbor_plots_block = build_neighbor_plots_block(prev_plot, next_plot)
+
     if args.prompt_only:
         policy_global, policy_chapter, character = _resolve_policy_paths(args)
         prompt = generate_prompt(
@@ -599,6 +713,7 @@ def main():
             policy_chapter=policy_chapter,
             character=character,
             previous_episode_text=prev_text,
+            neighbor_plots_block=neighbor_plots_block,
         )
         print(prompt)
         sys.exit(0)
@@ -608,16 +723,14 @@ def main():
     ep_num = extract_numbers(args.episode)
     output_filename = f"novels/{ch_num}_{ep_num}.txt"
 
-    # ensure output directory exists
-    os.makedirs("novels", exist_ok=True)
-
-    print(f"Starting writing process for {chapter_title} {args.episode}...")
-    print(f"Model: {args.model}")
-    if args.step_by_step:
-        print("Mode: Step-by-Step (Scene-based)")
-    if args.self_check:
-        print("Verification: Policy Self-Check enabled")
-    print(f"Output will be saved to: {output_filename}")
+    _print_writing_info(
+        chapter_title,
+        args.episode,
+        args.model,
+        args.step_by_step,
+        args.self_check,
+        output_filename,
+    )
 
     novel_content = ""
 
@@ -632,6 +745,7 @@ def main():
                 args.model,
                 args.title,
                 policy_paths,
+                neighbor_plots_block=neighbor_plots_block,
             )
         else:
             # 一括生成
@@ -645,6 +759,7 @@ def main():
                 policy_chapter=policy_chapter,
                 character=character,
                 previous_episode_text=prev_text,
+                neighbor_plots_block=neighbor_plots_block,
             )
             novel_content = generate_all_at_once(prompt, args.model)
 
@@ -655,10 +770,7 @@ def main():
             )
 
         # 結果をファイルに保存
-        with open(output_filename, "w", encoding="utf-8") as f:
-            f.write(novel_content.strip() + "\n")
-
-        print(f"\nSuccess! Novel saved to {output_filename}")
+        _save_result(output_filename, novel_content)
 
     except FileNotFoundError:
         print(
