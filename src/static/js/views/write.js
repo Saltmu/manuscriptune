@@ -92,6 +92,29 @@ export async function loadSourcesForWrite() {
             }
         });
 
+        // Restore checkbox states from localStorage
+        const cbFields = [
+            'write-step-by-step',
+            'write-self-check',
+            'write-neighbor-plots'
+        ];
+        cbFields.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            const savedVal = localStorage.getItem(id);
+            if (savedVal !== null) {
+                el.checked = savedVal === 'true';
+            }
+
+            if (!el.dataset.listenerRegistered) {
+                el.dataset.listenerRegistered = 'true';
+                el.addEventListener('change', () => {
+                    localStorage.setItem(id, el.checked);
+                });
+            }
+        });
+
     } catch (err) {
         console.error('Failed to load sources for write:', err);
     } finally {
@@ -116,6 +139,7 @@ export function runAiWriting() {
     const characterVal = document.getElementById('write-character').value;
     const stepByStepVal = document.getElementById('write-step-by-step').checked;
     const selfCheckVal = document.getElementById('write-self-check').checked;
+    const includeNeighborPlotsVal = document.getElementById('write-neighbor-plots').checked;
 
     const btn = document.getElementById('btn-run-write');
     if (btn) btn.disabled = true;
@@ -129,6 +153,7 @@ export function runAiWriting() {
     if (characterVal) url += `&character=${encodeURIComponent(characterVal)}`;
     if (stepByStepVal) url += `&step_by_step=true`;
     if (selfCheckVal) url += `&self_check=true`;
+    if (includeNeighborPlotsVal) url += `&include_neighbor_plots=true`;
 
     startEventStream(url, 'write-console-log', 'write-console-status', (success) => {
         if (btn) btn.disabled = false;
@@ -154,6 +179,7 @@ export async function copyWritingPrompt() {
     const policyGlobalVal = document.getElementById('write-policy-global').value;
     const policyChapterVal = document.getElementById('write-policy-chapter').value;
     const characterVal = document.getElementById('write-character').value;
+    const includeNeighborPlotsVal = document.getElementById('write-neighbor-plots').checked;
 
     const btn = document.getElementById('btn-copy-prompt');
     const writeBtn = document.getElementById('btn-run-write');
@@ -175,6 +201,7 @@ export async function copyWritingPrompt() {
         if (policyGlobalVal) url += `&policy_global=${encodeURIComponent(policyGlobalVal)}`;
         if (policyChapterVal) url += `&policy_chapter=${encodeURIComponent(policyChapterVal)}`;
         if (characterVal) url += `&character=${encodeURIComponent(characterVal)}`;
+        if (includeNeighborPlotsVal) url += `&include_neighbor_plots=true`;
 
         const response = await fetch(url);
         if (!response.ok) {

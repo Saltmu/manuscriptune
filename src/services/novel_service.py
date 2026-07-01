@@ -205,6 +205,8 @@ def build_writer_cmd(params: Any) -> list[str]:
         cmd.append("--step-by-step")
     if params.self_check:
         cmd.append("--self-check")
+    if params.include_neighbor_plots:
+        cmd.append("--include-neighbor-plots")
 
     return cmd
 
