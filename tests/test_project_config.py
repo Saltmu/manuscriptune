@@ -95,10 +95,12 @@ def test_resolve_novel_file_by_pattern(tmp_path):
         patch("src.utils.project_config.load_project_config", return_value=mock_config),
         patch("src.utils.project_config.resolve_latest_file") as mock_resolve,
     ):
-        mock_resolve.return_value = "data/sources/plot_2.txt"
+        expected_return = os.path.join("data", "sources", "plot_2.txt")
+        mock_resolve.return_value = expected_return
         res = resolve_novel_file_by_pattern("plot", "plot_default.txt")
-        mock_resolve.assert_called_once_with("data/sources/plot_*.txt", None)
-        assert res == "data/sources/plot_2.txt"
+        expected_pattern = os.path.join("data", "sources", "plot_*.txt")
+        mock_resolve.assert_called_once_with(expected_pattern, None)
+        assert res == expected_return
 
 
 def test_get_gdrive_config_toplevel():

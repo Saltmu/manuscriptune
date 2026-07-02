@@ -275,21 +275,22 @@ def test_novel_service_build_writer_cmd():
         self_check=True,
     )
     cmd = novel_service.build_writer_cmd(params)
-    assert "--episode" in cmd
-    assert "1" in cmd
-    assert "--title" in cmd
-    assert "Title" in cmd
-    assert "--policy-global" in cmd
-    assert "data/sources/global.txt" in cmd
-    assert "--policy-chapter" in cmd
-    assert "data/sources/chapter.txt" in cmd
-    assert "--character" in cmd
-    assert "data/sources/char.txt" in cmd
-    assert "--plot-file" in cmd
-    assert "data/sources/plot.txt" in cmd
-    assert "--step-by-step" in cmd
-    assert "--self-check" in cmd
-    assert "model-name" in cmd
+    cmd_normalized = [c.replace("\\", "/") for c in cmd]
+    assert "--episode" in cmd_normalized
+    assert "1" in cmd_normalized
+    assert "--title" in cmd_normalized
+    assert "Title" in cmd_normalized
+    assert "--policy-global" in cmd_normalized
+    assert "data/sources/global.txt" in cmd_normalized
+    assert "--policy-chapter" in cmd_normalized
+    assert "data/sources/chapter.txt" in cmd_normalized
+    assert "--character" in cmd_normalized
+    assert "data/sources/char.txt" in cmd_normalized
+    assert "--plot-file" in cmd_normalized
+    assert "data/sources/plot.txt" in cmd_normalized
+    assert "--step-by-step" in cmd_normalized
+    assert "--self-check" in cmd_normalized
+    assert "model-name" in cmd_normalized
 
 
 def test_novel_service_shutdown_server():

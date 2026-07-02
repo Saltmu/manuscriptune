@@ -205,55 +205,13 @@ class TextReviewPipeline(BaseReviewPipeline):
         if not os.path.exists(findings_file):
             return
 
-        history_dir = project_paths.get_history_dir(self.output_dir)
-        os.makedirs(history_dir, exist_ok=True)
+        from src.services import novel_service
 
-        existing_versions = []
-        version_pattern = re.compile(r"^v(\d+)$")
-        if os.path.exists(history_dir):
-            for d in os.listdir(history_dir):
-                if os.path.isdir(os.path.join(history_dir, d)):
-                    match = version_pattern.match(d)
-                    if match:
-                        existing_versions.append(int(match.group(1)))
-
-        next_version = max(existing_versions) + 1 if existing_versions else 1
-        v_prefix = f"v{next_version}"
-        version_dir = project_paths.get_version_dir(self.output_dir, v_prefix)
-        os.makedirs(version_dir, exist_ok=True)
-
-        logger.info(
-            f"Existing review findings found. Archiving to history/{v_prefix}/..."
+        novel_service.archive_current_state(
+            self.basename,
+            extra_novel_path=str(target_path) if target_path else None,
+            output_dir=self.output_dir,
         )
-
-        files_to_archive = {
-            project_paths.FORMATTED_DRAFT_TEMPLATE.format(
-                basename=self.basename
-            ): project_paths.FORMATTED_DRAFT_TEMPLATE.format(basename=self.basename),
-            project_paths.FINDINGS_YAML_TEMPLATE.format(
-                basename=self.basename
-            ): project_paths.FINDINGS_YAML_TEMPLATE.format(basename=self.basename),
-            project_paths.REPORT_MD_TEMPLATE.format(
-                basename=self.basename
-            ): project_paths.REPORT_MD_TEMPLATE.format(basename=self.basename),
-            project_paths.FILTERED_CONTEXT_NAME: project_paths.FILTERED_CONTEXT_NAME,
-        }
-
-        for src_name, dest_name in files_to_archive.items():
-            src_path = os.path.join(self.output_dir, src_name)
-            dest_path = os.path.join(version_dir, dest_name)
-            if os.path.exists(src_path):
-                shutil.copy2(src_path, dest_path)
-                logger.info(f"Archived: {src_name} -> history/{v_prefix}/{dest_name}")
-
-        if target_path:
-            target_path_obj = Path(target_path)
-            if target_path_obj.exists():
-                dest_original = os.path.join(version_dir, target_path_obj.name)
-                shutil.copy2(str(target_path_obj), dest_original)
-                logger.info(
-                    f"Archived Original Text: {target_path_obj.name} -> history/{v_prefix}/{target_path_obj.name}"
-                )
 
         # Clean up
         for src_path in [

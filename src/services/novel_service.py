@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from src.utils import project_paths
+from src.utils import plot_parser, project_config, project_paths
 from src.utils.logger import get_logger
 from src.utils.yaml_handler import YamlHandler
 
@@ -215,3 +215,109 @@ def shutdown_server():
     """Triggers server shutdown by sending SIGINT."""
     logger.info("Shutting down Review Editor server...")
     os.kill(os.getpid(), signal.SIGINT)
+
+
+def archive_current_state(
+    basename: str,
+    extra_novel_path: str | None = None,
+    output_dir: str | None = None,
+) -> str:
+    """現在の小説テキストとレビュー関連ファイルを reviews/{basename}/history/v{version}/ に退避する。"""
+    if not output_dir:
+        output_dir = project_paths.get_output_dir(basename)
+    history_dir = project_paths.get_history_dir(output_dir)
+    os.makedirs(history_dir, exist_ok=True)
+
+    # 次のバージョン番号を決定
+    existing_versions = []
+    version_pattern = re.compile(r"^v(\d+)$")
+    for d in os.listdir(history_dir):
+        if os.path.isdir(os.path.join(history_dir, d)):
+            match = version_pattern.match(d)
+            if match:
+                existing_versions.append(int(match.group(1)))
+
+    next_version = max(existing_versions) + 1 if existing_versions else 1
+    v_prefix = f"v{next_version}"
+    version_dir = project_paths.get_version_dir(output_dir, v_prefix)
+    os.makedirs(version_dir, exist_ok=True)
+
+    logger.info(f"Archiving current state of {basename} to history/{v_prefix}/...")
+
+    # コピー対象ファイルの定義 (reviews/{basename} 配下の主要ファイルを退避)
+    formatted_txt_path = project_paths.resolve_formatted_draft_path(
+        output_dir, basename
+    )
+    yaml_path = project_paths.resolve_findings_yaml_path(output_dir, basename)
+    report_path = project_paths.get_report_md_path(output_dir, basename)
+    ctx_path = project_paths.get_filtered_context_path(output_dir)
+
+    files_to_copy = []
+    if os.path.exists(formatted_txt_path):
+        files_to_copy.append((formatted_txt_path, os.path.basename(formatted_txt_path)))
+    if os.path.exists(yaml_path):
+        files_to_copy.append((yaml_path, os.path.basename(yaml_path)))
+    if os.path.exists(report_path):
+        files_to_copy.append((report_path, os.path.basename(report_path)))
+    if os.path.exists(ctx_path):
+        files_to_copy.append((ctx_path, os.path.basename(ctx_path)))
+
+    # 小説原本ファイル
+    if extra_novel_path and os.path.exists(extra_novel_path):
+        files_to_copy.append((extra_novel_path, os.path.basename(extra_novel_path)))
+
+    # コピー実行
+    for src, dest_name in files_to_copy:
+        shutil.copy2(src, os.path.join(version_dir, dest_name))
+        logger.info(
+            f"Archived: {os.path.basename(src)} -> history/{v_prefix}/{dest_name}"
+        )
+
+    return v_prefix
+
+
+def resolve_novel_path_for_write(
+    episode: str, plot_file: str | None = None
+) -> tuple[str, str]:
+    """エピソード名（例：「第1話」）とプロットファイルから、小説ファイルの絶対パスと basename を解決する。"""
+    plot_filepath = (
+        plot_file
+        if plot_file
+        else project_config.resolve_novel_file_by_pattern(
+            "plot", "*第1幕プロット*.txt", "data/sources/04_1_第1幕プロットver.3.0.txt"
+        )
+    )
+
+    # data/sources ディレクトリからのパス解決
+    if not os.path.isabs(plot_filepath):
+        plot_filepath = os.path.abspath(
+            project_paths.get_source_path(os.path.basename(plot_filepath))
+        )
+
+    # プロットデータのパース
+    plot_data = plot_parser.parse_plot(plot_filepath)
+
+    chapter_title = None
+    for chapter_data in plot_data:
+        c_title = chapter_data.get("title", "")
+        for ep in chapter_data.get("episodes", []):
+            if (
+                ep["title"] == episode
+                or episode in ep["title"]
+                or episode in ep["name"]
+            ):
+                chapter_title = c_title
+                break
+        if chapter_title:
+            break
+
+    # 番号抽出
+    def extract_numbers(text):
+        match = re.search(r"\d+", text)
+        return match.group(0) if match else "0"
+
+    ch_num = extract_numbers(chapter_title) if chapter_title else "0"
+    ep_num = extract_numbers(episode)
+    basename = f"{ch_num}_{ep_num}"
+    novel_path = os.path.abspath(project_paths.get_novel_path(f"{basename}.txt"))
+    return novel_path, basename

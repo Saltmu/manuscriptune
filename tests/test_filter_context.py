@@ -153,7 +153,7 @@ def test_filter_context_main_integration(tmp_path):
         def mock_join(*args):
             # If the join points to .../data/sources, redirect to tmp_path/data/sources
             joined = original_join(*args)
-            if joined.endswith("data/sources"):
+            if joined.replace("\\", "/").endswith("data/sources"):
                 return str(sources_dir)
             return joined
 

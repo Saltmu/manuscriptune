@@ -143,7 +143,8 @@ async def save_novel(req: SaveNovelRequest):
         raise he
 
     # Check protection
-    if f"{project_paths.DATA_SOURCES_DIR}/" in novel_path.replace("\\", "/"):
+    norm_sources_dir = project_paths.DATA_SOURCES_DIR.replace("\\", "/")
+    if f"{norm_sources_dir}/" in novel_path.replace("\\", "/"):
         logger.error(
             f"Violation: Attempt to save to source files in {project_paths.DATA_SOURCES_DIR}/"
         )
@@ -242,15 +243,11 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
     except HTTPException as he:
         raise he
     try:
-        # Automatically create backup before applying changes
-        if os.path.exists(novel_path):
-            shutil.copy2(novel_path, f"{novel_path}.bak")
-        if os.path.exists(yaml_path):
-            shutil.copy2(yaml_path, f"{yaml_path}.bak")
-
         basename = (
             Path(novel_path).stem.replace("_formatted", "").replace("_findings", "")
         )
+        # Automatically archive to history/v{next_version} before applying changes
+        novel_service.archive_current_state(basename, extra_novel_path=novel_path)
         output_dir = project_paths.get_output_dir(basename)
         script_path = project_paths.get_src_path("apply_findings.py")
         cmd = [
@@ -301,6 +298,20 @@ async def stream_review(
 
 @router.get("/api/stream/write")
 async def stream_write(params: WriteParams = Depends()):  # noqa: B008
+    # 執筆前に、もしすでにそのエピソードの小説ファイルが存在する場合は
+    # レビュー時と同様に history/v{next_version}/ に退避させる
+    try:
+        novel_path, basename = novel_service.resolve_novel_path_for_write(
+            params.episode, plot_file=params.plot
+        )
+        if os.path.exists(novel_path):
+            logger.info(
+                f"Existing novel file found for writing. Archiving: {novel_path}"
+            )
+            novel_service.archive_current_state(basename, extra_novel_path=novel_path)
+    except Exception as e:
+        logger.warning(f"Failed to archive prior to writing: {e}")
+
     cmd = novel_service.build_writer_cmd(params)
     return novel_service.stream_process_output(cmd)
 
