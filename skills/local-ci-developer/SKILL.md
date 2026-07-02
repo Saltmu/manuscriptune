@@ -1,6 +1,14 @@
 ---
-name: local-ci-developer
-description: 設計・実装プラン作成、GitHubでのIssue起票、TDDによる実装、ローカルCI検証、Walkthroughを記載したPR作成、マージ時のIssue自動クローズまでの一連の開発ワークフローを統制するスキル。
+name: "local-ci-developer"
+description: "設計・実装プラン作成、GitHubでのIssue起票、TDDによる実装、ローカルCI検証、Walkthroughを記載したPR作成、マージ時のIssue自動クローズまでの一連の開発ワークフローを統制するスキル。"
+version: "1.0.0"
+category: "Development"
+input_schema:
+  type: "object"
+  properties: {}
+output_schema:
+  type: "object"
+  properties: {}
 ---
 
 # Local CI & TDD Developer Skill

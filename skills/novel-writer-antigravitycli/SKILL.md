@@ -1,8 +1,26 @@
 ---
-name: "Novel-Writer-AntigravityCLI"
+name: "novel-writer-antigravitycli"
 description: "「重天の調律師」シリーズの執筆に特化した小説執筆スキル（Antigravity CLI版）。設定資料、キャラクター概要、プロットに基づき、指定された執筆ポリシーに従って小説を生成します。トークン制限を回避するため、Antigravity CLIツール（agy）を用いてローカルからAPIを呼び出します。"
 version: "1.0.0"
 category: "Novel-Writing"
+input_schema:
+  type: "object"
+  properties:
+    plot: { type: "string" }
+    settings: { type: "string" }
+    characters: { type: "string" }
+    policy: { type: "string" }
+  required:
+    - plot
+    - settings
+    - characters
+    - policy
+output_schema:
+  type: "object"
+  properties:
+    draft_text: { type: "string" }
+  required:
+    - draft_text
 ---
 
 # 役割

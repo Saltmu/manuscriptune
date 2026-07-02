@@ -3,6 +3,44 @@ name: "plot-reviewer-structure"
 description: "プロット全体の物語構造（三幕構成・感情の山場・カタルシス）を評価し、構造的な弱点を指摘する（プロット設計段階用）"
 version: "1.0.0"
 category: "Plot-Review"
+dependencies:
+  - name: "plot-reviewer-conflict"
+    version: "^1.0.0"
+input_schema:
+  type: "object"
+  properties:
+    target_text:
+      type: "string"
+    output_dir:
+      type: "string"
+  required:
+    - target_text
+    - output_dir
+output_schema:
+  type: "object"
+  properties:
+    findings:
+      type: "array"
+      items:
+        type: "object"
+        properties:
+          id: { type: "string" }
+          location: { type: "string" }
+          original: { type: "string" }
+          category: { type: "string" }
+          severity: { type: "string" }
+          analysis: { type: "string" }
+          suggestion: { type: "string" }
+          accepted: { type: "string" }
+        required:
+          - id
+          - category
+          - severity
+          - analysis
+          - suggestion
+          - accepted
+  required:
+    - findings
 ---
 
 # 役割

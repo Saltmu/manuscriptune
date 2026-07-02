@@ -17,16 +17,57 @@ def natural_sort_key(s):
     ]
 
 
-def load_project_config(config_path: str | None = None):
+def load_project_config(config_path: str | None = None, validate: bool = True):
     if config_path:
-        return YamlHandler.load_safe(config_path)
+        cfg = YamlHandler.load_safe(config_path)
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(script_dir))
+        config_path = os.path.join(project_root, "antigravity.yaml")
+        if not os.path.exists(config_path):
+            config_path = "antigravity.yaml"
+        cfg = YamlHandler.load_safe(config_path)
+
+    if validate and cfg:
+        validate_project_skills(cfg)
+    return cfg
+
+
+def validate_project_skills(config: dict) -> None:
+    """Validates the skills registered in the project config."""
+    from src.utils.skill_registry import SkillRegistry, SkillValidationError
+
+    skills_config = config.get("skills", [])
+    if not skills_config:
+        return
+
+    registry = SkillRegistry()
+    loaded_skills = {}
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(script_dir))
-    config_path = os.path.join(project_root, "antigravity.yaml")
-    if not os.path.exists(config_path):
-        config_path = "antigravity.yaml"
-    return YamlHandler.load_safe(config_path)
+
+    for skill_item in skills_config:
+        path = skill_item.get("path")
+        if not path:
+            raise SkillValidationError("Skill path configuration is missing.")
+
+        # Resolve path relative to project root if relative
+        if not os.path.isabs(path):
+            full_path = os.path.join(project_root, path)
+        else:
+            full_path = path
+
+        skill_md_path = os.path.join(full_path, "SKILL.md")
+        if not os.path.exists(skill_md_path):
+            raise SkillValidationError(
+                f"SKILL.md not found at '{skill_md_path}' for skill path '{path}'."
+            )
+
+        skill = registry.load_skill_from_file(skill_md_path)
+        loaded_skills[skill.name] = skill
+
+    registry.check_dependencies(loaded_skills)
 
 
 def get_gdrive_config(config: dict | None = None) -> tuple[str | None, str | None]:

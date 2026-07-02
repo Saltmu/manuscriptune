@@ -1,8 +1,14 @@
 ---
-name: "WebUI-Developer"
+name: "webui-developer"
 description: "WebUI（Novel Studioなど）のフロントエンド・バックエンドの実装・修正を行う"
 version: "1.0.0"
 category: "Development"
+input_schema:
+  type: "object"
+  properties: {}
+output_schema:
+  type: "object"
+  properties: {}
 ---
 
 # 役割

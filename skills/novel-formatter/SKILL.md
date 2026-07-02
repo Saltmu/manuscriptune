@@ -1,8 +1,22 @@
 ---
-name: "Novel-Formatter"
+name: "novel-formatter"
 description: "NotebookLM等で執筆された小説を、ウェブ小説（カクヨム、なろう等）向けに読みやすくフォーマットする。"
 version: "1.0.0"
 category: "Novel-Editing"
+input_schema:
+  type: "object"
+  properties:
+    target_text:
+      type: "string"
+  required:
+    - target_text
+output_schema:
+  type: "object"
+  properties:
+    formatted_text:
+      type: "string"
+  required:
+    - formatted_text
 ---
 
 # 役割

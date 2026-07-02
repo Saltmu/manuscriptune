@@ -3,6 +3,44 @@ name: "text-reviewer-logic"
 description: "世界観設定、過去のプロット・キャラ設定との矛盾、伏線の配置を統合的に検証する"
 version: "1.0.0"
 category: "Novel-Editing"
+dependencies:
+  - name: "novel-formatter"
+    version: "^1.0.0"
+input_schema:
+  type: "object"
+  properties:
+    target_text:
+      type: "string"
+    output_dir:
+      type: "string"
+  required:
+    - target_text
+    - output_dir
+output_schema:
+  type: "object"
+  properties:
+    findings:
+      type: "array"
+      items:
+        type: "object"
+        properties:
+          id: { type: "string" }
+          location: { type: "string" }
+          original: { type: "string" }
+          category: { type: "string" }
+          severity: { type: "string" }
+          analysis: { type: "string" }
+          suggestion: { type: "string" }
+          accepted: { type: "string" }
+        required:
+          - id
+          - category
+          - severity
+          - analysis
+          - suggestion
+          - accepted
+  required:
+    - findings
 ---
 
 # 役割
