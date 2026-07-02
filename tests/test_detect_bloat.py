@@ -84,3 +84,52 @@ def test_main_exit_codes(tmp_path):
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 0
+
+
+def test_scan_project_ast_analysis(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir(exist_ok=True)
+
+    # 50行を超える関数を持つPythonファイルを作成
+    content = ["def small_function():", "    return 1", ""]
+    content.append("def large_function():")
+    for i in range(55):
+        content.append(f"    print({i})")
+    content.append("")
+
+    # LIMIT_PYTHON(1000)を超えるようにダミーコメントを追加
+    dummy_lines = [f"# dummy {i}" for i in range(950)]
+    content_large = dummy_lines + content
+
+    bloated_py = src_dir / "bloated_with_large_func.py"
+    bloated_py.write_text("\n".join(content_large), encoding="utf-8")
+
+    reports = scan_project(root_dir=tmp_path)
+
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["file"].name == "bloated_with_large_func.py"
+    assert "bloated_functions" in report
+    funcs = report["bloated_functions"]
+    assert len(funcs) == 1
+    assert funcs[0]["name"] == "large_function"
+    assert funcs[0]["lines"] == 56  # def (1) + print lines (55)
+
+
+def test_check_file_bloat_error():
+    from pathlib import Path
+
+    is_bloated, lines = check_file_bloat(Path("non_existent_file.py"), 1000)
+    assert is_bloated is False
+    assert lines == 0
+
+
+def test_analyze_python_file_parse_error(tmp_path):
+    from src.utils.detect_bloat import analyze_python_file
+
+    invalid_py = tmp_path / "invalid.py"
+    # SyntaxErrorを誘発するコード
+    invalid_py.write_text("if True\n    print('missing colon')", encoding="utf-8")
+
+    funcs = analyze_python_file(invalid_py)
+    assert funcs == []
