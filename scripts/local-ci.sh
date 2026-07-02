@@ -8,13 +8,19 @@ echo "========================================="
 echo "Running Local CI Check..."
 echo "========================================="
 
-# 1. Check code format
-echo "[1/5] Checking code format (ruff format)..."
-poetry run ruff format --check
+# 1. Check code format & 2. Run Lint check
+if [[ " $* " == *" --fix "* ]]; then
+  echo "[1/2] Formatting code (ruff format)..."
+  poetry run ruff format
+  echo "[2/2] Fixing lint issues (ruff check --fix)..."
+  poetry run ruff check --fix
+else
+  echo "[1/5] Checking code format (ruff format)..."
+  poetry run ruff format --check
+  echo "[2/5] Running lint (ruff check)..."
+  poetry run ruff check
+fi
 
-# 2. Run Lint check
-echo "[2/5] Running lint (ruff check)..."
-poetry run ruff check
 
 # 3. Type check
 echo "[3/5] Checking types (mypy)..."

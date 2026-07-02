@@ -53,6 +53,10 @@ server = "src.review_server:main"
 apply-findings = "src.apply_findings:main"
 sync-gdrive = "src.sync_gdrive:main"
 detect-bloat = "src.utils.detect_bloat:main"
+detect-coverage-gaps = "src.utils.detect_coverage_gaps:main"
+create-issue = "src.utils.github_helper:create_issue_cli"
+create-pr = "src.utils.github_helper:create_pr_cli"
+
 
 [build-system]
 requires = ["poetry-core"]
