@@ -627,3 +627,62 @@ def test_routes_api_stream_plot_review_success(tmp_path):
             )
             assert response.status_code == 200
             assert mock_stream.called
+
+
+def test_save_and_get_findings_with_metadata():
+    os.makedirs("novels", exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:
+        tmp.write(b"Novel Content")
+        tmp_name = tmp.name
+        tmp_basename = os.path.basename(tmp_name)
+
+    try:
+        payload = {
+            "novel_name": tmp_basename,
+            "findings": [
+                {
+                    "id": "INT-001",
+                    "location": "1行目",
+                    "original": "原点",
+                    "category": "ロジック",
+                    "severity": "high",
+                    "analysis": "分析",
+                    "suggestion": "提案",
+                    "accepted": "y",
+                }
+            ],
+            "metadata": {
+                "fallback_mode": True,
+                "reason": "Test reason",
+                "completeness": "low",
+            },
+        }
+        response = client.post("/api/save", json=payload)
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+        response_get = client.get(f"/api/data?file={tmp_basename}")
+        assert response_get.status_code == 200
+        data = response_get.json()
+        assert data["metadata"]["fallback_mode"] is True
+        assert data["metadata"]["completeness"] == "low"
+        assert data["metadata"]["reason"] == "Test reason"
+
+        response_novel = client.get(f"/api/novel?file={tmp_basename}")
+        assert response_novel.status_code == 200
+        data_novel = response_novel.json()
+        assert data_novel["metadata"]["fallback_mode"] is True
+        assert data_novel["metadata"]["completeness"] == "low"
+        assert data_novel["metadata"]["reason"] == "Test reason"
+
+    finally:
+        if os.path.exists(tmp_name):
+            os.remove(tmp_name)
+        try:
+            _, yaml_path = novel_service.resolve_paths(tmp_basename)
+            if yaml_path and os.path.exists(yaml_path):
+                os.remove(yaml_path)
+            if yaml_path and os.path.exists(f"{yaml_path}.bak"):
+                os.remove(f"{yaml_path}.bak")
+        except Exception:
+            pass

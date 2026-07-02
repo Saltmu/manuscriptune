@@ -2,6 +2,8 @@ import os
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.sync_gdrive import (
     _check_lock_and_cache,
     _download_gdrive_file,
@@ -157,3 +159,37 @@ def test_main_no_config():
         with patch("src.sync_gdrive.build") as mock_build:
             main()
             mock_build.assert_not_called()
+
+
+@patch("src.sync_gdrive.build")
+@patch("src.sync_gdrive.service_account.Credentials.from_service_account_file")
+@patch("src.sync_gdrive.project_config")
+@patch("src.sync_gdrive._check_lock_and_cache", return_value=True)
+def test_main_failure_writes_status_yaml(
+    mock_check, mock_config, mock_creds, mock_build, tmp_path
+):
+    import yaml
+
+    mock_config.load_project_config.return_value = {}
+    mock_config.get_gdrive_config.return_value = (
+        "folder_123",
+        "./credentials/creds.json",
+    )
+
+    mock_build.side_effect = Exception("Google Drive API connection failed")
+
+    with (
+        patch("src.sync_gdrive.os.path.dirname", return_value=str(tmp_path)),
+    ):
+        with pytest.raises(Exception, match="Google Drive API connection failed"):
+            main()
+
+        status_yaml = tmp_path / "data/sources/sync_status.yaml"
+        assert status_yaml.exists()
+
+        with open(status_yaml, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            assert "_metadata" in data
+            assert data["_metadata"]["fallback_mode"] is True
+            assert data["_metadata"]["completeness"] == "low"
+            assert "connection failed" in data["_metadata"]["reason"]

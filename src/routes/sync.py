@@ -23,7 +23,7 @@ async def stream_sync():
 async def sync_status():
     sources_dir = Path(project_paths.get_sources_dir())
     if not sources_dir.exists():
-        return {"sources": []}
+        return {"sources": [], "metadata": {}}
 
     sources_list = []
     for f in sorted(sources_dir.glob("*.txt"), key=writer_helper.natural_sort_key):
@@ -32,4 +32,17 @@ async def sync_status():
         sources_list.append(
             {"name": f.name, "size": f.stat().st_size, "last_updated": dt}
         )
-    return {"sources": sources_list}
+
+    metadata = {}
+    status_path = sources_dir / "sync_status.yaml"
+    if status_path.exists():
+        try:
+            from src.utils.yaml_handler import YamlHandler
+
+            data = YamlHandler.load_safe(str(status_path))
+            if isinstance(data, dict) and "_metadata" in data:
+                metadata = data["_metadata"]
+        except Exception as e:
+            logger.error(f"Failed to load sync status yaml: {e}")
+
+    return {"sources": sources_list, "metadata": metadata}

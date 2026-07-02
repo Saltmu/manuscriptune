@@ -126,7 +126,16 @@ def _fallback_merge(all_findings: list[dict]) -> str:
         if "_source_file" in f_copy:
             del f_copy["_source_file"]
         merged_findings.append(f_copy)
-    return YamlHandler.dump({"findings": merged_findings})
+    return YamlHandler.dump(
+        {
+            "findings": merged_findings,
+            "_metadata": {
+                "fallback_mode": True,
+                "reason": "LLM integration failed; using mechanical merge",
+                "completeness": "low",
+            },
+        }
+    )
 
 
 def integrate_findings_in_dir(output_dir, model):

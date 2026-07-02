@@ -126,6 +126,10 @@ findings:
             assert len(data["findings"]) == 1
             assert data["findings"][0]["id"] == "INT-001"
             assert data["findings"][0]["original"] == "本文"
+            assert "_metadata" in data
+            assert data["_metadata"]["fallback_mode"] is True
+            assert data["_metadata"]["completeness"] == "low"
+            assert "LLM integration failed" in data["_metadata"]["reason"]
 
 
 def test_integrate_findings_in_dir_success(tmp_path):

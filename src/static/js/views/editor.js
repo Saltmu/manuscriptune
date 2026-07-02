@@ -15,6 +15,45 @@ export async function loadEditorData() {
         const data = await response.json();
         state.novelLines = data.novel_lines;
         state.findings = data.findings;
+        state.metadata = data.metadata || {};
+
+        // Show/hide fallback warning banner
+        const banner = document.getElementById('fallback-warning-banner');
+        const bannerMsg = document.getElementById('fallback-warning-message');
+        if (banner) {
+            if (state.metadata && (state.metadata.fallback_mode || state.metadata.completeness === 'low')) {
+                banner.style.display = 'flex';
+                if (bannerMsg) {
+                    const reason = state.metadata.reason || 'LLMによる指摘の統合に失敗したため、機械的なマージを使用しています。重複や矛盾が残っている可能性があります。';
+                    bannerMsg.innerHTML = `<strong>⚠️ 品質低下の警告 (低品質):</strong> ${reason}`;
+                }
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+
+        // Fetch sync status and show/hide sync warning banner
+        const syncWarningBanner = document.getElementById('sync-warning-banner');
+        const syncWarningMsg = document.getElementById('sync-warning-message');
+        if (syncWarningBanner) {
+            try {
+                const syncResponse = await fetch('/api/sync/status');
+                if (syncResponse.ok) {
+                    const syncData = await syncResponse.json();
+                    if (syncData.metadata && (syncData.metadata.fallback_mode || syncData.metadata.completeness === 'low')) {
+                        syncWarningBanner.style.display = 'flex';
+                        if (syncWarningMsg) {
+                            const reason = syncData.metadata.reason || '設定資料（Google Drive）の同期に失敗しています。';
+                            syncWarningMsg.innerHTML = `<strong>⚠️ 同期失敗の警告:</strong> ${reason}`;
+                        }
+                    } else {
+                        syncWarningBanner.style.display = 'none';
+                    }
+                }
+            } catch (syncErr) {
+                console.error('Failed to check sync status:', syncErr);
+            }
+        }
         
         const filenameDisplay = document.getElementById('filename-display');
         if (filenameDisplay) filenameDisplay.textContent = data.novel_filename;
@@ -261,7 +300,11 @@ export async function saveChanges() {
         await fetch('/api/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ novel_name: state.selectedNovelFile, findings: state.findings })
+            body: JSON.stringify({
+                novel_name: state.selectedNovelFile,
+                findings: state.findings,
+                metadata: state.metadata
+            })
         });
         showToast('自動保存しました');
     } catch (err) {

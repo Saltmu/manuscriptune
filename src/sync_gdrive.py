@@ -123,6 +123,36 @@ def main():
         with open(CACHE_FILE, "w") as f:
             f.write(str(time.time()))
 
+        # Remove sync_status.yaml on success
+        status_path = os.path.join(output_dir, "sync_status.yaml")
+        if os.path.exists(status_path):
+            try:
+                os.remove(status_path)
+                logger.info(f"Removed sync status file: {status_path}")
+            except Exception as e:
+                logger.warning(f"Failed to remove sync status file: {e}")
+
+    except Exception as e:
+        logger.error(f"Google Drive sync failed: {e}", exc_info=True)
+        # Write failure status to sync_status.yaml
+        status_path = os.path.join(output_dir, "sync_status.yaml")
+        try:
+            from src.utils.yaml_handler import YamlHandler
+
+            YamlHandler.dump(
+                {
+                    "_metadata": {
+                        "fallback_mode": True,
+                        "reason": f"Google Drive sync failed: {str(e)}",
+                        "completeness": "low",
+                    }
+                },
+                status_path,
+            )
+            logger.info(f"Saved failed sync status to {status_path}")
+        except Exception as ex:
+            logger.error(f"Failed to write sync_status.yaml: {ex}")
+        raise e
     finally:
         # Remove lock
         if os.path.exists(LOCK_FILE):

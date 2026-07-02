@@ -24,6 +24,20 @@
         </div>
     </div>
 
+    <!-- Fallback/Warning Banners -->
+    <div id="fallback-warning-banner" class="warning-banner" style="display: none; margin: 16px 24px 0 24px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span>⚠️</span>
+            <span id="fallback-warning-message">機械的マージのため、品質が低下している可能性があります。</span>
+        </div>
+    </div>
+    <div id="sync-warning-banner" class="warning-banner" style="display: none; margin: 16px 24px 0 24px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.05) 100%); border-color: rgba(245, 158, 11, 0.35); color: #fbbf24; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1);">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span>⚠️</span>
+            <span id="sync-warning-message">設定資料（Google Drive）の同期に失敗しています。ローカルのデータが古いか、不整合な可能性があります。</span>
+        </div>
+    </div>
+
     <!-- Editor split layout -->
     <div class="editor-container">
         <!-- Left Panel: Novel Draft -->

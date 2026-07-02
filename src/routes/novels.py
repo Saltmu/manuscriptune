@@ -34,6 +34,7 @@ class FindingItem(BaseModel):
 class SaveFindingsRequest(BaseModel):
     novel_name: str
     findings: list[FindingItem]
+    metadata: dict[str, Any] | None = None
 
 
 class SelectFileRequest(BaseModel):
@@ -101,11 +102,15 @@ async def get_novel(file: str = Query(..., description="Novel filename")):
         content = f.read()
 
     findings = []
+    metadata = {}
     if yaml_path and os.path.exists(yaml_path):
         try:
             data = YamlHandler.load_safe(yaml_path)
-            if data and "findings" in data:
-                findings = data["findings"]
+            if isinstance(data, dict):
+                findings = data.get("findings", [])
+                metadata = data.get("_metadata", {})
+            elif isinstance(data, list):
+                findings = data
         except Exception as e:
             logger.error(f"Error reading YAML findings: {e}", exc_info=True)
 
@@ -131,6 +136,7 @@ async def get_novel(file: str = Query(..., description="Novel filename")):
         "novel_name": file,
         "content": content,
         "findings": findings,
+        "metadata": metadata,
         "backups": backups,
     }
 
@@ -188,7 +194,10 @@ async def save_findings(req: SaveFindingsRequest):
             shutil.copy2(yaml_path, yaml_bak)
 
         findings_data = [f.model_dump() for f in req.findings]
-        YamlHandler.dump({"findings": findings_data}, yaml_path)
+        dump_data: dict[str, Any] = {"findings": findings_data}
+        if req.metadata:
+            dump_data["_metadata"] = req.metadata
+        YamlHandler.dump(dump_data, yaml_path)
         logger.info(f"Successfully saved findings YAML: {req.novel_name}")
         return {"status": "success", "message": "Findings saved successfully."}
     except Exception as e:
@@ -403,11 +412,16 @@ async def get_data(file: str = Query(..., description="Novel filename")):
         novel_lines = [line.rstrip("\r\n") for line in f.readlines()]
 
     findings: list[Any] = []
+    metadata: dict[str, Any] = {}
     # Findings YAML might not exist yet if review hasn't run
     if yaml_path and os.path.exists(yaml_path):
         try:
             data = YamlHandler.load(yaml_path)
-            findings = data.get("findings", []) if isinstance(data, dict) else []
+            if isinstance(data, dict):
+                findings = data.get("findings", [])
+                metadata = data.get("_metadata", {})
+            elif isinstance(data, list):
+                findings = data
         except Exception as e:
             raise HTTPException(
                 status_code=500, detail=f"Failed to parse YAML: {str(e)}"
@@ -431,6 +445,7 @@ async def get_data(file: str = Query(..., description="Novel filename")):
     return {
         "novel_lines": novel_lines,
         "findings": findings,
+        "metadata": metadata,
         "novel_filename": os.path.basename(novel_path),
         "has_backup": has_backup,
         "backups": backups,
