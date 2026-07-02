@@ -128,7 +128,7 @@ def test_run_single_review_skill_success(tmp_path):
     pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
 
     with patch(
-        "src.services.pipeline_service.ReviewSkillTask", return_value=mock_task_instance
+        "src.pipeline.phase_review.ReviewSkillTask", return_value=mock_task_instance
     ):
         skill, success, msg = pipeline.run_single_review_skill(
             "dummy-skill", "text", str(output_file)
@@ -146,7 +146,7 @@ def test_run_single_review_skill_client_error(tmp_path):
     pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
 
     with patch(
-        "src.services.pipeline_service.ReviewSkillTask", return_value=mock_task_instance
+        "src.pipeline.phase_review.ReviewSkillTask", return_value=mock_task_instance
     ):
         with pytest.raises(ReviewSkillExecutionError) as excinfo:
             pipeline.run_single_review_skill("dummy-skill", "text", str(output_file))
@@ -162,7 +162,7 @@ def test_run_single_review_skill_generic_error(tmp_path):
     pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
 
     with patch(
-        "src.services.pipeline_service.ReviewSkillTask", return_value=mock_task_instance
+        "src.pipeline.phase_review.ReviewSkillTask", return_value=mock_task_instance
     ):
         with pytest.raises(ReviewSkillExecutionError) as excinfo:
             pipeline.run_single_review_skill("dummy-skill", "text", str(output_file))

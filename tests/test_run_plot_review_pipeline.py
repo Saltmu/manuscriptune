@@ -48,7 +48,7 @@ def test_run_single_review_skill_success(tmp_path):
 
     pipeline = PlotReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
 
-    with patch("src.services.pipeline_service.ReviewSkillTask", mock_task):
+    with patch("src.pipeline.phase_review.ReviewSkillTask", mock_task):
         skill, success, msg = pipeline.run_single_review_skill(
             "plot-reviewer-conflict", "plot text", str(output_file)
         )
@@ -66,7 +66,7 @@ def test_run_single_review_skill_agy_error(tmp_path):
 
     pipeline = PlotReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
 
-    with patch("src.services.pipeline_service.ReviewSkillTask", mock_task):
+    with patch("src.pipeline.phase_review.ReviewSkillTask", mock_task):
         with pytest.raises(ReviewSkillExecutionError) as excinfo:
             pipeline.run_single_review_skill(
                 "plot-reviewer-conflict", "plot text", str(output_file)
@@ -83,7 +83,7 @@ def test_run_single_review_skill_unexpected_error(tmp_path):
 
     pipeline = PlotReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
 
-    with patch("src.services.pipeline_service.ReviewSkillTask", mock_task):
+    with patch("src.pipeline.phase_review.ReviewSkillTask", mock_task):
         with pytest.raises(ReviewSkillExecutionError) as excinfo:
             pipeline.run_single_review_skill(
                 "plot-reviewer-conflict", "plot text", str(output_file)

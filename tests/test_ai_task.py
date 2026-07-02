@@ -46,7 +46,7 @@ def test_review_skill_task_prompt_and_postprocess(tmp_path, mock_client):
 
     with (
         patch("os.path.exists", mock_exists),
-        patch("src.utils.ai_task.read_file", return_value="Dummy Instruction"),
+        patch("src.utils.ai_tasks.review.read_file", return_value="Dummy Instruction"),
     ):
         prompt = task.render_prompt(input_data)
         assert "Dummy Instruction" in prompt
@@ -141,23 +141,23 @@ def test_review_skill_task_contexts(tmp_path, mock_client):
     with (
         patch("os.path.exists", mock_exists),
         patch(
-            "src.utils.ai_task.read_file",
+            "src.utils.ai_tasks.review.read_file",
             side_effect=lambda path: f"Instruction for {os.path.basename(os.path.dirname(path))}",
         ),
         patch(
-            "src.utils.ai_task.ReviewSkillTask._get_text_logic_context",
+            "src.utils.ai_tasks.review.ReviewSkillTask._get_text_logic_context",
             return_value="Logic Context Block",
         ) as mock_logic,
         patch(
-            "src.utils.ai_task.ReviewSkillTask._get_text_style_context",
+            "src.utils.ai_tasks.review.ReviewSkillTask._get_text_style_context",
             return_value="Style Context Block",
         ) as mock_style,
         patch(
-            "src.utils.ai_task.ReviewSkillTask._get_plot_conflict_context",
+            "src.utils.ai_tasks.review.ReviewSkillTask._get_plot_conflict_context",
             return_value="Conflict Context Block",
         ) as mock_conflict,
         patch(
-            "src.utils.ai_task.ReviewSkillTask._get_plot_structure_context",
+            "src.utils.ai_tasks.review.ReviewSkillTask._get_plot_structure_context",
             return_value="Structure Context Block",
         ) as mock_structure,
     ):

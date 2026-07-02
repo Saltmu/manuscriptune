@@ -3,19 +3,14 @@ import re
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from src.pipeline.phase_context_filter import ContextFilterPhase
+from src.pipeline.phase_formatter import FormatterPhase
+from src.pipeline.phase_integration import IntegrationPhase
+from src.pipeline.phase_review import ReviewPhase
 from src.utils import project_paths
-from src.utils.ai_client import AgyClientError
-from src.utils.ai_exceptions import (
-    ContextFilteringError,
-    FormattingError,
-    IntegrationError,
-    PipelineError,
-    ReviewSkillExecutionError,
-)
-from src.utils.ai_task import ReviewSkillInput, ReviewSkillTask
+from src.utils.ai_exceptions import PipelineError
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
 
@@ -59,45 +54,29 @@ class BaseReviewPipeline(ABC):
         self.runner = runner or CommandRunner()
         self.basename, self.output_dir = self._resolve_output_dir(output_dir_override)
 
-    @abstractmethod
-    def _resolve_output_dir(self, args_dir: str | None) -> tuple[str, str]:
-        pass
-
-    @abstractmethod
-    def execute(self) -> None:
-        pass
+        # Initialize phases
+        self.formatter_phase = FormatterPhase(self.runner)
+        self.context_filter_phase = ContextFilterPhase(self.runner)
+        self.review_phase = ReviewPhase(self.model, self.output_dir, self.workers)
+        self.integration_phase = IntegrationPhase(self.model, self.output_dir)
 
     def run_single_review_skill(
         self, skill_name: str, target_text: str, output_file: str
     ) -> tuple[str, bool, str]:
-        """Executes a single review skill via ReviewSkillTask."""
-        logger.info(f"[{skill_name}] Preparing review prompt...")
-        task = ReviewSkillTask(model=self.model)
-        input_data = ReviewSkillInput(
-            skill_name=skill_name, target_text=target_text, output_dir=self.output_dir
+        """Delegates to ReviewPhase."""
+        return self.review_phase.run_single_review_skill(
+            skill_name, target_text, output_file
         )
-
-        logger.info(f"[{skill_name}] Running AgyClient ({self.model})...")
-        try:
-            yaml_content = task.execute(input_data)
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(yaml_content + "\n")
-            return skill_name, True, f"Saved to {output_file}"
-        except AgyClientError as e:
-            logger.error(f"[{skill_name}] AgyClientError: {e}")
-            raise ReviewSkillExecutionError(
-                f"Review skill {skill_name} failed via AgyClient: {e}"
-            ) from e
-        except Exception as e:
-            logger.error(f"[{skill_name}] Unexpected exception: {e}")
-            raise ReviewSkillExecutionError(
-                f"Unexpected error in {skill_name}: {e}"
-            ) from e
 
     def run_parallel_review_skills(
         self, target_text: str, review_skills: dict[str, str]
     ) -> None:
-        """Executes review skills in parallel using ThreadPoolExecutor."""
+        """Executes review skills in parallel, routing through self.run_single_review_skill."""
+        import os
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        from src.utils.ai_exceptions import ReviewSkillExecutionError
+
         results = []
         logger.info(f"Spawning {len(review_skills)} review skills in parallel...")
         with ThreadPoolExecutor(max_workers=self.workers) as executor:
@@ -131,6 +110,14 @@ class BaseReviewPipeline(ABC):
                     )
                     results.append((skill, False, str(exc)))
 
+    @abstractmethod
+    def _resolve_output_dir(self, args_dir: str | None) -> tuple[str, str]:
+        pass
+
+    @abstractmethod
+    def execute(self) -> None:
+        pass
+
 
 class TextReviewPipeline(BaseReviewPipeline):
     """Pipeline for reviewing novel drafts (text)."""
@@ -146,56 +133,6 @@ class TextReviewPipeline(BaseReviewPipeline):
         basename = self.target_path.stem
         output_dir = args_dir if args_dir else project_paths.get_output_dir(basename)
         return basename, output_dir
-
-    def run_formatter(self, input_file: str, output_file: str) -> None:
-        """Runs the novel mechanical formatter on the input file."""
-        formatter_script = os.path.join(
-            project_paths.get_skills_dir(),
-            "novel-formatter",
-            "scripts",
-            "novel_formatter_helper.py",
-        )
-        if not os.path.exists(formatter_script):
-            logger.warning(
-                f"Formatter script '{formatter_script}' not found. Performing fallback copy."
-            )
-            content = read_file(input_file)
-            content = re.sub(r"\[\d+(?:,\s*\d+)*\]", "", content)
-            content = re.sub(r"\(\d+(?:,\s*\d+)*\)", "", content)
-            content = re.sub(r"【\d+(?:,\s*\d+)*】", "", content)
-            content = re.sub(r"([。、！？])[\t 　]+", r"\1", content)
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(content)
-            return
-
-        cmd = [
-            "poetry",
-            "run",
-            "python",
-            formatter_script,
-            input_file,
-            "-o",
-            output_file,
-        ]
-        logger.info(f"Running mechanical formatter: {' '.join(cmd)}")
-        try:
-            self.runner.run(cmd)
-        except PipelineError as e:
-            raise FormattingError(f"Mechanical formatter failed: {e}") from e
-
-    def run_filter_context(self, formatted_file: str, output_file: str) -> None:
-        """Runs the filter_context script to extract relevant settings."""
-        filter_script = project_paths.get_src_path("filter_context.py")
-        if not os.path.exists(filter_script):
-            logger.warning("filter_context.py not found. Skipping context filtering.")
-            return
-
-        cmd = ["poetry", "run", "python", filter_script, formatted_file, output_file]
-        logger.info(f"Running context filter: {' '.join(cmd)}")
-        try:
-            self.runner.run(cmd)
-        except PipelineError as e:
-            raise ContextFilteringError(f"Context filter failed: {e}") from e
 
     def archive_previous_review(self, target_path: Path | None = None) -> None:
         """Archives the current review results into history/v{version}/."""
@@ -221,23 +158,17 @@ class TextReviewPipeline(BaseReviewPipeline):
             if os.path.exists(src_path):
                 os.remove(src_path)
 
-    def _integrate_findings(self) -> None:
-        """Helper to invoke finding integration module."""
-        from src import integrate_findings
+    def run_formatter(self, input_file: str, output_file: str) -> None:
+        """Delegates formatting to FormatterPhase."""
+        self.formatter_phase.run(input_file, output_file)
 
-        logger.info(
-            f"Calling: integrate_findings.integrate_findings_in_dir(output_dir='{self.output_dir}', model='{self.model}')"
-        )
-        try:
-            success = integrate_findings.integrate_findings_in_dir(
-                self.output_dir, self.model
-            )
-            if not success:
-                raise IntegrationError("Failed to integrate findings in directory.")
-        except IntegrationError:
-            raise
-        except Exception as e:
-            raise IntegrationError(f"Unexpected integration error: {e}") from e
+    def run_filter_context(self, formatted_file: str, output_file: str) -> None:
+        """Delegates context filtering to ContextFilterPhase."""
+        self.context_filter_phase.run(formatted_file, output_file)
+
+    def _integrate_findings(self) -> None:
+        """Delegates text findings integration to IntegrationPhase."""
+        self.integration_phase.integrate_text_findings()
 
     def execute(self, no_server: bool = False) -> None:
         """Runs the entire novel review pipeline."""
@@ -367,24 +298,6 @@ class PlotReviewPipeline(BaseReviewPipeline):
             if os.path.exists(src_path):
                 os.remove(src_path)
 
-    def _integrate_findings(self) -> None:
-        """Helper to invoke plot finding integration module."""
-        from src import integrate_plot_findings
-
-        logger.info("Integrating plot review results...")
-        try:
-            success = integrate_plot_findings.integrate_plot_findings_in_dir(
-                self.output_dir, str(self.target_path), self.model
-            )
-            if not success:
-                raise IntegrationError(
-                    "Failed to integrate plot findings in directory."
-                )
-        except IntegrationError:
-            raise
-        except Exception as e:
-            raise IntegrationError(f"Unexpected plot integration error: {e}") from e
-
     def execute(self) -> None:
         """Runs the parallel plot review pipeline."""
         os.makedirs(self.output_dir, exist_ok=True)
@@ -395,6 +308,8 @@ class PlotReviewPipeline(BaseReviewPipeline):
 
         self.archive_previous_review()
 
+        from src.utils.file_io import read_file
+
         target_text = read_file(str(self.target_path))
         if not target_text:
             raise PipelineError(f"Could not read target plot file: {self.target_path}")
@@ -403,7 +318,7 @@ class PlotReviewPipeline(BaseReviewPipeline):
         self.run_parallel_review_skills(target_text, project_paths.PLOT_REVIEW_SKILLS)
 
         # Step 3: Run integration report
-        self._integrate_findings()
+        self.integration_phase.integrate_plot_findings(str(self.target_path))
         logger.info("Plot reports integrated successfully.")
         logger.info(
             f"Consolidated Report: {project_paths.get_plot_report_md_path(self.output_dir, self.basename)}"

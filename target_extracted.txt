@@ -1,0 +1,9 @@
+target text
+==============================
+
+【実行指示】
+上記のテキストに対し、あなたの役割に従って校閲を行ってください。
+指摘事項がある場合は、指定されたYAML形式で出
+<truncated 756 bytes>
+
+NOTE: The output was truncated because it was too long. Use a more targeted query or a smaller range to get the information you need.

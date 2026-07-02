@@ -12,13 +12,14 @@ from src.utils.ai_task import (
 )
 
 
-@patch("src.utils.ai_task.read_file", return_value="dummy_file_content")
+@patch("src.utils.ai_tasks.writing.read_file", return_value="dummy_file_content")
 @patch(
-    "src.utils.ai_task.writer_helper.resolve_novel_file_by_pattern",
+    "src.utils.ai_tasks.writing.writer_helper.resolve_novel_file_by_pattern",
     return_value="dummy_path.txt",
 )
 @patch(
-    "src.utils.ai_task.writer_helper.get_novel_setting", return_value="テストタイトル"
+    "src.utils.ai_tasks.writing.writer_helper.get_novel_setting",
+    return_value="テストタイトル",
 )
 def test_novel_writing_task_prompt(mock_setting, mock_resolve, mock_read):
     task = NovelWritingTask()
@@ -39,9 +40,9 @@ def test_novel_writing_task_prompt(mock_setting, mock_resolve, mock_read):
     assert "前後話プロット" in prompt
 
 
-@patch("src.utils.ai_task.read_file", return_value="dummy_file_content")
+@patch("src.utils.ai_tasks.writing.read_file", return_value="dummy_file_content")
 @patch(
-    "src.utils.ai_task.writer_helper.resolve_novel_file_by_pattern",
+    "src.utils.ai_tasks.writing.writer_helper.resolve_novel_file_by_pattern",
     return_value="dummy_path.txt",
 )
 def test_novel_scene_writing_task_prompt(mock_resolve, mock_read):
