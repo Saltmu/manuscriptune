@@ -129,6 +129,13 @@ def main():
 
     applied_count, failed_count = _apply_grouped_findings(text_lines, groups, args)
 
+    if failed_count > 0:
+        logger.error(
+            f"安全対策ガードレール: {failed_count} 件の指摘の反映に失敗しました。"
+            "小説テキストおよびYAMLファイルの変更を保存せず、元の状態を維持して処理を中断します。"
+        )
+        sys.exit(1)
+
     skipped_count = sum(1 for f in findings if f.get("accepted") != "y")
     stats = (applied_count, skipped_count, failed_count)
 

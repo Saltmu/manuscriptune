@@ -303,10 +303,14 @@ def test_save_outputs_yaml_exception(tmp_path):
             raise Exception("YAML write failed")
         return real_open(tmp_path / "dummy.txt", *args, **kwargs)
 
+    import pytest
+
     with patch("builtins.open", mock_open):
-        _save_outputs_and_print_summary(
-            str(tmp_path / "dummy.txt"), "dummy.yaml", [], [], stats
-        )
+        with pytest.raises(Exception) as exc_info:
+            _save_outputs_and_print_summary(
+                str(tmp_path / "dummy.txt"), "dummy.yaml", [], [], stats
+            )
+        assert "YAML write failed" in str(exc_info.value)
 
 
 def test_find_target_line_robust_multi_line_and_fuzzy():

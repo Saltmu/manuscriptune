@@ -1,4 +1,6 @@
 import argparse
+import os
+import shutil
 
 from src.findings.replacer import (
     apply_fallback_to_block,
@@ -377,15 +379,48 @@ def _save_outputs_and_print_summary(
     findings: list[dict],
     stats: tuple[int, int, int],
 ) -> None:
-    write_file(formatted_txt_path, "".join(text_lines))
-    logger.info(f"小説テキストを更新しました: {formatted_txt_path}")
+    txt_bak = formatted_txt_path + ".bak"
+    yaml_bak = findings_yaml_path + ".bak"
 
-    updated_yaml_data = {"findings": findings}
+    txt_backed_up = False
+    yaml_backed_up = False
     try:
+        # Create backups
+        if os.path.exists(formatted_txt_path):
+            shutil.copy2(formatted_txt_path, txt_bak)
+            txt_backed_up = True
+        if os.path.exists(findings_yaml_path):
+            shutil.copy2(findings_yaml_path, yaml_bak)
+            yaml_backed_up = True
+
+        # Write text file
+        write_file(formatted_txt_path, "".join(text_lines))
+        logger.info(f"小説テキストを更新しました: {formatted_txt_path}")
+
+        # Write YAML file
+        updated_yaml_data = {"findings": findings}
         YamlHandler.dump(updated_yaml_data, findings_yaml_path)
         logger.info(f"指摘YAMLを更新しました: {findings_yaml_path}")
+
+        # Remove backups on success
+        if txt_backed_up and os.path.exists(txt_bak):
+            os.remove(txt_bak)
+        if yaml_backed_up and os.path.exists(yaml_bak):
+            os.remove(yaml_bak)
+
     except Exception as e:
-        logger.error(f"Error saving updated YAML '{findings_yaml_path}': {e}")
+        logger.error(
+            f"保存処理中にエラーが発生しました。バックアップから復元します: {e}",
+            exc_info=True,
+        )
+        # Restore from backups
+        if txt_backed_up and os.path.exists(txt_bak):
+            shutil.move(txt_bak, formatted_txt_path)
+            logger.info("小説テキストをバックアップから復元しました。")
+        if yaml_backed_up and os.path.exists(yaml_bak):
+            shutil.move(yaml_bak, findings_yaml_path)
+            logger.info("指摘YAMLをバックアップから復元しました。")
+        raise e
 
     applied_count, skipped_count, failed_count = stats
     logger.info("=== 反映処理完了 ===")
