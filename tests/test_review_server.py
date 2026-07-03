@@ -686,3 +686,29 @@ def test_save_and_get_findings_with_metadata():
                 os.remove(f"{yaml_path}.bak")
         except Exception:
             pass
+
+
+def test_get_plot_episodes_status():
+    # Test with nonexistent plot file
+    response = client.get("/api/plot/episodes_status?file=nonexistent_plot.txt")
+    assert response.status_code == 404
+
+    # Test with existing plot file '04_1_01_プロット.txt'
+    response = client.get("/api/plot/episodes_status?file=04_1_01_プロット.txt")
+    assert response.status_code == 200
+    data = response.json()
+    assert "chapters" in data
+    assert len(data["chapters"]) > 0
+
+    first_chapter = data["chapters"][0]
+    assert "title" in first_chapter
+    assert "name" in first_chapter
+    assert "episodes" in first_chapter
+    assert len(first_chapter["episodes"]) > 0
+
+    first_episode = first_chapter["episodes"][0]
+    assert "title" in first_episode
+    assert "name" in first_episode
+    assert "status" in first_episode
+    assert "novel_file" in first_episode
+    assert "findings_count" in first_episode
