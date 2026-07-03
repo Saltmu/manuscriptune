@@ -1,6 +1,10 @@
 import { showToast } from '../utils.js';
 
 export async function loadSettingsData() {
+    const overlay = document.getElementById('settings-loading-overlay');
+    if (overlay) {
+        overlay.classList.add('active');
+    }
     try {
         // Load sync status for policies and characters
         const response = await fetch('/api/sync/status');
@@ -62,6 +66,10 @@ export async function loadSettingsData() {
 
     } catch (err) {
         console.error('Failed to load settings data:', err);
+    } finally {
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
     }
 }
 
