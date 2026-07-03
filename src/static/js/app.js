@@ -3,6 +3,7 @@ import { showToast, initPanelResizer, shutdownServerGlobal, toggleConsole, close
 import { loadDashboardData, selectDraftCard, loadPreview, selectAndEditNovel, selectAndReviewNovel } from './views/dashboard.js';
 import { runDriveSync } from './views/sync.js';
 import { loadPlotsData, runPlotReviewPipeline, filterPlotFindings } from './views/plot_review.js';
+import { loadSettingsData, saveSettings, getCommonSettings } from './views/settings.js';
 import {
     loadEditorData,
     filterCategory,
@@ -17,11 +18,11 @@ import {
     executeRollback,
     confirmRestoreHistory,
     executeRestoreHistory,
-    loadSourcesForWrite,
-    runAiWriting,
-    copyWritingPrompt,
-    runReviewPipeline,
-    switchEditorTab
+    switchEditorTab,
+    onEditorPlotChange,
+    selectAndLoadNovelFile,
+    runWriteForEpisode,
+    runReviewForFile
 } from './views/editor.js';
 
 // Parse URL hash to view and file resources
@@ -62,7 +63,7 @@ async function handleRouting() {
         return;
     }
 
-    const validViews = ['dashboard', 'sync', 'editor', 'plot_review'];
+    const validViews = ['dashboard', 'sync', 'editor', 'plot_review', 'settings'];
     if (!validViews.includes(view)) {
         window.location.hash = '#/dashboard';
         return;
@@ -115,6 +116,8 @@ async function handleRouting() {
         }
     } else if (view === 'plot_review') {
         await loadPlotsData();
+    } else if (view === 'settings') {
+        await loadSettingsData();
     }
 }
 
@@ -168,7 +171,6 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     loadProjectConfig();
-    loadSourcesForWrite();
     
     // Execute routing for initial page load
     handleRouting();
@@ -181,9 +183,8 @@ window.addEventListener('DOMContentLoaded', () => {
 // HTML のインラインイベントハンドラからアクセスできるように global 公開する
 window.switchView = switchView;
 window.runDriveSync = runDriveSync;
-window.runAiWriting = runAiWriting;
-window.copyWritingPrompt = copyWritingPrompt;
-window.runReviewPipeline = runReviewPipeline;
+window.runWriteForEpisode = runWriteForEpisode;
+window.runReviewForFile = runReviewForFile;
 window.runPlotReviewPipeline = runPlotReviewPipeline;
 window.filterPlotFindings = filterPlotFindings;
 window.selectAndEditNovel = selectAndEditNovel;
@@ -205,3 +206,7 @@ window.toggleConsole = toggleConsole;
 window.closeModal = closeModal;
 window.executeGlobalShutdown = executeGlobalShutdown;
 window.switchEditorTab = switchEditorTab;
+window.saveSettings = saveSettings;
+window.getCommonSettings = getCommonSettings;
+window.onEditorPlotChange = onEditorPlotChange;
+window.selectAndLoadNovelFile = selectAndLoadNovelFile;
