@@ -757,16 +757,20 @@ export async function executeRestoreHistory(version) {
 }
 
 export function switchEditorTab(tabName) {
-    // Hide all tab contents
-    document.querySelectorAll('#view-editor .tab-content').forEach(el => {
-        el.style.display = 'none';
-    });
-    // Remove active class from all tab buttons
-    document.querySelectorAll('#view-editor .tab-btn').forEach(el => {
-        el.classList.remove('active');
+    if (tabName === 'preview') {
+        const previewContent = document.getElementById('tab-content-preview');
+        if (previewContent) previewContent.style.display = 'flex';
+        return;
+    }
+
+    const rightTabs = ['findings', 'logs'];
+    rightTabs.forEach(t => {
+        const el = document.getElementById(`tab-content-${t}`);
+        if (el) el.style.display = 'none';
+        const btn = document.getElementById(`tab-btn-${t}`);
+        if (btn) btn.classList.remove('active');
     });
 
-    // Show selected tab content
     const targetContent = document.getElementById(`tab-content-${tabName}`);
     if (targetContent) {
         if (tabName === 'logs') {
@@ -775,7 +779,6 @@ export function switchEditorTab(tabName) {
             targetContent.style.display = 'block';
         }
     }
-    // Add active class to selected tab button
     const targetBtn = document.getElementById(`tab-btn-${tabName}`);
     if (targetBtn) {
         targetBtn.classList.add('active');

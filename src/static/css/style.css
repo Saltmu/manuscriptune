@@ -29,27 +29,32 @@ body {
     color: var(--text-main);
     height: 100vh;
     display: flex;
+    flex-direction: column;
     overflow: hidden;
 }
 
-/* Sidebar Navigation */
-aside {
-    width: 260px;
+/* Top Navigation Bar */
+header {
+    height: 64px;
     background-color: var(--sidebar-bg);
-    border-right: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     justify-content: space-between;
+    align-items: center;
+    padding: 0 24px;
     flex-shrink: 0;
 }
 
 .brand {
-    padding: 24px;
-    border-bottom: 1px solid var(--border-color);
+    padding: 0;
+    border-bottom: none;
+    display: flex;
+    flex-direction: column;
 }
 
 .brand h1 {
-    font-size: 1.25rem;
+    font-size: 1.20rem;
     font-weight: 800;
     background: linear-gradient(135deg, #a5b4fc, #818cf8);
     -webkit-background-clip: text;
@@ -58,18 +63,18 @@ aside {
 }
 
 .brand p {
-    font-size: 0.75rem;
+    font-size: 0.70rem;
     color: var(--text-muted);
-    margin-top: 4px;
+    margin-top: 2px;
 }
 
 .nav-links {
     list-style: none;
-    padding: 16px 12px;
+    padding: 0;
     display: flex;
-    flex-direction: column;
-    gap: 6px;
-    flex: 1;
+    flex-direction: row;
+    gap: 12px;
+    align-items: center;
 }
 
 .nav-item {
@@ -94,16 +99,16 @@ aside {
 .nav-item.active {
     color: #ffffff;
     background-color: rgba(99, 102, 241, 0.15);
-    box-shadow: inset 3px 0 0 var(--accent-color);
+    box-shadow: inset 0 -3px 0 var(--accent-color);
 }
 
 .sidebar-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border-color);
+    padding: 0;
+    border-top: none;
     font-size: 0.75rem;
     color: var(--text-muted);
     display: flex;
-    justify-content: space-between;
+    gap: 16px;
     align-items: center;
 }
 
@@ -397,7 +402,8 @@ button {
 }
 
 /* Re-use original classes with exact matches */
-.novel-panel { flex: 3; border-right: 1px solid var(--border-color); background-color: #0b0f19; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.plot-panel { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border-color); background-color: #0b0f19; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.novel-panel { flex: 1; border-right: 1px solid var(--border-color); background-color: #0b0f19; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .novel-content { flex: 1; overflow-y: auto; padding: 24px; font-family: 'Sawarabi Mincho', serif; font-size: 1.05rem; line-height: 2.0; color: #e2e8f0; }
 .novel-line-wrapper { display: flex; position: relative; padding: 2px 0 2px 48px; border-radius: 4px; transition: background-color 0.2s; }
 .novel-line-wrapper:hover { background-color: rgba(255, 255, 255, 0.02); }
@@ -411,7 +417,7 @@ button {
 .novel-line-wrapper.highlight.finding-logic { background-color: rgba(168, 85, 247, 0.15) !important; box-shadow: inset 3px 0 0 var(--logic-color); }
 .novel-line-wrapper.highlight.finding-style { background-color: rgba(13, 148, 136, 0.15) !important; box-shadow: inset 3px 0 0 var(--style-color); }
 
-.findings-panel { flex: 2; background-color: var(--panel-bg); display: flex; flex-direction: column; height: 100%; overflow: hidden; min-width: 400px; }
+.findings-panel { width: 450px; flex-shrink: 0; background-color: var(--panel-bg); display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .filter-bar { display: flex; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--border-color); background-color: rgba(15, 23, 42, 0.2); overflow-x: auto; }
 .filter-btn { font-size: 0.75rem; padding: 4px 10px; border-radius: 12px; background-color: rgba(51, 65, 85, 0.3); border: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; }
 .filter-btn.active { background-color: var(--accent-color); border-color: var(--accent-color); color: #ffffff; }
