@@ -2,6 +2,7 @@ import os
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 from src.routes.novels import router as novels_router
 from src.routes.plots import router as plots_router
@@ -14,6 +15,17 @@ from src.utils.logger import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+class SettingsRequest(BaseModel):
+    """ユーザー設定リクエストモデル"""
+
+    title: str | None = None
+    model: str | None = None
+    policy_global: str | None = None
+    policy_chapter: str | None = None
+    character: str | None = None
+
 
 # Include the split sub-routers
 router.include_router(novels_router)
@@ -86,6 +98,62 @@ async def cancel_process(request_id: str = Query(...)):
         raise HTTPException(status_code=404, detail="Process not found")
 
     return {"status": "cancelled"}
+
+
+@router.get("/api/settings")
+async def get_settings():
+    """
+    ユーザーの設定を取得する。
+
+    Returns:
+        {
+            "title": str,
+            "model": str,
+            "policy_global": str,
+            "policy_chapter": str,
+            "character": str
+        }
+    """
+    return {
+        "title": writer_helper.get_novel_setting("title", "重天の調律師"),
+        "model": writer_helper.get_novel_setting("model", "Gemini 3.5 Flash (High)"),
+        "policy_global": writer_helper.get_novel_setting("policy_global", ""),
+        "policy_chapter": writer_helper.get_novel_setting("policy_chapter", ""),
+        "character": writer_helper.get_novel_setting("character", ""),
+    }
+
+
+@router.post("/api/settings")
+async def save_settings(req: SettingsRequest):
+    """
+    ユーザーの設定を保存する。
+
+    Args:
+        req: SettingsRequest（title, model, policy_global, policy_chapter, character）
+
+    Returns:
+        {"status": "success"}
+    """
+    try:
+        # 各設定を保存
+        if req.title:
+            writer_helper.set_novel_setting("title", req.title)
+        if req.model:
+            writer_helper.set_novel_setting("model", req.model)
+        if req.policy_global is not None:
+            writer_helper.set_novel_setting("policy_global", req.policy_global)
+        if req.policy_chapter is not None:
+            writer_helper.set_novel_setting("policy_chapter", req.policy_chapter)
+        if req.character is not None:
+            writer_helper.set_novel_setting("character", req.character)
+
+        logger.info("Settings saved successfully")
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error saving settings: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to save settings: {str(e)}"
+        )
 
 
 @router.post("/api/shutdown")

@@ -192,6 +192,29 @@ def get_novel_setting(key: str, default: Any = None) -> Any:
     return novel_dict.get(key, default)
 
 
+def set_novel_setting(key: str, value: Any) -> None:
+    """設定値をプロジェクト設定ファイルに保存する。"""
+    config = load_project_config()
+    novel_dict = config.project.novel.model_dump()
+    novel_dict[key] = value
+    config.project.novel = type(config.project.novel)(**novel_dict)
+
+    # Save to file
+    config_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "data",
+        "sources",
+        "project_config.json",
+    )
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(config.model_dump_json(indent=2))
+
+    # Clear cache to force reload
+    clear_config_cache()
+
+
 def resolve_novel_file_by_pattern(
     pattern_key: str, default_pattern: str, default_fallback: Any = None
 ) -> Any:
