@@ -27,6 +27,9 @@ body {
     font-family: 'Inter', 'Noto Sans JP', sans-serif;
     background-color: var(--bg-color);
     color: var(--text-main);
+}
+
+#app {
     height: 100vh;
     display: flex;
     flex-direction: column;
@@ -859,5 +862,3 @@ body.process-running #view-sync .card button {
     flex-direction: column;
     gap: 12px;
 }
-
-
