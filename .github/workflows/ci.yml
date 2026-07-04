@@ -31,6 +31,7 @@ jobs:
         npm run build
 
     - name: Set up Python 3.12
+      id: setup-python
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
@@ -46,10 +47,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: .venv
-        key: venv-${{ runner.os }}-${{ steps.setup-python.id }}-${{ hashFiles('**/poetry.lock') }}
+        key: venv-v2-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
 
     - name: Install dependencies
-      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
       run: poetry install --no-interaction --no-root
 
     - name: Install project
