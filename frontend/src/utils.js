@@ -22,27 +22,47 @@ export function startEventStream(url, consoleKey, onComplete = null) {
     isRunningProcess.set(true);
 
     const eventSource = new EventSource(url);
+    let requestId = null;
 
     eventSource.onmessage = function(event) {
+        // First message contains request_id for cancellation
+        if (event.data.includes('[REQUEST_ID]')) {
+            requestId = event.data.split('[REQUEST_ID]')[1].trim();
+            return;
+        }
+
         if (event.data.includes('[PROCESS_EXITED]')) {
             const code = event.data.split('code=')[1] || '0';
             const logSuffix = `\n--- プロセスが終了しました (終了コード: ${code}) ---\n`;
-            
+
             consoleLogMap.update(map => ({ ...map, [consoleKey]: map[consoleKey] + logSuffix }));
             consoleStatusMap.update(map => ({ ...map, [consoleKey]: code === '0' ? 'COMPLETED' : 'FAILED' }));
-            
+
             eventSource.close();
             isRunningProcess.set(false);
 
             if (onComplete) onComplete(code === '0');
             return;
         }
-        
+
+        if (event.data.includes('[PROCESS_CANCELLED]')) {
+            const logSuffix = '\n--- プロセスがキャンセルされました ---\n';
+
+            consoleLogMap.update(map => ({ ...map, [consoleKey]: map[consoleKey] + logSuffix }));
+            consoleStatusMap.update(map => ({ ...map, [consoleKey]: 'CANCELLED' }));
+
+            eventSource.close();
+            isRunningProcess.set(false);
+
+            if (onComplete) onComplete(false);
+            return;
+        }
+
         consoleLogMap.update(map => {
             const currentLog = map[consoleKey];
             return { ...map, [consoleKey]: currentLog + event.data + '\n' };
         });
-        
+
         // Auto scroll console if element exists
         setTimeout(() => {
             const consoleEl = document.getElementById(`${consoleKey}-console-log`);
@@ -60,6 +80,9 @@ export function startEventStream(url, consoleKey, onComplete = null) {
 
         if (onComplete) onComplete(false);
     };
+
+    // Return eventSource and requestId for cancellation support
+    return { eventSource, requestId: () => requestId };
 }
 
 // Resize panel helper (can be used on mount)

@@ -4,12 +4,14 @@ import re
 import shutil
 import signal
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
+from src.services import process_manager
 from src.utils import plot_parser, project_config, project_paths
 from src.utils.logger import get_logger
 from src.utils.yaml_handler import YamlHandler
@@ -61,24 +63,46 @@ def render_html_template(template_name: str) -> str:
 
 def stream_process_output(cmd: list[str]) -> StreamingResponse:
     """Runs a command and streams its output via SSE (Server-Sent Events)."""
+    request_id = str(uuid.uuid4())
 
     async def event_generator():
+        current_task = asyncio.current_task()
+        if current_task:
+            process_manager.register_process(request_id, current_task)
+
         logger.info(f"Running process stream: {' '.join(cmd)}")
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
+        process = None
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
 
-        while True:
-            line_bytes = await process.stdout.readline()
-            if not line_bytes:
-                break
-            line = line_bytes.decode("utf-8")
-            yield f"data: {line.rstrip()}\n\n"
+            # Send request_id as first message
+            yield f"data: [REQUEST_ID] {request_id}\n\n"
 
-        rc = await process.wait()
-        yield f"data: [PROCESS_EXITED] code={rc}\n\n"
+            while True:
+                line_bytes = await process.stdout.readline()
+                if not line_bytes:
+                    break
+                line = line_bytes.decode("utf-8")
+                yield f"data: {line.rstrip()}\n\n"
+
+            rc = await process.wait()
+            yield f"data: [PROCESS_EXITED] code={rc}\n\n"
+        except asyncio.CancelledError:
+            logger.info(f"Process cancelled: {request_id}")
+            if process and process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except TimeoutError:
+                    process.kill()
+                    await process.wait()
+            yield "data: [PROCESS_CANCELLED]\n\n"
+        finally:
+            process_manager.unregister_process(request_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

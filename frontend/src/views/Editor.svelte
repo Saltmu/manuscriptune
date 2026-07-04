@@ -49,6 +49,10 @@
     let showRewriteConfirmModal = false;
     let pendingRewriteEpisode = null;
 
+    // Process cancellation state
+    let currentRequestId = null;
+    let currentEventSource = null;
+
     // Element bindings
     let resizerEl;
     let rightPanelEl;
@@ -352,17 +356,19 @@
         if (character) url += `&character=${encodeURIComponent(character)}`;
         url += `&step_by_step=true&self_check=true`;
 
-        startEventStream(url, 'editor', async (success) => {
+        const result = startEventStream(url, 'editor', async (success) => {
+            currentRequestId = null;
+            currentEventSource = null;
             if (success) {
                 showToast('AI執筆が完了しました');
-                
+
                 const logContent = $consoleLogMap.editor;
                 const match = logContent.match(/Success! Novel saved to novels\/([^\s\r\n]+)/);
                 if (match) {
                     const filename = match[1];
                     await loadEpisodeCards($selectedPlot);
                     await selectAndLoadNovelFile(filename);
-                    
+
                     setTimeout(async () => {
                         if (confirm(`AI執筆が完了し、新規ファイル「${filename}」がロードされました。すぐに本文レビュー（校閲）を実行しますか？`)) {
                             await runReviewForFile(filename);
@@ -375,6 +381,11 @@
                 showToast('執筆中にエラーが発生しました');
             }
         });
+        if (result) {
+            currentEventSource = result.eventSource;
+            // Set initial requestId as callback
+            currentRequestId = result.requestId;
+        }
     }
 
     // AI Review File
@@ -387,7 +398,9 @@
             url += `&model=${encodeURIComponent(modelVal)}`;
         }
 
-        startEventStream(url, 'editor', async (success) => {
+        const result = startEventStream(url, 'editor', async (success) => {
+            currentRequestId = null;
+            currentEventSource = null;
             if (success) {
                 showToast('レビューパイプラインが正常に完了しました');
                 if ($selectedPlot) {
@@ -399,6 +412,39 @@
                 showToast('レビュー中にエラーが発生しました');
             }
         });
+        if (result) {
+            currentEventSource = result.eventSource;
+            currentRequestId = result.requestId;
+        }
+    }
+
+    // Cancel current process
+    async function cancelCurrentProcess() {
+        if (!currentRequestId || typeof currentRequestId !== 'function') {
+            showToast('キャンセル対象のプロセスがありません');
+            return;
+        }
+
+        const reqId = currentRequestId();
+        if (!reqId) {
+            showToast('プロセスIDが見つかりません');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/cancel?request_id=${encodeURIComponent(reqId)}`);
+            if (response.ok) {
+                if (currentEventSource) {
+                    currentEventSource.close();
+                }
+                showToast('プロセスをキャンセルしました');
+            } else {
+                showToast('キャンセル処理に失敗しました');
+            }
+        } catch (err) {
+            console.error('Cancel error:', err);
+            showToast('キャンセル中に通信エラーが発生しました');
+        }
     }
 
     // UI Interactive helpers
