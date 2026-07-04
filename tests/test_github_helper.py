@@ -15,13 +15,13 @@ def test_create_issue_success():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="https://github.com/Saltmu/novel_tools/issues/100\n",
+            stdout="https://github.com/Saltmu/manuscriptune/issues/100\n",
             stderr="",
         )
         url = create_issue(
             "Test Title", "Test Body", labels=["bug", "high"], assignees=["user1"]
         )
-        assert url == "https://github.com/Saltmu/novel_tools/issues/100"
+        assert url == "https://github.com/Saltmu/manuscriptune/issues/100"
 
         expected_cmd = [
             "gh",
@@ -56,11 +56,11 @@ def test_create_pr_success():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="https://github.com/Saltmu/novel_tools/pull/101\n",
+            stdout="https://github.com/Saltmu/manuscriptune/pull/101\n",
             stderr="",
         )
         url = create_pr("PR Title", "PR Body", base="main", head="feature", draft=True)
-        assert url == "https://github.com/Saltmu/novel_tools/pull/101"
+        assert url == "https://github.com/Saltmu/manuscriptune/pull/101"
 
         expected_cmd = [
             "gh",
@@ -99,7 +99,7 @@ def test_create_issue_cli():
             ],
         ),
     ):
-        mock_create.return_value = "https://github.com/Saltmu/novel_tools/issues/102"
+        mock_create.return_value = "https://github.com/Saltmu/manuscriptune/issues/102"
         create_issue_cli()
         mock_create.assert_called_once_with(
             "CLI Title", "CLI Body", labels=["bug"], assignees=["user1"]
@@ -153,7 +153,7 @@ def test_create_pr_cli():
             ],
         ),
     ):
-        mock_create.return_value = "https://github.com/Saltmu/novel_tools/pull/103"
+        mock_create.return_value = "https://github.com/Saltmu/manuscriptune/pull/103"
         create_pr_cli()
         mock_create.assert_called_once_with(
             "CLI PR", "CLI PR Body", base="main", head="feat", draft=True
