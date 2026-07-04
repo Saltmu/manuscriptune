@@ -274,7 +274,7 @@ def test_novel_service_build_writer_cmd():
         step_by_step=True,
         self_check=True,
     )
-    cmd = novel_service.build_writer_cmd(params)
+    cmd = novel_service.build_writer_cmd(params.model_dump())
     cmd_normalized = [c.replace("\\", "/") for c in cmd]
     assert "--episode" in cmd_normalized
     assert "1" in cmd_normalized

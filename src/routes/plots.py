@@ -5,6 +5,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.routes.models.plots import (
+    PlotDetailResponse,
+    PlotEpisodesStatusResponse,
+    PlotListResponse,
+)
 from src.services import novel_service
 from src.utils import plot_parser, project_paths
 from src.utils import project_config as writer_helper
@@ -15,7 +20,7 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-@router.get("/api/plots")
+@router.get("/api/plots", response_model=PlotListResponse)
 async def list_plots():
     sources_dir = Path(project_paths.get_sources_dir())
     if not sources_dir.exists():
@@ -45,7 +50,7 @@ async def list_plots():
     return {"plots": plots_list}
 
 
-@router.get("/api/plot")
+@router.get("/api/plot", response_model=PlotDetailResponse)
 async def get_plot(
     file: str = Query(
         ..., description=f"Plot filename in {project_paths.DATA_SOURCES_DIR}/"
@@ -172,7 +177,7 @@ def _resolve_episode_status(matched_file: str | None) -> tuple[str, int]:
         return "written", 0
 
 
-@router.get("/api/plot/episodes_status")
+@router.get("/api/plot/episodes_status", response_model=PlotEpisodesStatusResponse)
 async def get_plot_episodes_status(
     file: str = Query(..., description="Plot filename in sources/"),
 ):

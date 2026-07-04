@@ -165,8 +165,12 @@ def rollback_backup(
         raise HTTPException(status_code=500, detail=f"Failed to rollback: {str(e)}")
 
 
-def build_writer_cmd(params: Any) -> list[str]:
+def build_writer_cmd(params: dict[str, Any]) -> list[str]:
     """Builds command parameters for running the novel writer CLI."""
+    episode = params.get("episode")
+    if not episode:
+        raise ValueError("episode is required")
+
     cmd = [
         "poetry",
         "run",
@@ -174,38 +178,40 @@ def build_writer_cmd(params: Any) -> list[str]:
         "-u",
         "skills/novel-writer-antigravitycli/writer_cli.py",
         "--episode",
-        params.episode,
+        episode,
     ]
 
-    if params.model:
-        cmd.extend(["--model", params.model])
-    if params.novel_title:
-        cmd.extend(["--title", params.novel_title])
-    if params.policy_global:
+    if params.get("model"):
+        cmd.extend(["--model", params["model"]])
+    if params.get("novel_title"):
+        cmd.extend(["--title", params["novel_title"]])
+    if params.get("policy_global"):
         cmd.extend(
             [
                 "--policy-global",
-                f"{project_paths.DATA_SOURCES_DIR}/{params.policy_global}",
+                f"{project_paths.DATA_SOURCES_DIR}/{params['policy_global']}",
             ]
         )
-    if params.policy_chapter:
+    if params.get("policy_chapter"):
         cmd.extend(
             [
                 "--policy-chapter",
-                f"{project_paths.DATA_SOURCES_DIR}/{params.policy_chapter}",
+                f"{project_paths.DATA_SOURCES_DIR}/{params['policy_chapter']}",
             ]
         )
-    if params.character:
+    if params.get("character"):
         cmd.extend(
-            ["--character", f"{project_paths.DATA_SOURCES_DIR}/{params.character}"]
+            ["--character", f"{project_paths.DATA_SOURCES_DIR}/{params['character']}"]
         )
-    if params.plot:
-        cmd.extend(["--plot-file", f"{project_paths.DATA_SOURCES_DIR}/{params.plot}"])
-    if params.step_by_step:
+    if params.get("plot"):
+        cmd.extend(
+            ["--plot-file", f"{project_paths.DATA_SOURCES_DIR}/{params['plot']}"]
+        )
+    if params.get("step_by_step"):
         cmd.append("--step-by-step")
-    if params.self_check:
+    if params.get("self_check"):
         cmd.append("--self-check")
-    if params.include_neighbor_plots:
+    if params.get("include_neighbor_plots"):
         cmd.append("--include-neighbor-plots")
 
     return cmd
