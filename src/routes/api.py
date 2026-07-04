@@ -1,12 +1,12 @@
 import os
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from src.routes.novels import router as novels_router
 from src.routes.plots import router as plots_router
 from src.routes.sync import router as sync_router
-from src.services import novel_service
+from src.services import novel_service, process_manager
 from src.utils import project_config as writer_helper
 from src.utils import project_paths
 from src.utils.ai_client import AgyClient
@@ -68,6 +68,24 @@ async def list_available_models():
     except Exception as e:
         logger.error(f"Error fetching models: {e}", exc_info=True)
         return {"models": default_models}
+
+
+@router.get("/api/cancel")
+async def cancel_process(request_id: str = Query(...)):
+    """
+    実行中のLLM処理（ストリーミング）をキャンセルする。
+
+    Args:
+        request_id: キャンセル対象のリクエストID
+
+    Returns:
+        {"status": "cancelled"} - キャンセル成功時
+        404 - プロセスが見つからない場合
+    """
+    if not process_manager.cancel_process(request_id):
+        raise HTTPException(status_code=404, detail="Process not found")
+
+    return {"status": "cancelled"}
 
 
 @router.post("/api/shutdown")
