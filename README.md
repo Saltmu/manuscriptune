@@ -1,6 +1,6 @@
-# Novel Tools
+# Manuscriptune
 
-「重天の調律師」シリーズの執筆・校閲・フォーマットを支援するエージェント環境です。
+「重天の調律師」シリーズの執筆・校閲・フォーマットを支援するエージェント環境（Manuscriptune）です。
 
 ---
 
@@ -132,15 +132,15 @@ novel_tools/
 ### 4. WebUI開発（WebUI Developer）
 
 - **[webui-developer](file:///home/sshioyama/workspace/novel_tools/skills/webui-developer/)** [`webui-developer`]
-  Novel Studio（WebUI）のフロントエンド・バックエンドの実装・修正を行う際のポリシーと手順を定義します。WebUIの機能追加・修正時はこのスキルを遵守してください。
+  Manuscriptune（WebUI）のフロントエンド・バックエンドの実装・修正を行う際のポリシーと手順を定義します。WebUIの機能追加・修正時はこのスキルを遵守してください。
 
 ---
 
-## WebUI ポータル「Novel Studio」の利用
+## WebUI ポータル「Manuscriptune」の利用
 
-本プロジェクトでは、小説の執筆、レビュー、指摘の確認および本文への反映を直感的に行えるWebベースの総合開発ポータル **「Novel Studio」** を提供しています。
+本プロジェクトでは、小説の執筆、レビュー、指摘の確認および本文への反映を直感的に行えるWebベースの総合開発ポータル **「Manuscriptune」** を提供しています。
 
-### Novel Studio で提供される機能
+### Manuscriptune で提供される機能
 1. **ダッシュボード**: 執筆済み小説テキストの一覧表示、レビュー実行状況や最終更新日時の確認。
 2. **AI執筆支援 (Write)**: 指定したエピソード名、プロット、キャラクター概要、執筆ポリシー等を選択し、AIによる小説執筆をWebUI上で実行（進捗ログをリアルタイムでSSEストリーミング出力）。
 3. **設定同期 (Sync)**: 設定資料・プロット等のGoogle Driveフォルダとの同期をワンクリックで実行（SSEストリーミング出力）。
@@ -198,7 +198,7 @@ poetry run run-review novels/1_12.txt --no-server
 * `00_integrated_findings.yaml`: **LLMによって競合解消・マージされた最終的な指摘YAML**
 * `00_integrated_report.md`: 人間向けの見やすいマークダウンレポート
 
-生成後、WebUI（Novel Studio）の「Editor」を開き、指摘の確認、採用（y/n）の切り替え、および小説本文へのマージ適用（Apply）を行うのが最もスムーズです。
+生成後、WebUI（Manuscriptune）の「Editor」を開き、指摘の確認、採用（y/n）の切り替え、および小説本文へのマージ適用（Apply）を行うのが最もスムーズです。
 
 ---
 

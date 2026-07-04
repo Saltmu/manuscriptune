@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "novel-tools-system"
+name = "manuscriptune"
 version = "0.1.0"
-description = "小説の整合性と世界観をチェックするエージェント環境"
+description = "小説の整合性と世界観をチェックするエージェント環境（Manuscriptune）"
 authors = ["sshioyama"]
 readme = "README.md"
 packages = [{include = "src"}]
