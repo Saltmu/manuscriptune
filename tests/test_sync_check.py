@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from src.sync_check import main
+from src.cli.sync_check import main
 
 
 def test_sync_check_config_error(caplog):
@@ -56,10 +56,10 @@ def test_sync_check_diagnostics_success(tmp_path, caplog):
         ),
         patch("os.path.exists", return_value=True),
         patch(
-            "src.sync_check.service_account.Credentials.from_service_account_file",
+            "src.cli.sync_check.service_account.Credentials.from_service_account_file",
             return_value=mock_creds,
         ),
-        patch("src.sync_check.build", return_value=mock_service),
+        patch("src.cli.sync_check.build", return_value=mock_service),
         caplog.at_level(logging.INFO),
     ):
         main()

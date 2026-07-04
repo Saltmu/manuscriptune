@@ -14,7 +14,7 @@ class ContextFilterPhase:
         self.runner = runner
 
     def run(self, formatted_file: str, output_file: str) -> None:
-        filter_script = project_paths.get_src_path("filter_context.py")
+        filter_script = project_paths.get_src_path("cli/filter_context.py")
         if not os.path.exists(filter_script):
             logger.warning("filter_context.py not found. Skipping context filtering.")
             return

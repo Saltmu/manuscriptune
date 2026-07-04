@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from src.integrate_plot_findings import (
+from src.cli.integrate_plot_findings import (
     _collect_raw_findings,
     generate_markdown_report,
     integrate_plot_findings_in_dir,
@@ -177,7 +177,7 @@ def test_run_integration_llm_generic_exception():
     mock_task = MagicMock()
     mock_task.execute.side_effect = Exception("General LLM Error")
     with patch(
-        "src.integrate_plot_findings.PlotFindingsIntegrationTask",
+        "src.cli.integrate_plot_findings.PlotFindingsIntegrationTask",
         return_value=mock_task,
     ):
         res = run_integration_llm("dir", "text", "raw", "model")
@@ -212,7 +212,7 @@ def test_integrate_plot_findings_in_dir_plot_file_not_exists(tmp_path):
 
 def test_main_failure():
     with patch(
-        "src.integrate_plot_findings.integrate_plot_findings_in_dir",
+        "src.cli.integrate_plot_findings.integrate_plot_findings_in_dir",
         return_value=False,
     ):
         test_args = [

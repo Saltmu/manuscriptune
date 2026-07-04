@@ -96,7 +96,7 @@ async def stream_plot_review(
         "run",
         "python",
         "-u",
-        "src/run_plot_review_pipeline.py",
+        "src/cli/run_plot_review_pipeline.py",
         plot_path,
     ]
     if model:

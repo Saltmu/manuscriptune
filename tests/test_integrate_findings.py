@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from src.integrate_findings import (
+from src.cli.integrate_findings import (
     _collect_raw_findings,
     generate_markdown_report,
     integrate_findings_in_dir,
@@ -207,7 +207,7 @@ def test_run_integration_llm_generic_exception():
     mock_task = MagicMock()
     mock_task.execute.side_effect = Exception("General LLM Error")
     with patch(
-        "src.integrate_findings.FindingsIntegrationTask", return_value=mock_task
+        "src.cli.integrate_findings.FindingsIntegrationTask", return_value=mock_task
     ):
         res = run_integration_llm("dir", "text", "raw", "model")
         assert res is None
@@ -268,7 +268,7 @@ def test_integrate_findings_in_dir_parse_merged_exception(tmp_path):
     )
 
     with patch(
-        "src.integrate_findings.run_integration_llm", return_value="invalid_yaml: ["
+        "src.cli.integrate_findings.run_integration_llm", return_value="invalid_yaml: ["
     ):
         success = integrate_findings_in_dir(str(chapter_dir), "model")
         assert success is True
@@ -277,7 +277,9 @@ def test_integrate_findings_in_dir_parse_merged_exception(tmp_path):
 
 
 def test_main_failure():
-    with patch("src.integrate_findings.integrate_findings_in_dir", return_value=False):
+    with patch(
+        "src.cli.integrate_findings.integrate_findings_in_dir", return_value=False
+    ):
         test_args = ["integrate_findings.py", "--dir", "dummy_dir"]
         with patch("sys.argv", test_args):
             with pytest.raises(SystemExit) as excinfo:

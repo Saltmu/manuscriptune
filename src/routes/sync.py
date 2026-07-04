@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 @router.get("/api/stream/sync")
 async def stream_sync():
-    cmd = ["poetry", "run", "python", "-u", "src/sync_gdrive.py"]
+    cmd = ["poetry", "run", "python", "-u", "src/cli/sync_gdrive.py"]
     return novel_service.stream_process_output(cmd)
 
 

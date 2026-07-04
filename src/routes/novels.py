@@ -266,7 +266,7 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
         # Automatically archive to history/v{next_version} before applying changes
         novel_service.archive_current_state(basename, extra_novel_path=novel_path)
         output_dir = project_paths.get_output_dir(basename)
-        script_path = project_paths.get_src_path("apply_findings.py")
+        script_path = project_paths.get_src_path("cli/apply_findings.py")
         cmd = [
             "poetry",
             "run",
@@ -303,7 +303,7 @@ async def stream_review(
         "run",
         "python",
         "-u",
-        "src/run_review_pipeline.py",
+        "src/cli/run_review_pipeline.py",
         novel_path,
         "--no-server",
     ]
