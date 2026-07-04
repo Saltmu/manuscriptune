@@ -39,11 +39,13 @@ async def disable_static_cache(request: Request, call_next):
     return response
 
 
-# Mount static directory for CSS/JS
+# Mount Vite assets directory if it exists
+assets_dir = os.path.join(project_paths.PROJECT_ROOT, "frontend/dist/assets")
+os.makedirs(assets_dir, exist_ok=True)
 app.mount(
-    "/static",
-    StaticFiles(directory=project_paths.get_src_path("static")),
-    name="static",
+    "/assets",
+    StaticFiles(directory=assets_dir),
+    name="assets",
 )
 
 # Include the API routes

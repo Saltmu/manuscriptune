@@ -540,9 +540,12 @@ def test_routes_api_preview_novel_exception():
 
 
 def test_routes_api_get_index_exception():
-    with patch(
-        "src.services.novel_service.render_html_template",
-        side_effect=Exception("Render error"),
+    with (
+        patch(
+            "src.services.novel_service.render_html_template",
+            side_effect=Exception("Render error"),
+        ),
+        patch("src.routes.api.os.path.exists", return_value=False),
     ):
         response = client.get("/")
         assert response.status_code == 500
