@@ -1,50 +1,39 @@
-# Walkthrough: AI開発前提のプロジェクト改善（全5項目）
+# Walkthrough: 「再執筆」ボタンへの確認モーダル追加
 
-本PRでは、AIによる自律的な開発・検証・運用の効率性と安全性を高めるため、以下の改善（全5項目）を並行して実装しました。
+本PRでは、Editor画面の各話カードにある「🔄 再執筆」ボタンに、実行前の確認モーダルを追加しました（[Issue #136](https://github.com/Saltmu/manuscriptune/issues/136)）。
+
+## 背景
+
+- 既存の指摘反映ボタン（「反映を実行」）には確認モーダル（`showApplyModal`）があるが、「再執筆」ボタンには確認処理が一切なく、クリック直後に `runWriteForEpisode(ep.title)` が実行され、AIによる本文の再生成（上書き）が即座に開始されていた。
+- バックエンド（`src/routes/novels.py` の `stream_write`）は再執筆前に既存ファイルを `reviews/{basename}/history/v{n}/` へ自動退避するため完全なデータ消失は起きないが、UI上にその安全性が示されておらず、誤クリックによる無駄なAPIコスト・処理時間の発生や、ユーザーの不安を招いていた。
 
 ## 変更内容
 
-### 1. 「自己修復型」ローカルCIの導入
-- **`scripts/local-ci.sh`**:
-  - `--fix` 引数をサポート。オプション指定時、`poetry run ruff format` および `poetry run ruff check --fix` を自動実行し、コードの整形・Lintエラーの自動修正をその場で行います。
+- **`frontend/src/views/Editor.svelte`**:
+  - 新規状態 `showRewriteConfirmModal` / `pendingRewriteEpisode` を追加
+  - 「🔄 再執筆」ボタンの `on:click` を、直接 `runWriteForEpisode` を呼ぶ形から `openRewriteConfirm(ep)` を呼ぶ形に変更
+  - 既存の `showApplyModal` と統一感のあるスタイルの確認モーダルを追加。対象話名、現在の本文が履歴に自動退避されたうえで置き換えられる旨を明記し、「キャンセル」「再執筆を実行」ボタンを配置
+  - 未執筆エピソードの「✍️ 執筆する」ボタン（上書き対象が存在しない）は変更なし
 
-### 2. カバレッジギャップのAIフレンドリーな自動検出
-- **`src/utils/detect_coverage_gaps.py`**:
-  - `poetry run coverage json` を実行・パースし、カバレッジが 100% 未満のファイルと未カバー行（missing_lines）を Markdown テーブル形式で出力するスクリプト。
-  - `pyproject.toml` の `[tool.poetry.scripts]` に `detect-coverage-gaps` を登録しました。
+バックエンド（API・データモデル）への変更はありません。
 
-### 3. API通信（Google Drive, Gemini API）の共通モック整備
-- **`tests/conftest.py`**:
-  - Google Drive API フィクスチャ (`mock_gdrive_service`, `mock_gdrive_build`) を追加。これにより、API呼び出しを自動で遮断しダミーデータを返します。
-  - Gemini API フィクスチャ (`mock_agy_client`) を追加。`AgyClient` の呼び出しを安全にモック化します。
+## 検証結果
 
-### 4. `detect-bloat`（肥大化検知）の高度化
-- **`src/utils/detect_bloat.py`**:
-  - 標準モジュール `ast` を用いた Python ファイルの構文解析を追加。
-  - 1000行（`LIMIT_PYTHON`）を超えるファイルが検出された場合、ファイル内の各関数・メソッドの行数を解析し、50行を超えるものがあればレポートの警告出力に含めます。
+### ブラウザでの手動検証
+`poetry run server`（バックエンド）と `npm run dev`（フロントエンド）を起動し、実データで以下を確認しました：
+1. 執筆済み/レビュー済みの話で「🔄 再執筆」をクリック → 確認モーダルが表示され、`/api/stream/write` は呼ばれないこと
+2. 「キャンセル」をクリック → モーダルが閉じ、APIが呼ばれないこと
+3. 「再執筆を実行」をクリック → `/api/stream/write?episode=...` が正しいパラメータで呼び出され、従来通りAI再執筆が開始されること（バックエンドログで `history/v{n}/` への自動退避も確認）
+4. コードレビューにより、未執筆の「✍️ 執筆する」ボタンの挙動が変更されていないことを確認
 
-### 5. GitHub CLI (`gh`) 操作のPythonラッパー化
-- **`src/utils/github_helper.py`**:
-  - `subprocess.run(..., shell=False)` を利用して、特殊文字や改行を安全にハンドリングする `gh issue create` および `gh pr create` のラッパーを新規作成。
-  - `pyproject.toml` に `create-issue` および `create-pr` スクリプトを登録しました。
+検証で生成された一時的な履歴退避ファイル（`reviews/1_1/history/v2/`、`.gitignore` 対象）はテスト後に削除済みです。
 
----
-
-## 追加されたテストコード
-
-- **`tests/test_detect_coverage_gaps.py`**: `detect_coverage_gaps.py` の Markdown 出力とパース処理を網羅的にテスト (カバレッジ 99%)。
-- **`tests/test_github_helper.py`**: 安全な引数受け渡しと例外ハンドリングのモックテスト (カバレッジ 100%)。
-- **`tests/test_gdrive_mocks.py`**: `mock_gdrive_build` フィクスチャの挙動を検証。
-- **`tests/test_agy_mocks.py`**: `mock_agy_client` フィクスチャの挙動を検証。
-- **`tests/test_detect_bloat.py`**: ASTによる巨大関数検出ロジックとエラーハンドリングを検証。
-
----
-
-## ローカルCI検証結果
+### ローカルCI検証結果
+本フロントエンド（Svelte + Vite）にはユニットテスト基盤が存在せず、`./scripts/local-ci.sh` はPython（ruff/mypy/pytest/detect-bloat）のみを検証対象とするため、TDDの対象外としました。バックエンドは変更していませんが、影響がないことを確認するため実行しました。
 
 `./scripts/local-ci.sh` を実行し、以下の項目がすべてパスしたことを確認しました：
 - `ruff format`: パス
-- `ruff check`: パス（自動修正済）
-- `mypy`: パス（Success: no issues found）
-- `pytest`: パス（221 tests passed, 全体カバレッジ 85.43% で基準 75% をクリア）
+- `ruff check`: パス
+- `mypy`: パス（Success: no issues found in 83 source files）
+- `pytest`: パス（229 tests passed, 全体カバレッジ 84.31% で基準 75% をクリア）
 - `detect-bloat`: パス
