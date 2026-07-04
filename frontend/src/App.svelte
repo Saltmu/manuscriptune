@@ -172,7 +172,7 @@
 {#if showShutdownModal}
     <div class="modal-overlay active">
         <div class="modal">
-            <h3>Novel Studio を終了しますか？</h3>
+            <h3>Manuscriptune を終了しますか？</h3>
             <p>サーバーをシャットダウンし、ブラウザセッションを終了します。保存された採用マーク情報はYAMLファイルに残ります。</p>
             <div class="modal-buttons">
                 <button class="btn-secondary" on:click={() => showShutdownModal = false}>キャンセル</button>

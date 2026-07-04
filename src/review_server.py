@@ -18,12 +18,12 @@ logger = get_logger("review_server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Novel Studio Server is starting up.")
+    logger.info("Manuscriptune Server is starting up.")
     yield
-    logger.info("Novel Studio Server is shutting down.")
+    logger.info("Manuscriptune Server is shutting down.")
 
 
-app = FastAPI(title="Novel Studio - AI Writing & Review Portal", lifespan=lifespan)
+app = FastAPI(title="Manuscriptune - AI Writing & Review Portal", lifespan=lifespan)
 
 
 # Middleware to disable caching for static files to prevent stale browser cache
@@ -59,7 +59,7 @@ async def open_browser(port: int):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Start the Interactive Novel Studio Server."
+        description="Start the Interactive Manuscriptune Server."
     )
     parser.add_argument(
         "--novel", default=None, help="Initial path to the novel txt file."
@@ -80,7 +80,7 @@ def main():
         initial_novel = os.path.basename(args.novel)
     app.state.initial_novel = initial_novel
 
-    logger.info("=== Novel Studio Server Running ===")
+    logger.info("=== Manuscriptune Server Running ===")
     if initial_novel:
         logger.info(f"Initial Novel: {initial_novel}")
     logger.info(f"URL  : http://localhost:{args.port}")

@@ -719,3 +719,7 @@ def test_get_plot_episodes_status(tmp_path):
         assert "status" in first_episode
     assert "novel_file" in first_episode
     assert "findings_count" in first_episode
+
+
+def test_app_title():
+    assert app.title == "Manuscriptune - AI Writing & Review Portal"
