@@ -584,7 +584,7 @@ def test_routes_api_get_write_prompt():
 
 
 def test_routes_api_list_plots(tmp_path):
-    with patch("src.utils.project_paths.DATA_SOURCES_DIR", str(tmp_path)):
+    with patch("src.utils.project_paths.get_sources_dir", return_value=str(tmp_path)):
         mock_plot = tmp_path / "04_1_01_プロット.txt"
         mock_plot.write_text("プロットの中身", encoding="utf-8")
 
@@ -601,7 +601,7 @@ def test_routes_api_get_plot_not_found():
 
 
 def test_routes_api_get_plot_success(tmp_path):
-    with patch("src.utils.project_paths.DATA_SOURCES_DIR", str(tmp_path)):
+    with patch("src.utils.project_paths.get_sources_dir", return_value=str(tmp_path)):
         mock_plot = tmp_path / "test_get_plot.txt"
         mock_plot.write_text("プロットテスト本文", encoding="utf-8")
 
@@ -619,7 +619,7 @@ def test_routes_api_stream_plot_review_not_found():
 
 
 def test_routes_api_stream_plot_review_success(tmp_path):
-    with patch("src.utils.project_paths.DATA_SOURCES_DIR", str(tmp_path)):
+    with patch("src.utils.project_paths.get_sources_dir", return_value=str(tmp_path)):
         mock_plot = tmp_path / "test_stream_plot.txt"
         mock_plot.write_text("プロットテスト本文", encoding="utf-8")
 
@@ -692,7 +692,7 @@ def test_save_and_get_findings_with_metadata():
 
 
 def test_get_plot_episodes_status(tmp_path):
-    with patch("src.utils.project_paths.DATA_SOURCES_DIR", str(tmp_path)):
+    with patch("src.utils.project_paths.get_sources_dir", return_value=str(tmp_path)):
         # Test with nonexistent plot file
         response = client.get("/api/plot/episodes_status?file=nonexistent_plot.txt")
         assert response.status_code == 404

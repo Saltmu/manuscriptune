@@ -9,6 +9,7 @@ from src.cli.sync_gdrive import (
     _download_gdrive_file,
     main,
 )
+from src.utils.project_config import AppConfig
 
 
 def test_check_lock_and_cache(tmp_path):
@@ -110,7 +111,9 @@ def test_download_gdrive_file_skips(tmp_path):
 @patch("src.cli.sync_gdrive.project_config")
 @patch("src.cli.sync_gdrive._check_lock_and_cache", return_value=True)
 def test_main_success(mock_check, mock_config, mock_creds, mock_build, tmp_path):
-    mock_config.load_project_config.return_value = {}
+    mock_config.load_project_config.return_value = AppConfig(
+        project={"name": "dummy"}, agent={"name": "dummy"}
+    )
     mock_config.get_gdrive_config.return_value = (
         "folder_123",
         "./credentials/creds.json",
@@ -153,7 +156,9 @@ def test_main_no_config():
         patch("src.cli.sync_gdrive.project_config") as mock_config,
         patch("src.cli.sync_gdrive.os.path.dirname", return_value="/dummy"),
     ):
-        mock_config.load_project_config.return_value = {}
+        mock_config.load_project_config.return_value = AppConfig(
+            project={"name": "dummy"}, agent={"name": "dummy"}
+        )
         mock_config.get_gdrive_config.return_value = (None, None)
 
         with patch("src.cli.sync_gdrive.build") as mock_build:
@@ -170,7 +175,9 @@ def test_main_failure_writes_status_yaml(
 ):
     import yaml
 
-    mock_config.load_project_config.return_value = {}
+    mock_config.load_project_config.return_value = AppConfig(
+        project={"name": "dummy"}, agent={"name": "dummy"}
+    )
     mock_config.get_gdrive_config.return_value = (
         "folder_123",
         "./credentials/creds.json",

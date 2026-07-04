@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from src.utils.logger import get_logger
+from src.utils.project_config import AppConfig
 
 
 @pytest.fixture
@@ -27,15 +28,17 @@ def test_get_logger_returns_logger():
 def test_logger_creates_directory_and_file(temp_log_dir):
     log_file_path = os.path.join(temp_log_dir, "test_app.log")
 
-    mock_config = {
-        "logging": {
+    mock_config = AppConfig(
+        project={"name": "dummy"},
+        agent={"name": "dummy"},
+        logging={
             "level": "DEBUG",
             "dir": temp_log_dir,
             "filename": "test_app.log",
             "max_bytes": 1024,
             "backup_count": 5,
-        }
-    }
+        },
+    )
 
     # load_project_config をモックして一時ディレクトリを使うようにする
     with patch("src.utils.logger.load_project_config", return_value=mock_config):
@@ -61,15 +64,17 @@ def test_logger_rotation_and_generations(temp_log_dir):
     log_file_path = os.path.join(temp_log_dir, log_filename)
 
     # ローテーションを発生させるため、max_bytes を極小(50バイト)に設定
-    mock_config = {
-        "logging": {
+    mock_config = AppConfig(
+        project={"name": "dummy"},
+        agent={"name": "dummy"},
+        logging={
             "level": "DEBUG",
             "dir": temp_log_dir,
             "filename": log_filename,
             "max_bytes": 50,
             "backup_count": 5,
-        }
-    }
+        },
+    )
 
     with patch("src.utils.logger.load_project_config", return_value=mock_config):
         import src.utils.logger
