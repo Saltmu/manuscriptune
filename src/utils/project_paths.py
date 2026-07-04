@@ -1,6 +1,6 @@
 import os
 
-# Project Directory Constants
+# Project Directory Constants (Default values, will be updated dynamically)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 
@@ -13,6 +13,16 @@ DEFAULT_RESULTS_DIR = "reviews"
 DEFAULT_LOGS_DIR = "logs"
 
 
+def update_constants(novels: str, data: str, sources: str, results: str) -> None:
+    """Updates module-level constants dynamically when configuration changes."""
+    global NOVELS_DIR, DATA_DIR, SOURCES_DIR, DATA_SOURCES_DIR, DEFAULT_RESULTS_DIR
+    NOVELS_DIR = novels
+    DATA_DIR = data
+    SOURCES_DIR = sources
+    DATA_SOURCES_DIR = os.path.join(data, sources)
+    DEFAULT_RESULTS_DIR = results
+
+
 # Naming Templates
 FORMATTED_DRAFT_TEMPLATE = "{basename}_formatted.txt"
 FINDINGS_YAML_TEMPLATE = "{basename}_findings.yaml"
@@ -21,9 +31,16 @@ PLOT_FINDINGS_YAML_TEMPLATE = "{basename}_plot_findings.yaml"
 PLOT_REPORT_MD_TEMPLATE = "{basename}_plot_report.md"
 
 
-def get_output_dir(basename: str, results_dir: str = DEFAULT_RESULTS_DIR) -> str:
+def get_output_dir(basename: str, results_dir: str | None = None) -> str:
     """Returns the output directory path for a given novel basename."""
-    # Resolve relative to project root or use as-is
+    if results_dir is None:
+        from src.utils.project_config import load_project_config
+
+        try:
+            config = load_project_config()
+            results_dir = config.project.novel.results_dir
+        except Exception:
+            results_dir = DEFAULT_RESULTS_DIR
     return os.path.join(results_dir, basename)
 
 
@@ -70,12 +87,28 @@ def get_report_md_path(output_dir: str, basename: str) -> str:
 
 def get_novels_dir() -> str:
     """Returns the absolute path to the novels directory."""
-    return os.path.join(PROJECT_ROOT, NOVELS_DIR)
+    from src.utils.project_config import load_project_config
+
+    try:
+        config = load_project_config()
+        novels = config.project.novel.novels_dir
+    except Exception:
+        novels = NOVELS_DIR
+    return os.path.join(PROJECT_ROOT, novels)
 
 
 def get_sources_dir() -> str:
     """Returns the absolute path to the data sources directory."""
-    return os.path.join(PROJECT_ROOT, DATA_SOURCES_DIR)
+    from src.utils.project_config import load_project_config
+
+    try:
+        config = load_project_config()
+        data = config.project.novel.data_dir
+        sources = config.project.novel.sources_dir
+    except Exception:
+        data = DATA_DIR
+        sources = SOURCES_DIR
+    return os.path.join(PROJECT_ROOT, data, sources)
 
 
 def get_novel_path(safe_file: str) -> str:

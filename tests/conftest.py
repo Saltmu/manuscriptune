@@ -105,3 +105,12 @@ skills:
     )
 
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def clear_config_cache_fixture():
+    from src.utils.project_config import clear_config_cache
+
+    clear_config_cache()
+    yield
+    clear_config_cache()

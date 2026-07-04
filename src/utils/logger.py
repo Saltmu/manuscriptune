@@ -3,7 +3,7 @@ import os
 from logging.handlers import RotatingFileHandler
 
 from src.utils.project_config import load_project_config
-from src.utils.project_paths import DEFAULT_LOGS_DIR, PROJECT_ROOT
+from src.utils.project_paths import PROJECT_ROOT
 
 _initialized = False
 
@@ -19,14 +19,14 @@ def setup_logger() -> None:
 
     # 設定ファイルをロード
     config = load_project_config()
-    log_config = config.get("logging", {})
+    log_config = config.logging
 
     # ログレベルの設定 (デフォルトは INFO)
-    log_level_str = log_config.get("level", "INFO").upper()
+    log_level_str = log_config.level.upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
 
     # ログ出力先ディレクトリ
-    log_dir_name = log_config.get("dir", DEFAULT_LOGS_DIR)
+    log_dir_name = log_config.dir
     if os.path.isabs(log_dir_name):
         log_dir = log_dir_name
     else:
@@ -35,12 +35,12 @@ def setup_logger() -> None:
     os.makedirs(log_dir, exist_ok=True)
 
     # ログファイル名
-    log_filename = log_config.get("filename", "app.log")
+    log_filename = log_config.filename
     log_file_path = os.path.join(log_dir, log_filename)
 
     # ローテーション設定
-    max_bytes = log_config.get("max_bytes", 10 * 1024 * 1024)  # デフォルト 10MB
-    backup_count = log_config.get("backup_count", 5)  # デフォルト 5世代
+    max_bytes = log_config.max_bytes
+    backup_count = log_config.backup_count
 
     # ログフォーマット
     formatter = logging.Formatter(

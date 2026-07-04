@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from src.cli.sync_check import main
+from src.utils.project_config import AppConfig
 
 
 def test_sync_check_config_error(caplog):
@@ -36,19 +37,15 @@ def test_sync_check_diagnostics_success(tmp_path, caplog):
     with (
         patch(
             "src.utils.project_config.load_project_config",
-            return_value={
-                "skills": [
-                    {
-                        "sources": [
-                            {
-                                "type": "google-drive",
-                                "folder_id": "folder_id_123",
-                                "auth_file": str(dummy_creds),
-                            }
-                        ]
-                    }
-                ]
-            },
+            return_value=AppConfig(
+                project={"name": "dummy"},
+                agent={"name": "dummy"},
+                google_drive={
+                    "type": "google-drive",
+                    "folder_id": "folder_id_123",
+                    "auth_file": str(dummy_creds),
+                },
+            ),
         ),
         patch(
             "src.utils.project_config.get_gdrive_config",
