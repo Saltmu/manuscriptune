@@ -721,5 +721,35 @@ def test_get_plot_episodes_status(tmp_path):
     assert "findings_count" in first_episode
 
 
+def test_chat_finding_api():
+    # ChatService.chatのモック
+    with patch("src.routes.novels.chat_service.chat") as mock_chat:
+        mock_chat.return_value = {
+            "status": "success",
+            "reply": "こんにちは！修正提案を生成しました。",
+            "source_suggestion": {
+                "file": "setting.txt",
+                "original": "A",
+                "replacement": "B",
+                "reason": "C",
+            },
+        }
+
+        response = client.post(
+            "/api/findings/chat",
+            json={
+                "novel_name": "test_novel.txt",
+                "finding_id": "INT-001",
+                "message": "魔力を発散させたい。",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert "こんにちは" in data["reply"]
+        assert data["source_suggestion"]["file"] == "setting.txt"
+
+
 def test_app_title():
     assert app.title == "Manuscriptune - AI Writing & Review Portal"
