@@ -48,10 +48,10 @@ explicit_package_bases = true
 
 
 [tool.poetry.scripts]
-run-review = "src.run_review_pipeline:main"
-server = "src.review_server:main"
-apply-findings = "src.apply_findings:main"
-sync-gdrive = "src.sync_gdrive:main"
+run-review = "src.cli.run_review_pipeline:main"
+server = "src.cli.review_server:main"
+apply-findings = "src.cli.apply_findings:main"
+sync-gdrive = "src.cli.sync_gdrive:main"
 detect-bloat = "src.utils.detect_bloat:main"
 detect-coverage-gaps = "src.utils.detect_coverage_gaps:main"
 create-issue = "src.utils.github_helper:create_issue_cli"

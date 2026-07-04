@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.run_review_pipeline import main
+from src.cli.run_review_pipeline import main
 from src.services.pipeline_service import TextReviewPipeline
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_exceptions import (
@@ -259,7 +259,7 @@ def test_run_step_parallel_reviews(tmp_path):
 def test_run_step_integration_success(tmp_path):
     pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
     with patch(
-        "src.integrate_findings.integrate_findings_in_dir", return_value=True
+        "src.cli.integrate_findings.integrate_findings_in_dir", return_value=True
     ) as mock_integrate:
         pipeline._integrate_findings()
         mock_integrate.assert_called_once_with(str(tmp_path), pipeline.model)
@@ -268,7 +268,7 @@ def test_run_step_integration_success(tmp_path):
 def test_run_step_integration_fail(tmp_path):
     pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
     with patch(
-        "src.integrate_findings.integrate_findings_in_dir", return_value=False
+        "src.cli.integrate_findings.integrate_findings_in_dir", return_value=False
     ) as mock_integrate:
         with pytest.raises(IntegrationError):
             pipeline._integrate_findings()
@@ -278,7 +278,7 @@ def test_run_step_integration_fail(tmp_path):
 def test_run_step_integration_error(tmp_path):
     pipeline = TextReviewPipeline("dummy.txt", output_dir_override=str(tmp_path))
     with patch(
-        "src.integrate_findings.integrate_findings_in_dir",
+        "src.cli.integrate_findings.integrate_findings_in_dir",
         side_effect=Exception("Error"),
     ) as mock_integrate:
         with pytest.raises(IntegrationError):
@@ -392,7 +392,7 @@ def test_main_success(tmp_path):
 
     with (
         patch("sys.argv", test_args),
-        patch("src.run_review_pipeline.TextReviewPipeline") as mock_pipeline_class,
+        patch("src.cli.run_review_pipeline.TextReviewPipeline") as mock_pipeline_class,
     ):
         mock_pipeline_class.return_value.execute = mock_pipeline_execute
         main()

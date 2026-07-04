@@ -8,7 +8,7 @@ import yaml
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from src.review_server import app
+from src.cli.review_server import app
 from src.routes.novels import WriteParams
 from src.services import novel_service
 

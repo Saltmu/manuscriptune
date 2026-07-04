@@ -13,7 +13,7 @@ class IntegrationPhase:
 
     def integrate_text_findings(self) -> None:
         """Invokes finding integration module for novel text."""
-        from src import integrate_findings
+        from src.cli import integrate_findings
 
         logger.info(
             f"Calling: integrate_findings.integrate_findings_in_dir(output_dir='{self.output_dir}', model='{self.model}')"
@@ -31,7 +31,7 @@ class IntegrationPhase:
 
     def integrate_plot_findings(self, target_path: str) -> None:
         """Invokes plot finding integration module for novel plots."""
-        from src import integrate_plot_findings
+        from src.cli import integrate_plot_findings
 
         logger.info("Integrating plot review results...")
         try:

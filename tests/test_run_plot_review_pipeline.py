@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.run_plot_review_pipeline import main
+from src.cli.run_plot_review_pipeline import main
 from src.services.pipeline_service import PlotReviewPipeline
 from src.utils.ai_client import AgyClientError
 from src.utils.ai_exceptions import (
@@ -117,7 +117,7 @@ def test_main_success(tmp_path):
 
     with patch("sys.argv", test_args):
         with patch(
-            "src.run_plot_review_pipeline.PlotReviewPipeline"
+            "src.cli.run_plot_review_pipeline.PlotReviewPipeline"
         ) as mock_pipeline_class:
             mock_pipeline_class.return_value.execute = mock_pipeline_execute
             main()

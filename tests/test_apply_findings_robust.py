@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import yaml
 
-from src.apply_findings import (
+from src.cli.apply_findings import (
     main,
 )
 
@@ -204,7 +204,7 @@ def test_apply_findings_failure_aborts_without_saving(tmp_path):
     with (
         patch("sys.argv", test_args),
         patch(
-            "src.apply_findings._apply_grouped_findings", return_value=(0, 1)
+            "src.cli.apply_findings._apply_grouped_findings", return_value=(0, 1)
         ) as mock_apply,
     ):
         with pytest.raises(SystemExit) as exc_info:
