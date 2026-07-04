@@ -16,12 +16,22 @@
         novelFilename
     } from '../store.js';
     import { startEventStream, showToast, initPanelResizer } from '../utils.js';
+    import FindingChat from '../lib/FindingChat.svelte';
 
     let plots = [];
     let chapters = [];
     let loadingPlots = true;
     let loadingEpisodes = false;
     let loadingEditor = false;
+    let activeChatFindingId = null;
+
+    function toggleChat(findingId) {
+        if (activeChatFindingId === findingId) {
+            activeChatFindingId = null;
+        } else {
+            activeChatFindingId = findingId;
+        }
+    }
 
     // Direct editing state
     let editMode = false;
@@ -680,6 +690,22 @@
                                     {#if f.apply_status === 'failed'}
                                         <div class="apply-error-msg">
                                             <strong>反映失敗:</strong> {f.apply_result || '原因不明のエラー'}
+                                        </div>
+                                    {/if}
+
+                                    <!-- svelte-ignore a11y-click-events-have-key-events -->
+                                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                                    <div class="card-actions" style="margin-top: 12px; display: flex; gap: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;" on:click|stopPropagation>
+                                        <button class="filter-btn {activeChatFindingId === f.id ? 'active' : ''}" style="padding: 4px 8px; font-size: 0.75rem;" on:click={() => toggleChat(f.id)}>
+                                            {activeChatFindingId === f.id ? '相談を閉じる' : '💬 AIと相談する'}
+                                        </button>
+                                    </div>
+
+                                    {#if activeChatFindingId === f.id}
+                                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                                        <div on:click|stopPropagation>
+                                            <FindingChat finding={f} />
                                         </div>
                                     {/if}
                                 </div>

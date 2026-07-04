@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.services import novel_service
+from src.services.chat_service import ChatService
 from src.utils import project_config as writer_helper
 from src.utils import project_paths
 from src.utils.logger import get_logger
@@ -39,6 +40,13 @@ class SaveFindingsRequest(BaseModel):
 
 class SelectFileRequest(BaseModel):
     novel_name: str
+
+
+class ChatRequest(BaseModel):
+    novel_name: str
+    finding_id: str
+    message: str
+    model: str | None = None
 
 
 class SaveNovelRequest(BaseModel):
@@ -450,3 +458,23 @@ async def get_data(file: str = Query(..., description="Novel filename")):
         "has_backup": has_backup,
         "backups": backups,
     }
+
+
+chat_service = ChatService()
+
+
+@router.post("/api/findings/chat")
+async def chat_finding(req: ChatRequest):
+    try:
+        res = chat_service.chat(
+            novel_name=req.novel_name,
+            finding_id=req.finding_id,
+            message=req.message,
+            model=req.model,
+        )
+        return res
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error in chat_finding: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
