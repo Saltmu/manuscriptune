@@ -43,3 +43,6 @@ htmlcov/
 # App Logs
 logs/
 
+# Temporary and planning files
+implementation_plan.md
+walkthrough.md
