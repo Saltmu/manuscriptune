@@ -46,6 +46,8 @@
     let showApplyProgressModal = false;
     let applyConsoleStatus = 'READY';
     let applyConsoleLog = '--- 待機中 ---';
+    let showRewriteConfirmModal = false;
+    let pendingRewriteEpisode = null;
 
     // Element bindings
     let resizerEl;
@@ -319,6 +321,19 @@
     }
 
     // AI Write Episode
+    function openRewriteConfirm(ep) {
+        pendingRewriteEpisode = ep;
+        showRewriteConfirmModal = true;
+    }
+
+    function confirmRewrite() {
+        showRewriteConfirmModal = false;
+        if (pendingRewriteEpisode) {
+            runWriteForEpisode(pendingRewriteEpisode.title);
+        }
+        pendingRewriteEpisode = null;
+    }
+
     function runWriteForEpisode(episodeTitle) {
         const titleVal = localStorage.getItem('settings-title') || '重天の調律師';
         const modelVal = localStorage.getItem('settings-model') || 'Gemini 3.5 Flash (High)';
@@ -529,7 +544,7 @@
                                             ✍️ 執筆する
                                         </button>
                                     {:else}
-                                        <button class="draft-card-action-btn" style="background-color: rgba(255,255,255,0.05); color: var(--text-main); border: 1px solid var(--border-color); flex: 1;" on:click|stopPropagation={() => runWriteForEpisode(ep.title)}>
+                                        <button class="draft-card-action-btn" style="background-color: rgba(255,255,255,0.05); color: var(--text-main); border: 1px solid var(--border-color); flex: 1;" on:click|stopPropagation={() => openRewriteConfirm(ep)}>
                                             🔄 再執筆
                                         </button>
                                         <button class="draft-card-action-btn" style="flex: 1;" on:click|stopPropagation={() => runReviewForFile(ep.novel_file)}>
@@ -740,6 +755,20 @@
             <div class="modal-buttons">
                 <button class="btn-secondary" on:click={() => showApplyModal = false}>キャンセル</button>
                 <button class="btn-primary" on:click={handleApplyFindings}>反映を実行</button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- Confirm Rewrite Modal -->
+{#if showRewriteConfirmModal}
+    <div class="modal-overlay active">
+        <div class="modal">
+            <h3>「{pendingRewriteEpisode?.title}」を再執筆しますか？</h3>
+            <p>AIによって本文が新しく生成し直され、現在の本文はレビュー結果ごと履歴（history）に自動退避されたうえで置き換えられます。処理には時間がかかる場合があります。</p>
+            <div class="modal-buttons">
+                <button class="btn-secondary" on:click={() => { showRewriteConfirmModal = false; pendingRewriteEpisode = null; }}>キャンセル</button>
+                <button class="btn-primary" on:click={confirmRewrite}>再執筆を実行</button>
             </div>
         </div>
     </div>
