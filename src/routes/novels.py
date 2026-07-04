@@ -6,8 +6,22 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 
+from src.routes.models.novels import (
+    ChatRequest,
+    ChatResponse,
+    NovelDataResponse,
+    NovelDetailResponse,
+    NovelListResponse,
+    NovelPreviewResponse,
+    SaveFindingsRequest,
+    SaveNovelRequest,
+    SelectFileRequest,
+    SelectFileResponse,
+    StatusResponse,
+    WriteParams,
+    WritePromptResponse,
+)
 from src.services import novel_service
 from src.services.chat_service import ChatService
 from src.utils import project_config as writer_helper
@@ -19,55 +33,7 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-class FindingItem(BaseModel):
-    id: str
-    location: str
-    original: str
-    category: str
-    severity: str
-    analysis: str
-    suggestion: str
-    accepted: str
-    apply_status: str | None = None
-    apply_result: str | None = None
-
-
-class SaveFindingsRequest(BaseModel):
-    novel_name: str
-    findings: list[FindingItem]
-    metadata: dict[str, Any] | None = None
-
-
-class SelectFileRequest(BaseModel):
-    novel_name: str
-
-
-class ChatRequest(BaseModel):
-    novel_name: str
-    finding_id: str
-    message: str
-    model: str | None = None
-
-
-class SaveNovelRequest(BaseModel):
-    novel_name: str
-    content: str
-
-
-class WriteParams(BaseModel):
-    episode: str
-    novel_title: str | None = None
-    policy_global: str | None = None
-    policy_chapter: str | None = None
-    character: str | None = None
-    plot: str | None = None
-    model: str | None = None
-    step_by_step: bool = False
-    self_check: bool = False
-    include_neighbor_plots: bool = False
-
-
-@router.get("/api/novels")
+@router.get("/api/novels", response_model=NovelListResponse)
 async def list_novels():
     novel_dir = Path(project_paths.get_novels_dir())
     if not novel_dir.exists():
@@ -96,7 +62,7 @@ async def list_novels():
     return {"novels": novels_list}
 
 
-@router.get("/api/novel")
+@router.get("/api/novel", response_model=NovelDetailResponse)
 async def get_novel(file: str = Query(..., description="Novel filename")):
     try:
         novel_path, yaml_path = novel_service.resolve_paths(file)
@@ -149,7 +115,7 @@ async def get_novel(file: str = Query(..., description="Novel filename")):
     }
 
 
-@router.post("/api/save_novel")
+@router.post("/api/save_novel", response_model=StatusResponse)
 async def save_novel(req: SaveNovelRequest):
     try:
         novel_path, _ = novel_service.resolve_paths(req.novel_name)
@@ -182,7 +148,7 @@ async def save_novel(req: SaveNovelRequest):
         raise HTTPException(status_code=500, detail=f"Failed to save novel: {str(e)}")
 
 
-@router.post("/api/save")
+@router.post("/api/save", response_model=StatusResponse)
 async def save_findings(req: SaveFindingsRequest):
     try:
         _, yaml_path = novel_service.resolve_paths(req.novel_name)
@@ -217,7 +183,7 @@ async def save_findings(req: SaveFindingsRequest):
         )
 
 
-@router.post("/api/backup")
+@router.post("/api/backup", response_model=StatusResponse)
 async def create_backup(file: str = Query(..., description="Novel filename")):
     try:
         novel_path, yaml_path = novel_service.resolve_paths(file)
@@ -238,7 +204,7 @@ async def create_backup(file: str = Query(..., description="Novel filename")):
         )
 
 
-@router.post("/api/rollback")
+@router.post("/api/rollback", response_model=StatusResponse)
 async def rollback_backup(
     file: str = Query(..., description="Novel filename"),
     version: str | None = Query(
@@ -329,13 +295,13 @@ async def stream_write(params: WriteParams = Depends()):  # noqa: B008
     except Exception as e:
         logger.warning(f"Failed to archive prior to writing: {e}")
 
-    cmd = novel_service.build_writer_cmd(params)
+    cmd = novel_service.build_writer_cmd(params.model_dump())
     return novel_service.stream_process_output(cmd)
 
 
-@router.get("/api/write/prompt")
+@router.get("/api/write/prompt", response_model=WritePromptResponse)
 async def get_write_prompt(params: WriteParams = Depends()):  # noqa: B008
-    cmd = novel_service.build_writer_cmd(params)
+    cmd = novel_service.build_writer_cmd(params.model_dump())
     cmd.append("--prompt-only")
 
     import asyncio
@@ -357,7 +323,7 @@ async def get_write_prompt(params: WriteParams = Depends()):  # noqa: B008
     return {"prompt": stdout.decode("utf-8")}
 
 
-@router.get("/api/preview")
+@router.get("/api/preview", response_model=NovelPreviewResponse)
 async def preview_novel(
     file: str = Query(
         ..., description=f"Novel text filename in {project_paths.NOVELS_DIR}/"
@@ -382,7 +348,7 @@ async def preview_novel(
         raise HTTPException(status_code=500, detail=f"Failed to read novel: {str(e)}")
 
 
-@router.post("/api/select")
+@router.post("/api/select", response_model=SelectFileResponse)
 async def select_file(payload: SelectFileRequest):
     try:
         novel_path, yaml_path = novel_service.resolve_paths(payload.novel_name)
@@ -398,7 +364,7 @@ async def select_file(payload: SelectFileRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/data")
+@router.get("/api/data", response_model=NovelDataResponse)
 async def get_data(file: str = Query(..., description="Novel filename")):
     try:
         novel_path, yaml_path = novel_service.resolve_paths(file)
@@ -408,6 +374,7 @@ async def get_data(file: str = Query(..., description="Novel filename")):
             "findings": [],
             "novel_filename": "ファイル未選択",
             "has_backup": False,
+            "backups": [],
         }
 
     if not os.path.exists(novel_path):
@@ -463,7 +430,7 @@ async def get_data(file: str = Query(..., description="Novel filename")):
 chat_service = ChatService()
 
 
-@router.post("/api/findings/chat")
+@router.post("/api/findings/chat", response_model=ChatResponse)
 async def chat_finding(req: ChatRequest):
     try:
         res = chat_service.chat(
