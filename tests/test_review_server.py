@@ -668,10 +668,12 @@ def test_save_and_get_findings_with_metadata():
             os.remove(tmp_name)
         try:
             _, yaml_path = novel_service.resolve_paths(tmp_basename)
-            if yaml_path and os.path.exists(yaml_path):
-                os.remove(yaml_path)
-            if yaml_path and os.path.exists(f"{yaml_path}.bak"):
-                os.remove(f"{yaml_path}.bak")
+            if yaml_path:
+                yaml_dir = os.path.dirname(yaml_path)
+                if os.path.exists(yaml_dir):
+                    import shutil
+
+                    shutil.rmtree(yaml_dir)
         except Exception:
             pass
 
