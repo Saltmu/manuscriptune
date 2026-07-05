@@ -88,9 +88,7 @@ def test_cascade_dynamic_mapping_on_line_shift(tmp_path):
     先行する指摘の適用によって行数がシフト（増加）した場合でも、
     後続の指摘が find_target_line の動的再検索によって正しく適用されることを検証する。
     """
-    formatted_txt_content = (
-        "L1: 最初の行です。\n" "L2: 二行目です。\n" "L3: 三行目です。\n"
-    )
+    formatted_txt_content = "L1: 最初の行です。\nL2: 二行目です。\nL3: 三行目です。\n"
     formatted_txt_path = tmp_path / "01_formatted.txt"
     formatted_txt_path.write_text(formatted_txt_content, encoding="utf-8")
 
@@ -204,7 +202,8 @@ def test_apply_findings_failure_aborts_without_saving(tmp_path):
     with (
         patch("sys.argv", test_args),
         patch(
-            "src.cli.apply_findings._apply_grouped_findings", return_value=(0, 1)
+            "src.services.findings_service._apply_grouped_findings",
+            return_value=(0, 1),
         ) as mock_apply,
     ):
         with pytest.raises(SystemExit) as exc_info:

@@ -3,14 +3,15 @@ import os
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.routes.deps import require_api_key
 from src.routes.models.plots import (
     PlotDetailResponse,
     PlotEpisodesStatusResponse,
     PlotListResponse,
 )
-from src.services import novel_service
+from src.services import novel_service, pipeline_service, stream_service
 from src.utils import plot_parser, project_paths
 from src.utils import project_config as writer_helper
 from src.utils.logger import get_logger
@@ -84,7 +85,7 @@ async def get_plot(
     }
 
 
-@router.get("/api/stream/plot_review")
+@router.get("/api/stream/plot_review", dependencies=[Depends(require_api_key)])
 async def stream_plot_review(
     file: str = Query(
         ..., description=f"Plot filename in {project_paths.DATA_SOURCES_DIR}/"
@@ -96,18 +97,14 @@ async def stream_plot_review(
     if not os.path.exists(plot_path):
         raise HTTPException(status_code=404, detail="Plot file not found.")
 
-    cmd = [
-        "poetry",
-        "run",
-        "python",
-        "-u",
-        "src/cli/run_plot_review_pipeline.py",
-        plot_path,
-    ]
-    if model:
-        cmd.extend(["--model", model])
+    def _run_plot_review(*, cancel_token=None, on_line=None):
+        pipeline_service.PlotReviewPipeline(
+            target_file=plot_path,
+            model=model or "Gemini 3.5 Flash (High)",
+            cancel_token=cancel_token,
+        ).execute()
 
-    return novel_service.stream_process_output(cmd)
+    return stream_service.stream_service_call(_run_plot_review)
 
 
 def kanji_to_num(kanji_str: str) -> int:

@@ -1,6 +1,7 @@
 import argparse
 import os
 import shutil
+from collections.abc import Callable
 
 from src.findings.replacer import (
     apply_fallback_to_block,
@@ -360,11 +361,14 @@ def _apply_grouped_findings(
     text_lines: list[str],
     groups: list[list[tuple[int, dict]]],
     args: argparse.Namespace,
+    cancel_check: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
     applied_count = 0
     failed_count = 0
 
     for group in groups:
+        if cancel_check:
+            cancel_check()
         app, fail = _apply_single_group(text_lines, group, args)
         applied_count += app
         failed_count += fail

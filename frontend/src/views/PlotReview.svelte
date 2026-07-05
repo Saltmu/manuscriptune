@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import { isRunningProcess, consoleLogMap, consoleStatusMap } from '../store.js';
     import { startEventStream, showToast, initPanelResizer } from '../utils.js';
+    import { withToken } from '../lib/apiClient.js';
     import FindingChat from '../lib/FindingChat.svelte';
 
     let plots = [];
@@ -106,7 +107,7 @@
             url += `&model=${encodeURIComponent(selectedModel)}`;
         }
 
-        startEventStream(url, 'plot_review', (success) => {
+        startEventStream(withToken(url), 'plot_review', (success) => {
             if (success) {
                 showToast('プロットレビューパイプラインが正常に完了しました');
                 rightPanelMode = 'preview';

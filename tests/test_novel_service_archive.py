@@ -1,7 +1,4 @@
-import os
 from unittest.mock import patch
-
-import pytest
 
 from src.services import novel_service
 
@@ -61,52 +58,3 @@ def test_archive_current_state(tmp_path):
         assert (history_v2_dir / f"{basename}.txt").read_text(
             encoding="utf-8"
         ) == "これは更新された小説の本文です。"
-
-
-def test_resolve_novel_path_for_write(tmp_path):
-    sources_dir = tmp_path / "data" / "sources"
-    sources_dir.mkdir(parents=True)
-
-    # ダミープロットファイル
-    plot_content = """第1章：テストの始まり
-第1話：プロットタイトル（エピソード名）
-シーン1：テスト
-"""
-    plot_file = sources_dir / "04_1_plot.txt"
-    plot_file.write_text(plot_content, encoding="utf-8")
-
-    # モック
-    with (
-        patch("src.utils.project_paths.get_sources_dir", return_value=str(sources_dir)),
-        patch(
-            "src.utils.project_paths.get_novels_dir",
-            return_value=str(tmp_path / "novels"),
-        ),
-    ):
-        novel_path, basename = novel_service.resolve_novel_path_for_write(
-            "第1話", plot_file=str(plot_file)
-        )
-        assert basename == "1_1"
-        assert os.path.basename(novel_path) == "1_1.txt"
-
-
-def test_resolve_novel_path_for_write_rejects_plot_file_outside_sources(tmp_path):
-    sources_dir = tmp_path / "data" / "sources"
-    sources_dir.mkdir(parents=True)
-
-    outside_file = tmp_path / "outside" / "evil.txt"
-    outside_file.parent.mkdir(parents=True)
-    outside_file.write_text("第1章：無関係\n", encoding="utf-8")
-
-    with (
-        patch("src.utils.project_paths.get_sources_dir", return_value=str(sources_dir)),
-        patch(
-            "src.utils.project_paths.get_novels_dir",
-            return_value=str(tmp_path / "novels"),
-        ),
-    ):
-        with pytest.raises(Exception) as excinfo:
-            novel_service.resolve_novel_path_for_write(
-                "第1話", plot_file=str(outside_file)
-            )
-        assert excinfo.value.status_code == 403

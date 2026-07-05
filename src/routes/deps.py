@@ -1,3 +1,4 @@
+import secrets
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
@@ -25,3 +26,24 @@ async def verify_local_origin(request: Request) -> None:
     )
     if not (same_host and same_port):
         raise HTTPException(status_code=403, detail="Cross-origin request rejected.")
+
+
+async def require_api_key(request: Request) -> None:
+    """書き込み系/破壊的操作エンドポイントをAPIキーで保護する。
+
+    app.state.api_key が未設定の場合(review_server.main()を経由しないテスト実行時等)は
+    認証を無効化する。EventSourceはカスタムヘッダーを送れないため、
+    クエリパラメータ ?token=... でのトークン受け渡しも許可する。
+    """
+    expected = getattr(request.app.state, "api_key", None)
+    if not expected:
+        return
+
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        supplied = auth_header.removeprefix("Bearer ").strip()
+    else:
+        supplied = request.query_params.get("token", "")
+
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Missing or invalid API key.")
