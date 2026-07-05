@@ -4,6 +4,9 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [svelte()],
+  resolve: {
+    conditions: ['browser']
+  },
   server: {
     proxy: {
       '/api': {
@@ -11,5 +14,9 @@ export default defineConfig({
         changeOrigin: true,
       }
     }
+  },
+  test: {
+    environment: 'happy-dom',
+    globals: true,
   }
 })
