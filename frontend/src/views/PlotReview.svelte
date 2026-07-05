@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import { isRunningProcess, consoleLogMap, consoleStatusMap } from '../store.js';
     import { startEventStream, showToast, initPanelResizer } from '../utils.js';
-    import { withToken } from '../lib/apiClient.js';
+    import { withFreshToken } from '../lib/apiClient.js';
     import FindingChat from '../lib/FindingChat.svelte';
 
     let plots = [];
@@ -93,7 +93,7 @@
         showConsole = true; // Show preview
     }
 
-    function runPlotReview() {
+    async function runPlotReview() {
         if (!selectedPlotFile) {
             alert('プロットファイルを選択してください');
             return;
@@ -107,7 +107,8 @@
             url += `&model=${encodeURIComponent(selectedModel)}`;
         }
 
-        startEventStream(withToken(url), 'plot_review', (success) => {
+        const freshUrl = await withFreshToken(url);
+        startEventStream(freshUrl, 'plot_review', (success) => {
             if (success) {
                 showToast('プロットレビューパイプラインが正常に完了しました');
                 rightPanelMode = 'preview';

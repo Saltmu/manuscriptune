@@ -27,3 +27,11 @@ def test_cross_origin_post_rejected():
         headers={"origin": "https://evil.example.com"},
     )
     assert response.status_code == 403
+
+
+def test_auth_token_endpoint_rejects_cross_origin_post():
+    response = client.post(
+        "/api/auth/token",
+        headers={"origin": "https://evil.example.com"},
+    )
+    assert response.status_code == 403

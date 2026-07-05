@@ -31,12 +31,15 @@ async def verify_local_origin(request: Request) -> None:
 async def require_api_key(request: Request) -> None:
     """書き込み系/破壊的操作エンドポイントをAPIキーで保護する。
 
-    app.state.api_key が未設定の場合(review_server.main()を経由しないテスト実行時等)は
-    認証を無効化する。EventSourceはカスタムヘッダーを送れないため、
-    クエリパラメータ ?token=... でのトークン受け渡しも許可する。
+    app.state.api_keys が未設定または空の場合(review_server.main()を経由しない
+    テスト実行時、または起動直後まだ誰もトークンを発行していない場合)は認証を
+    無効化する。複数のブラウザタブ/セッションがそれぞれ自己発行したトークンを
+    同時に有効とするため、単一値ではなく集合(set)に対するmembership checkを行う。
+    EventSourceはカスタムヘッダーを送れないため、クエリパラメータ ?token=... での
+    トークン受け渡しも許可する。
     """
-    expected = getattr(request.app.state, "api_key", None)
-    if not expected:
+    valid_keys = getattr(request.app.state, "api_keys", None)
+    if not valid_keys:
         return
 
     auth_header = request.headers.get("authorization", "")
@@ -45,5 +48,7 @@ async def require_api_key(request: Request) -> None:
     else:
         supplied = request.query_params.get("token", "")
 
-    if not supplied or not secrets.compare_digest(supplied, expected):
+    if not supplied or not any(
+        secrets.compare_digest(supplied, key) for key in valid_keys
+    ):
         raise HTTPException(status_code=401, detail="Missing or invalid API key.")

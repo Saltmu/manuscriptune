@@ -1,4 +1,5 @@
 import os
+import secrets
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -81,6 +82,28 @@ async def list_available_models():
     except Exception as e:
         logger.error(f"Error fetching models: {e}", exc_info=True)
         return {"models": default_models}
+
+
+@router.post("/api/auth/token")
+async def issue_api_token(request: Request):
+    """クライアント(ブラウザタブ)ごとに自己発行APIトークンを新規発行する。
+
+    require_api_key の保護対象には含めない(トークンを得るためにトークンが要る、
+    という鶏卵問題を避けるため)。ただし api_router のメンバーであるため、
+    review_server.py で全体に適用されている verify_local_origin
+    (Origin/Refererの不一致を拒否する)は自動的に効く。
+
+    POSTである点が本エンドポイントの安全性にとって必須: ブラウザはクロスオリジン
+    POSTに対しページJSから抑制できない正規のOriginヘッダーを必ず付与するため、
+    悪意ある別タブが<img src=...>のような単純GETでこのエンドポイントを叩いて
+    トークンを窃取することを防げる(GETにした場合、Originヘッダーは付与されない
+    ためこの防御は成立しない)。
+    """
+    if not hasattr(request.app.state, "api_keys"):
+        request.app.state.api_keys = set()
+    token = secrets.token_urlsafe(32)
+    request.app.state.api_keys.add(token)
+    return {"token": token}
 
 
 @router.get("/api/cancel", dependencies=[Depends(require_api_key)])

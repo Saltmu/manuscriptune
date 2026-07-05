@@ -16,7 +16,7 @@
         novelFilename
     } from '../store.js';
     import { startEventStream, showToast, initPanelResizer } from '../utils.js';
-    import { apiFetch, withToken } from '../lib/apiClient.js';
+    import { apiFetch, withFreshToken } from '../lib/apiClient.js';
     import FindingChat from '../lib/FindingChat.svelte';
 
     let plots = [];
@@ -281,14 +281,15 @@
     }
 
     // Apply Findings pipeline (SSE)
-    function handleApplyFindings() {
+    async function handleApplyFindings() {
         showApplyModal = false;
         showApplyProgressModal = true;
         applyConsoleStatus = 'RUNNING';
         applyConsoleLog = '--- プロセスを開始します ---\n';
 
-        const eventSource = new EventSource(withToken(`/api/stream/apply?file=${encodeURIComponent($selectedNovelFile)}`));
-        
+        const url = await withFreshToken(`/api/stream/apply?file=${encodeURIComponent($selectedNovelFile)}`);
+        const eventSource = new EventSource(url);
+
         eventSource.onmessage = function(event) {
             if (event.data.includes('[PROCESS_EXITED]')) {
                 const code = event.data.split('code=')[1] || '0';
@@ -339,7 +340,7 @@
         pendingRewriteEpisode = null;
     }
 
-    function runWriteForEpisode(episodeTitle) {
+    async function runWriteForEpisode(episodeTitle) {
         const titleVal = localStorage.getItem('settings-title') || '重天の調律師';
         const modelVal = localStorage.getItem('settings-model') || 'Gemini 3.5 Flash (High)';
         const policyGlobal = localStorage.getItem('settings-policy-global') || '';
@@ -357,7 +358,8 @@
         if (character) url += `&character=${encodeURIComponent(character)}`;
         url += `&step_by_step=true&self_check=true`;
 
-        const result = startEventStream(withToken(url), 'editor', async (success) => {
+        const freshUrl = await withFreshToken(url);
+        const result = startEventStream(freshUrl, 'editor', async (success) => {
             currentRequestId = null;
             currentEventSource = null;
             if (success) {
@@ -390,7 +392,7 @@
     }
 
     // AI Review File
-    function runReviewForFile(novelFile) {
+    async function runReviewForFile(novelFile) {
         activeEditorTab.set('logs');
         const modelVal = localStorage.getItem('settings-model') || 'Gemini 3.5 Flash (High)';
 
@@ -399,7 +401,8 @@
             url += `&model=${encodeURIComponent(modelVal)}`;
         }
 
-        const result = startEventStream(withToken(url), 'editor', async (success) => {
+        const freshUrl = await withFreshToken(url);
+        const result = startEventStream(freshUrl, 'editor', async (success) => {
             currentRequestId = null;
             currentEventSource = null;
             if (success) {

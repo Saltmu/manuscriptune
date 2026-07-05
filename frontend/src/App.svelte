@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import { activeView, selectedNovelFile, isRunningProcess } from './store.js';
     import { showToast } from './utils.js';
-    import { apiFetch, setApiKey } from './lib/apiClient.js';
+    import { apiFetch, ensureApiKey } from './lib/apiClient.js';
     
     // Import views
     import Dashboard from './views/Dashboard.svelte';
@@ -86,16 +86,8 @@
     }
 
     onMount(() => {
-        // サーバー起動時に発行されたAPIキーをブートストラップURLから取り込む
-        const urlParams = new URLSearchParams(window.location.search);
-        const token = urlParams.get('token');
-        if (token) {
-            setApiKey(token);
-            urlParams.delete('token');
-            const cleanQuery = urlParams.toString();
-            const newUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : '') + window.location.hash;
-            history.replaceState(null, '', newUrl);
-        }
+        // 起動時にAPIトークンが未キャッシュなら自己発行しておく(非同期・非ブロッキング)
+        ensureApiKey().catch(err => console.error('Failed to self-issue API token:', err));
 
         window.addEventListener('hashchange', handleRouting);
         loadProjectConfig();
