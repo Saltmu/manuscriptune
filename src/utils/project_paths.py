@@ -158,11 +158,6 @@ def get_skills_dir() -> str:
     return os.path.join(PROJECT_ROOT, "skills")
 
 
-def get_templates_dir() -> str:
-    """Returns the absolute path to the templates directory."""
-    return os.path.join(PROJECT_ROOT, "src", "templates")
-
-
 # Pipeline File Constants
 FILTERED_CONTEXT_NAME = "01_filtered_context.txt"
 
