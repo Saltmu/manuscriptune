@@ -2,8 +2,8 @@ import argparse
 import os
 import sys
 
+from src.findings import integration as _integration
 from src.utils import project_paths
-from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import FindingsIntegrationInput, FindingsIntegrationTask
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
@@ -11,72 +11,45 @@ from src.utils.yaml_handler import YamlHandler
 
 logger = get_logger(__name__)
 
+parse_yaml_file = _integration.parse_yaml_file
 
-def parse_yaml_file(filepath):
-    return YamlHandler.load_findings(filepath)
+_SEVERITY_TITLES = {
+    "high": "重大な課題",
+    "medium": "中程度の改善提案",
+    "low": "軽微な指摘",
+    "info": "参考情報",
+}
 
 
 def generate_markdown_report(findings, output_md):
     """
     Generates a human-readable markdown summary report from the integrated findings.
     """
-    md = "# 小説校閲 統合レポート\n\n"
-    if not findings:
-        md += "指摘事項はありませんでした。ロジック・表現ともに非常に良好です。\n"
-    else:
-        md += f'合計 {len(findings)} 件の指摘が統合・整理されました。各指摘を確認し、YAMLファイル上で `accepted: "y"` に変更して反映してください。\n\n'
-
-        # Categorize by severity
-        severities = {"high": [], "medium": [], "low": [], "info": []}
-        for f in findings:
-            sev = f.get("severity", "low").lower()
-            if sev in severities:
-                severities[sev].append(f)
-            else:
-                severities["low"].append(f)
-
-        for sev_level in ["high", "medium", "low", "info"]:
-            level_findings = severities[sev_level]
-            if not level_findings:
-                continue
-
-            emoji = {"high": "🚨", "medium": "⚠️", "low": "💡", "info": "ℹ️"}[sev_level]
-            title = {
-                "high": "重大な課題",
-                "medium": "中程度の改善提案",
-                "low": "軽微な指摘",
-                "info": "参考情報",
-            }[sev_level]
-
-            md += f"## {emoji} {title} ({len(level_findings)}件)\n\n"
-
-            for item in level_findings:
-                md += f"### [{item.get('id', 'INT')}] {item.get('category', '指摘')} (場所: {item.get('location', '不明')})\n"
-                md += f"- **対象テキスト:** `{item.get('original', '')}`\n"
-                md += f"- **分析:** {item.get('analysis', '')}\n"
-                md += f"- **修正提案:** {item.get('suggestion', '')}\n\n"
-
-    with open(output_md, "w", encoding="utf-8") as f:
-        f.write(md)
+    return _integration.generate_markdown_report(
+        findings,
+        output_md,
+        report_title="# 小説校閲 統合レポート",
+        no_findings_message="指摘事項はありませんでした。ロジック・表現ともに非常に良好です。",
+        summary_message='合計 {count} 件の指摘が統合・整理されました。各指摘を確認し、YAMLファイル上で `accepted: "y"` に変更して反映してください。',
+        severity_titles=_SEVERITY_TITLES,
+        item_label="対象テキスト",
+        suggestion_label="修正提案",
+        default_id_prefix="INT",
+    )
 
 
 def run_integration_llm(output_dir, target_text, raw_findings_text, model):
     """
     Calls FindingsIntegrationTask to merge and resolve conflicts in the findings.
     """
-    logger.info(f"Sending consolidation request to AgyClient ({model})...")
-    task = FindingsIntegrationTask(model=model)
-    input_data = FindingsIntegrationInput(
-        target_text=target_text, raw_findings_text=raw_findings_text
+    return _integration.run_integration_llm(
+        target_text,
+        raw_findings_text,
+        model,
+        task_cls=FindingsIntegrationTask,
+        input_cls=FindingsIntegrationInput,
+        log_prefix="consolidation",
     )
-    try:
-        return task.execute(input_data)
-    except AgyClientError as e:
-        logger.error(f"Error calling AgyClient: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error calling AgyClient: {e}")
-        return None
 
 
 def _collect_raw_findings(output_dir: str) -> list[dict]:
@@ -119,22 +92,14 @@ def _fallback_merge(all_findings: list[dict]) -> str:
     """
     Performs mechanical fallback merging when LLM is unavailable.
     """
-    merged_findings = []
-    for idx, f in enumerate(all_findings, 1):
-        f_copy = f.copy()
-        f_copy["id"] = f"INT-{idx:03d}"
-        if "_source_file" in f_copy:
-            del f_copy["_source_file"]
-        merged_findings.append(f_copy)
-    return YamlHandler.dump(
-        {
-            "findings": merged_findings,
-            "_metadata": {
-                "fallback_mode": True,
-                "reason": "LLM integration failed; using mechanical merge",
-                "completeness": "low",
-            },
-        }
+    return _integration.fallback_merge(
+        all_findings,
+        id_prefix="INT",
+        extra_metadata={
+            "fallback_mode": True,
+            "reason": "LLM integration failed; using mechanical merge",
+            "completeness": "low",
+        },
     )
 
 
