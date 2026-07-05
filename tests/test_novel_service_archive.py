@@ -1,6 +1,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from src.services import novel_service
 
 
@@ -86,3 +88,25 @@ def test_resolve_novel_path_for_write(tmp_path):
         )
         assert basename == "1_1"
         assert os.path.basename(novel_path) == "1_1.txt"
+
+
+def test_resolve_novel_path_for_write_rejects_plot_file_outside_sources(tmp_path):
+    sources_dir = tmp_path / "data" / "sources"
+    sources_dir.mkdir(parents=True)
+
+    outside_file = tmp_path / "outside" / "evil.txt"
+    outside_file.parent.mkdir(parents=True)
+    outside_file.write_text("第1章：無関係\n", encoding="utf-8")
+
+    with (
+        patch("src.utils.project_paths.get_sources_dir", return_value=str(sources_dir)),
+        patch(
+            "src.utils.project_paths.get_novels_dir",
+            return_value=str(tmp_path / "novels"),
+        ),
+    ):
+        with pytest.raises(Exception) as excinfo:
+            novel_service.resolve_novel_path_for_write(
+                "第1話", plot_file=str(outside_file)
+            )
+        assert excinfo.value.status_code == 403

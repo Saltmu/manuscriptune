@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from src.services import process_manager
-from src.utils import plot_parser, project_config, project_paths
+from src.utils import path_safety, plot_parser, project_config, project_paths
 from src.utils.logger import get_logger
 from src.utils.yaml_handler import YamlHandler
 
@@ -108,7 +108,10 @@ def stream_process_output(cmd: list[str]) -> StreamingResponse:
 
 
 def _rollback_versioned(output_dir: str, yaml_path: str, version: str) -> None:
-    version_dir = os.path.join(output_dir, "history", version)
+    history_dir = os.path.join(output_dir, "history")
+    version_dir = os.path.join(history_dir, version)
+    if not path_safety.is_within(history_dir, version_dir):
+        raise HTTPException(status_code=403, detail="Invalid backup version.")
     if not os.path.exists(version_dir):
         raise HTTPException(
             status_code=404, detail=f"Backup version '{version}' not found."
@@ -189,6 +192,14 @@ def rollback_backup(
         raise HTTPException(status_code=500, detail=f"Failed to rollback: {str(e)}")
 
 
+def _safe_source_arg(field_name: str, value: str) -> str:
+    """DATA_SOURCES_DIR配下に収まることを確認した上でパスを組み立てる。範囲外なら403。"""
+    candidate = f"{project_paths.DATA_SOURCES_DIR}/{value}"
+    if not path_safety.is_within(project_paths.DATA_SOURCES_DIR, candidate):
+        raise HTTPException(status_code=403, detail=f"Invalid path for {field_name}.")
+    return candidate
+
+
 def build_writer_cmd(params: dict[str, Any]) -> list[str]:
     """Builds command parameters for running the novel writer CLI."""
     episode = params.get("episode")
@@ -213,24 +224,20 @@ def build_writer_cmd(params: dict[str, Any]) -> list[str]:
         cmd.extend(
             [
                 "--policy-global",
-                f"{project_paths.DATA_SOURCES_DIR}/{params['policy_global']}",
+                _safe_source_arg("policy_global", params["policy_global"]),
             ]
         )
     if params.get("policy_chapter"):
         cmd.extend(
             [
                 "--policy-chapter",
-                f"{project_paths.DATA_SOURCES_DIR}/{params['policy_chapter']}",
+                _safe_source_arg("policy_chapter", params["policy_chapter"]),
             ]
         )
     if params.get("character"):
-        cmd.extend(
-            ["--character", f"{project_paths.DATA_SOURCES_DIR}/{params['character']}"]
-        )
+        cmd.extend(["--character", _safe_source_arg("character", params["character"])])
     if params.get("plot"):
-        cmd.extend(
-            ["--plot-file", f"{project_paths.DATA_SOURCES_DIR}/{params['plot']}"]
-        )
+        cmd.extend(["--plot-file", _safe_source_arg("plot", params["plot"])])
     if params.get("step_by_step"):
         cmd.append("--step-by-step")
     if params.get("self_check"):
@@ -323,6 +330,8 @@ def resolve_novel_path_for_write(
         plot_filepath = os.path.abspath(
             project_paths.get_source_path(os.path.basename(plot_filepath))
         )
+    elif not path_safety.is_within(project_paths.get_sources_dir(), plot_filepath):
+        raise HTTPException(status_code=403, detail="Invalid plot file path.")
 
     # プロットデータのパース
     plot_data = plot_parser.parse_plot(plot_filepath)
