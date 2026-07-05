@@ -133,3 +133,31 @@ def test_analyze_python_file_parse_error(tmp_path):
 
     funcs = analyze_python_file(invalid_py)
     assert funcs == []
+
+
+def test_scan_project_frontend(tmp_path):
+    # ダミープロジェクト構成を作成
+    frontend_src_dir = tmp_path / "frontend" / "src"
+    frontend_src_dir.mkdir(parents=True)
+
+    # OKなSvelteファイル
+    ok_svelte = frontend_src_dir / "OkComponent.svelte"
+    ok_svelte.write_text("<!-- svelte -->\n" * 400, encoding="utf-8")
+
+    # 肥大化したSvelteファイル
+    bloated_svelte = frontend_src_dir / "BloatedComponent.svelte"
+    bloated_svelte.write_text("<!-- svelte -->\n" * 550, encoding="utf-8")
+
+    # 肥大化したJavaScriptファイル
+    bloated_js = frontend_src_dir / "bloated.js"
+    bloated_js.write_text("// javascript\n" * 600, encoding="utf-8")
+
+    # スキャン実行
+    reports = scan_project(root_dir=tmp_path)
+
+    # 検証
+    frontend_reports = [r for r in reports if r["type"] == "frontend"]
+    assert len(frontend_reports) == 2
+    assert any(r["file"].name == "BloatedComponent.svelte" for r in frontend_reports)
+    assert any(r["file"].name == "bloated.js" for r in frontend_reports)
+    assert all(r["limit"] == 500 for r in frontend_reports)
