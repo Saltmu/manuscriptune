@@ -37,20 +37,18 @@ router.include_router(sync_router)
 
 @router.get("/", response_class=HTMLResponse)
 async def get_index():
-    # 1. Try to serve Vite build first
     root_dir = project_paths.PROJECT_ROOT
     vite_index = os.path.join(root_dir, "frontend/dist/index.html")
-    if os.path.exists(vite_index):
-        with open(vite_index, encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
-
-    # 2. Fallback to legacy SSI template rendering during migration
-    try:
-        return novel_service.render_html_template("index.html")
-    except Exception as e:
+    if not os.path.exists(vite_index):
         raise HTTPException(
-            status_code=500, detail=f"Template rendering error: {str(e)}"
+            status_code=500,
+            detail=(
+                "Frontend build not found. Run `npm ci && npm run build` "
+                "in the frontend/ directory."
+            ),
         )
+    with open(vite_index, encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 
 @router.get("/api/config")

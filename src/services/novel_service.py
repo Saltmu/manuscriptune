@@ -42,24 +42,6 @@ def resolve_paths(novel_name: str) -> tuple[str, str]:
     return novel_path, yaml_path
 
 
-def render_html_template(template_name: str) -> str:
-    """Recursively resolves <!--#include file="filename.html"--> placeholders."""
-    template_dir = Path(project_paths.get_templates_dir())
-    template_path = template_dir / template_name
-    if not template_path.exists():
-        raise FileNotFoundError(f"Template '{template_name}' not found.")
-
-    with open(template_path, encoding="utf-8") as file:
-        content = file.read()
-
-    def replace_match(match):
-        include_file = match.group(1)
-        return render_html_template(include_file)
-
-    # Pattern to match: <!--#include file="some/path.html"-->
-    return re.sub(r'<!--#include file="([^"]+)"-->', replace_match, content)
-
-
 def stream_process_output(cmd: list[str]) -> StreamingResponse:
     """Runs a command and streams its output via SSE (Server-Sent Events)."""
     request_id = str(uuid.uuid4())

@@ -184,11 +184,6 @@ def test_novel_service_resolve_paths_empty():
     assert excinfo.value.status_code == 400
 
 
-def test_novel_service_render_html_template_not_found():
-    with pytest.raises(FileNotFoundError):
-        novel_service.render_html_template("non_existent_template.html")
-
-
 def test_novel_service_stream_process_output():
     res = novel_service.stream_process_output(["echo", "hello"])
     assert isinstance(res, StreamingResponse)
@@ -528,16 +523,11 @@ def test_routes_api_preview_novel_exception():
         assert response.status_code == 500
 
 
-def test_routes_api_get_index_exception():
-    with (
-        patch(
-            "src.services.novel_service.render_html_template",
-            side_effect=Exception("Render error"),
-        ),
-        patch("src.routes.api.os.path.exists", return_value=False),
-    ):
+def test_routes_api_get_index_not_built():
+    with patch("src.routes.api.os.path.exists", return_value=False):
         response = client.get("/")
         assert response.status_code == 500
+        assert "frontend" in response.json()["detail"].lower()
 
 
 def test_routes_api_select_file_exception():

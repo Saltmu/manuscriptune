@@ -105,7 +105,6 @@ def test_new_path_resolutions() -> None:
         get_sources_dir,
         get_src_path,
         get_stopwords_path,
-        get_templates_dir,
         get_version_dir,
     )
 
@@ -130,4 +129,3 @@ def test_new_path_resolutions() -> None:
     )
     assert get_src_path("test.py") == os.path.join(PROJECT_ROOT, "src", "test.py")
     assert get_skills_dir() == os.path.join(PROJECT_ROOT, "skills")
-    assert get_templates_dir() == os.path.join(PROJECT_ROOT, "src", "templates")
