@@ -32,6 +32,9 @@ pytest-xdist = "^3.8.0"
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+# tools/ 配下（例: tools/orchestrator/）は独立したPoetry環境・ローカルCIを持つため、
+# 本体側のスキャン対象から除外する。
+extend-exclude = ["tools"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C90", "PLR"]
@@ -68,4 +71,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+# tools/ 配下は独立したPoetry環境・テストスイートを持つため、
+# 本体のテスト収集対象を tests/ に限定して隔離する。
+testpaths = ["tests"]
 addopts = "--cov=src --cov-fail-under=75 --cov-report=term-missing"
