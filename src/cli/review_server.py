@@ -5,11 +5,12 @@ import webbrowser
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from src.routes.api import router as api_router
+from src.routes.deps import verify_local_origin
 from src.utils import project_paths
 from src.utils.logger import get_logger
 
@@ -49,7 +50,7 @@ app.mount(
 )
 
 # Include the API routes
-app.include_router(api_router)
+app.include_router(api_router, dependencies=[Depends(verify_local_origin)])
 
 
 async def open_browser(port: int):
