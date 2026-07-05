@@ -25,11 +25,16 @@ output_schema:
 - 実装アプローチや影響範囲、オープンな疑問点をまとめ、必ずユーザーの承認を得てから実装フェーズへ進みます。
 
 ### 2. GitHub Issueの起票
-- プランが承認された段階で、GitHub CLI (`gh`) を使用してIssueを起票します。
-- リポジトリのIssueテンプレート（`.github/issue_template.md`）を使用し、概要、目的・背景、設計・実装プラン、ToDoを記述して起票します。
-  ```bash
-  gh issue create --title "Issueのタイトル" --body-file .github/issue_template.md
-  ```
+- プランが承認された段階で、GitHub上でIssueを起票します。環境に応じて、以下のいずれかの手段を用いてください。
+  - **手段A: GitHub CLI (推奨)**
+    `gh` コマンドを使用して起票します。
+    ```bash
+    gh issue create --title "Issueのタイトル" --body-file .github/issue_template.md
+    ```
+  - **手段B: GitHub MCP (MCP利用可能な環境)**
+    GitHub MCPサーバーの `create_issue` ツールを呼び出します。引数には、タイトルと `.github/issue_template.md` の内容に沿って記述した本文を指定します。
+  - **手段C: Web UI (Web/手動環境)**
+    ブラウザでGitHubのリポジトリにアクセスし、`.github/issue_template.md` の内容をコピー＆ペーストして手動でIssueを作成します。
 - 起票したIssue番号（例: `#123`）を記録しておきます。
 
 ### 3. 実装前のテスト作成 (テストファースト)
@@ -72,10 +77,17 @@ output_schema:
 ### 7. すべてがパスした後の確認とPR作成
 - `./scripts/local-ci.sh` が `✨ Local CI passed successfully!` と出力して正常終了したことを確認します。
 - `walkthrough.md` を作成し、実施した変更やテスト内容、Local CI の結果をまとめます。
-- GitHub CLI (`gh`) を用いてPRを作成します。その際、PRテンプレート（`.github/pull_request_template.md`）の内容に沿って、変更内容（Walkthrough）やローカルCIの合格有無、関連するIssue番号（`Closes #<Issue番号>`）を記述してPRを送信します。
-  ```bash
-  gh pr create --title "PRのタイトル" --body-file .github/pull_request_template.md
-  ```
+- GitHub上にPRを作成します。その際、PRテンプレート（`.github/pull_request_template.md`）の内容に沿って、変更内容（Walkthrough）やローカルCIの合格有無、関連するIssue番号（`Closes #<Issue番号>`）を記述してPRを送信します。
+  環境に応じて、以下のいずれかの手段を用いてください。
+  - **手段A: GitHub CLI (推奨)**
+    `gh` コマンドを使用してPRを作成します。
+    ```bash
+    gh pr create --title "PRのタイトル" --body-file .github/pull_request_template.md
+    ```
+  - **手段B: GitHub MCP (MCP利用可能な環境)**
+    GitHub MCPサーバーの `create_pull_request` ツールなどを呼び出します。
+  - **手段C: Web UI (Web/手動環境)**
+    作業ブランチをリモートにプッシュし（`git push origin <branch-name>`）、ブラウザでGitHubのリポジトリにアクセスし、PRテンプレートに沿って手動でPull Requestを作成します。
 - PR作成後、ユーザーにPR上でのレビューを依頼します。
 
 ### 8. PRマージとIssueの自動クローズ
