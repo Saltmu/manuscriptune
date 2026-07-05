@@ -262,6 +262,17 @@ def test_novel_service_rollback_backup_versioned(tmp_path):
         assert yaml_path.read_text(encoding="utf-8") == "findings: []"
 
 
+def test_novel_service_rollback_backup_rejects_version_traversal(tmp_path):
+    novel_path = tmp_path / "novel.txt"
+    yaml_path = tmp_path / "novel_findings.yaml"
+
+    with pytest.raises(Exception) as excinfo:
+        novel_service.rollback_backup(
+            str(novel_path), str(yaml_path), version="../../etc"
+        )
+    assert excinfo.value.status_code == 403
+
+
 def test_novel_service_build_writer_cmd():
     params = WriteParams(
         episode="1",
@@ -291,6 +302,13 @@ def test_novel_service_build_writer_cmd():
     assert "--step-by-step" in cmd_normalized
     assert "--self-check" in cmd_normalized
     assert "model-name" in cmd_normalized
+
+
+def test_novel_service_build_writer_cmd_rejects_path_traversal():
+    params = WriteParams(episode="1", character="../../etc/passwd")
+    with pytest.raises(Exception) as excinfo:
+        novel_service.build_writer_cmd(params.model_dump())
+    assert excinfo.value.status_code == 403
 
 
 def test_novel_service_shutdown_server():

@@ -24,8 +24,8 @@ from src.routes.models.novels import (
 )
 from src.services import novel_service
 from src.services.chat_service import ChatService
+from src.utils import path_safety, project_paths
 from src.utils import project_config as writer_helper
-from src.utils import project_paths
 from src.utils.logger import get_logger
 from src.utils.yaml_handler import YamlHandler
 
@@ -123,8 +123,7 @@ async def save_novel(req: SaveNovelRequest):
         raise he
 
     # Check protection
-    norm_sources_dir = project_paths.DATA_SOURCES_DIR.replace("\\", "/")
-    if f"{norm_sources_dir}/" in novel_path.replace("\\", "/"):
+    if path_safety.contains_source_segment(novel_path):
         logger.error(
             f"Violation: Attempt to save to source files in {project_paths.DATA_SOURCES_DIR}/"
         )

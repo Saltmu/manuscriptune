@@ -8,7 +8,7 @@ from src.findings.applier import (
     _group_findings,
     _save_outputs_and_print_summary,
 )
-from src.utils import project_paths
+from src.utils import path_safety, project_paths
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
 from src.utils.yaml_handler import YamlHandler
@@ -53,23 +53,11 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _validate_output_dir(output_dir: str) -> None:
-    if output_dir:
-        abs_output_dir = os.path.abspath(output_dir)
-        norm_path = os.path.normpath(abs_output_dir)
-        path_parts = norm_path.split(os.sep)
-        is_source_path = False
-        for i in range(len(path_parts) - 1):
-            if (
-                path_parts[i] == project_paths.DATA_DIR
-                and path_parts[i + 1] == project_paths.SOURCES_DIR
-            ):
-                is_source_path = True
-                break
-        if is_source_path:
-            logger.error(
-                f"Writing to source files in {project_paths.DATA_SOURCES_DIR}/ is strictly prohibited by AI guardrails."
-            )
-            sys.exit(1)
+    if output_dir and path_safety.contains_source_segment(output_dir):
+        logger.error(
+            f"Writing to source files in {project_paths.DATA_SOURCES_DIR}/ is strictly prohibited by AI guardrails."
+        )
+        sys.exit(1)
 
     if not os.path.exists(output_dir):
         logger.error(f"Directory '{output_dir}' does not exist.")
