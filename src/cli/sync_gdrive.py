@@ -67,7 +67,9 @@ def _download_gdrive_file(service, item, output_dir: str) -> None:
 
 
 def main():
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root_dir = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
     config_path = os.path.join(root_dir, "antigravity.yaml")
 
     CACHE_FILE = os.path.join(root_dir, ".sync_cache")
