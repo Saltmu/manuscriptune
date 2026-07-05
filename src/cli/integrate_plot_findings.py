@@ -2,8 +2,8 @@ import argparse
 import os
 import sys
 
+from src.findings import integration as _integration
 from src.utils import project_paths
-from src.utils.ai_client import AgyClientError
 from src.utils.ai_task import PlotFindingsIntegrationInput, PlotFindingsIntegrationTask
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
@@ -11,67 +11,41 @@ from src.utils.yaml_handler import YamlHandler
 
 logger = get_logger(__name__)
 
+parse_yaml_file = _integration.parse_yaml_file
 
-def parse_yaml_file(filepath):
-    return YamlHandler.load_findings(filepath)
+_SEVERITY_TITLES = {
+    "high": "重大な課題 (GMCO欠如・深刻な中だるみ等)",
+    "medium": "構成改善の提案 (動機づけ・山場補強等)",
+    "low": "軽微な指摘",
+    "info": "参考情報",
+}
 
 
 def generate_markdown_report(findings, output_md):
     """Generates a human-readable markdown summary report from the integrated plot findings."""
-    md = "# プロット構成校閲 統合レポート\n\n"
-    if not findings:
-        md += "指摘事項はありませんでした。プロット構成は非常に良好です。\n"
-    else:
-        md += f"合計 {len(findings)} 件の指摘が統合・整理されました。各指摘を確認し、プロットのブラッシュアップに役立ててください。\n\n"
-
-        # Categorize by severity
-        severities = {"high": [], "medium": [], "low": [], "info": []}
-        for f in findings:
-            sev = f.get("severity", "low").lower()
-            if sev in severities:
-                severities[sev].append(f)
-            else:
-                severities["low"].append(f)
-
-        for sev_level in ["high", "medium", "low", "info"]:
-            level_findings = severities[sev_level]
-            if not level_findings:
-                continue
-
-            emoji = {"high": "🚨", "medium": "⚠️", "low": "💡", "info": "ℹ️"}[sev_level]
-            title = {
-                "high": "重大な課題 (GMCO欠如・深刻な中だるみ等)",
-                "medium": "構成改善の提案 (動機づけ・山場補強等)",
-                "low": "軽微な指摘",
-                "info": "参考情報",
-            }[sev_level]
-
-            md += f"## {emoji} {title} ({len(level_findings)}件)\n\n"
-
-            for item in level_findings:
-                md += f"### [{item.get('id', 'PINT')}] {item.get('category', '指摘')} (場所: {item.get('location', '不明')})\n"
-                md += f"- **対象プロット記述:** `{item.get('original', '')}`\n"
-                md += f"- **分析:** {item.get('analysis', '')}\n"
-                md += f"- **構成改善案:** {item.get('suggestion', '')}\n\n"
-
-    with open(output_md, "w", encoding="utf-8") as f:
-        f.write(md)
+    return _integration.generate_markdown_report(
+        findings,
+        output_md,
+        report_title="# プロット構成校閲 統合レポート",
+        no_findings_message="指摘事項はありませんでした。プロット構成は非常に良好です。",
+        summary_message="合計 {count} 件の指摘が統合・整理されました。各指摘を確認し、プロットのブラッシュアップに役立ててください。",
+        severity_titles=_SEVERITY_TITLES,
+        item_label="対象プロット記述",
+        suggestion_label="構成改善案",
+        default_id_prefix="PINT",
+    )
 
 
 def run_integration_llm(output_dir, target_text, raw_findings_text, model):
     logger.info(f"Sending plot consolidation request to AgyClient ({model})...")
-    task = PlotFindingsIntegrationTask(model=model)
-    input_data = PlotFindingsIntegrationInput(
-        target_text=target_text, raw_findings_text=raw_findings_text
+    return _integration.run_integration_llm(
+        target_text,
+        raw_findings_text,
+        model,
+        task_cls=PlotFindingsIntegrationTask,
+        input_cls=PlotFindingsIntegrationInput,
+        log_prefix="plot consolidation",
     )
-    try:
-        return task.execute(input_data)
-    except AgyClientError as e:
-        logger.error(f"Error calling AgyClient: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error calling AgyClient: {e}")
-        return None
 
 
 def _collect_raw_findings(output_dir: str) -> list[dict]:
@@ -99,14 +73,7 @@ def _collect_raw_findings(output_dir: str) -> list[dict]:
 
 def _fallback_merge(all_findings: list[dict]) -> str:
     """Performs mechanical fallback merging when LLM is unavailable."""
-    merged_findings = []
-    for idx, f in enumerate(all_findings, 1):
-        f_copy = f.copy()
-        f_copy["id"] = f"PINT-{idx:03d}"
-        if "_source_file" in f_copy:
-            del f_copy["_source_file"]
-        merged_findings.append(f_copy)
-    return YamlHandler.dump({"findings": merged_findings})
+    return _integration.fallback_merge(all_findings, id_prefix="PINT")
 
 
 def integrate_plot_findings_in_dir(output_dir, plot_filepath, model):
