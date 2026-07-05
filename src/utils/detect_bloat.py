@@ -12,6 +12,7 @@ logger = get_logger(__name__)
 # しきい値の定義
 LIMIT_PYTHON = 1000
 LIMIT_SKILL = 500
+LIMIT_FRONTEND = 500
 
 
 class FunctionLineCounter(ast.NodeVisitor):
@@ -114,6 +115,22 @@ def scan_project(root_dir: Path) -> list[dict]:
                     }
                 )
 
+    # フロントエンドコードのスキャン (frontend/src 配下)
+    frontend_dir = root_dir / "frontend" / "src"
+    if frontend_dir.exists() and frontend_dir.is_dir():
+        for ext in ("*.svelte", "*.js", "*.ts"):
+            for path in frontend_dir.rglob(ext):
+                is_bloated, lines = check_file_bloat(path, LIMIT_FRONTEND)
+                if is_bloated:
+                    reports.append(
+                        {
+                            "file": path,
+                            "lines": lines,
+                            "limit": LIMIT_FRONTEND,
+                            "type": "frontend",
+                        }
+                    )
+
     return reports
 
 
@@ -146,7 +163,14 @@ def main():
     print("=" * 60)
     for r in reports:
         rel_path = os.path.relpath(r["file"], root_path)
-        print(f"[{'コード' if r['type'] == 'code' else 'スキル'}] {rel_path}")
+        label = (
+            "コード"
+            if r["type"] == "code"
+            else "スキル"
+            if r["type"] == "skill"
+            else "フロントエンド"
+        )
+        print(f"[{label}] {rel_path}")
         print(f"  -> 現在の行数: {r['lines']}行 (しきい値: {r['limit']}行)")
         if r.get("bloated_functions"):
             print("  -> 行数が50行を超える関数/メソッド:")
