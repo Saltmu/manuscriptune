@@ -6,13 +6,12 @@ import signal
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Any
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from src.services import process_manager
-from src.utils import path_safety, plot_parser, project_config, project_paths
+from src.utils import path_safety, project_paths
 from src.utils.logger import get_logger
 from src.utils.yaml_handler import YamlHandler
 
@@ -192,62 +191,6 @@ def rollback_backup(
         raise HTTPException(status_code=500, detail=f"Failed to rollback: {str(e)}")
 
 
-def _safe_source_arg(field_name: str, value: str) -> str:
-    """DATA_SOURCES_DIR配下に収まることを確認した上でパスを組み立てる。範囲外なら403。"""
-    candidate = f"{project_paths.DATA_SOURCES_DIR}/{value}"
-    if not path_safety.is_within(project_paths.DATA_SOURCES_DIR, candidate):
-        raise HTTPException(status_code=403, detail=f"Invalid path for {field_name}.")
-    return candidate
-
-
-def build_writer_cmd(params: dict[str, Any]) -> list[str]:
-    """Builds command parameters for running the novel writer CLI."""
-    episode = params.get("episode")
-    if not episode:
-        raise ValueError("episode is required")
-
-    cmd = [
-        "poetry",
-        "run",
-        "python",
-        "-u",
-        "skills/novel-writer-antigravitycli/writer_cli.py",
-        "--episode",
-        episode,
-    ]
-
-    if params.get("model"):
-        cmd.extend(["--model", params["model"]])
-    if params.get("novel_title"):
-        cmd.extend(["--title", params["novel_title"]])
-    if params.get("policy_global"):
-        cmd.extend(
-            [
-                "--policy-global",
-                _safe_source_arg("policy_global", params["policy_global"]),
-            ]
-        )
-    if params.get("policy_chapter"):
-        cmd.extend(
-            [
-                "--policy-chapter",
-                _safe_source_arg("policy_chapter", params["policy_chapter"]),
-            ]
-        )
-    if params.get("character"):
-        cmd.extend(["--character", _safe_source_arg("character", params["character"])])
-    if params.get("plot"):
-        cmd.extend(["--plot-file", _safe_source_arg("plot", params["plot"])])
-    if params.get("step_by_step"):
-        cmd.append("--step-by-step")
-    if params.get("self_check"):
-        cmd.append("--self-check")
-    if params.get("include_neighbor_plots"):
-        cmd.append("--include-neighbor-plots")
-
-    return cmd
-
-
 def shutdown_server():
     """Triggers server shutdown by sending SIGINT."""
     logger.info("Shutting down Review Editor server...")
@@ -311,52 +254,3 @@ def archive_current_state(
         )
 
     return v_prefix
-
-
-def resolve_novel_path_for_write(
-    episode: str, plot_file: str | None = None
-) -> tuple[str, str]:
-    """エピソード名（例：「第1話」）とプロットファイルから、小説ファイルの絶対パスと basename を解決する。"""
-    plot_filepath = (
-        plot_file
-        if plot_file
-        else project_config.resolve_novel_file_by_pattern(
-            "plot", "*第1幕プロット*.txt", "data/sources/04_1_第1幕プロットver.3.0.txt"
-        )
-    )
-
-    # data/sources ディレクトリからのパス解決
-    if not os.path.isabs(plot_filepath):
-        plot_filepath = os.path.abspath(
-            project_paths.get_source_path(os.path.basename(plot_filepath))
-        )
-    elif not path_safety.is_within(project_paths.get_sources_dir(), plot_filepath):
-        raise HTTPException(status_code=403, detail="Invalid plot file path.")
-
-    # プロットデータのパース
-    plot_data = plot_parser.parse_plot(plot_filepath)
-
-    chapter_title = None
-    for chapter_data in plot_data:
-        c_title = chapter_data.get("title", "")
-        for ep in chapter_data.get("episodes", []):
-            if (
-                ep["title"] == episode
-                or episode in ep["title"]
-                or episode in ep["name"]
-            ):
-                chapter_title = c_title
-                break
-        if chapter_title:
-            break
-
-    # 番号抽出
-    def extract_numbers(text):
-        match = re.search(r"\d+", text)
-        return match.group(0) if match else "0"
-
-    ch_num = extract_numbers(chapter_title) if chapter_title else "0"
-    ep_num = extract_numbers(episode)
-    basename = f"{ch_num}_{ep_num}"
-    novel_path = os.path.abspath(project_paths.get_novel_path(f"{basename}.txt"))
-    return novel_path, basename

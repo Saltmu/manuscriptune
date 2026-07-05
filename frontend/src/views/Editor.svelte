@@ -16,6 +16,7 @@
         novelFilename
     } from '../store.js';
     import { startEventStream, showToast, initPanelResizer } from '../utils.js';
+    import { apiFetch, withToken } from '../lib/apiClient.js';
     import FindingChat from '../lib/FindingChat.svelte';
 
     let plots = [];
@@ -183,7 +184,7 @@
     async function saveChanges() {
         if (!$selectedNovelFile) return;
         try {
-            await fetch('/api/save', {
+            await apiFetch('/api/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -210,7 +211,7 @@
         if (!$selectedNovelFile) return;
         loadingEditor = true;
         try {
-            const response = await fetch('/api/save_novel', {
+            const response = await apiFetch('/api/save_novel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ novel_name: $selectedNovelFile, content: editedText })
@@ -237,7 +238,7 @@
         
         loadingEditor = true;
         try {
-            const response = await fetch(`/api/rollback?file=${encodeURIComponent($selectedNovelFile)}`, {
+            const response = await apiFetch(`/api/rollback?file=${encodeURIComponent($selectedNovelFile)}`, {
                 method: 'POST'
             });
             const data = await response.json();
@@ -261,7 +262,7 @@
 
         loadingEditor = true;
         try {
-            const response = await fetch(`/api/rollback?file=${encodeURIComponent($selectedNovelFile)}&version=${encodeURIComponent(selectedVersion)}`, {
+            const response = await apiFetch(`/api/rollback?file=${encodeURIComponent($selectedNovelFile)}&version=${encodeURIComponent(selectedVersion)}`, {
                 method: 'POST'
             });
             const data = await response.json();
@@ -286,7 +287,7 @@
         applyConsoleStatus = 'RUNNING';
         applyConsoleLog = '--- プロセスを開始します ---\n';
 
-        const eventSource = new EventSource(`/api/stream/apply?file=${encodeURIComponent($selectedNovelFile)}`);
+        const eventSource = new EventSource(withToken(`/api/stream/apply?file=${encodeURIComponent($selectedNovelFile)}`));
         
         eventSource.onmessage = function(event) {
             if (event.data.includes('[PROCESS_EXITED]')) {
@@ -356,7 +357,7 @@
         if (character) url += `&character=${encodeURIComponent(character)}`;
         url += `&step_by_step=true&self_check=true`;
 
-        const result = startEventStream(url, 'editor', async (success) => {
+        const result = startEventStream(withToken(url), 'editor', async (success) => {
             currentRequestId = null;
             currentEventSource = null;
             if (success) {
@@ -398,7 +399,7 @@
             url += `&model=${encodeURIComponent(modelVal)}`;
         }
 
-        const result = startEventStream(url, 'editor', async (success) => {
+        const result = startEventStream(withToken(url), 'editor', async (success) => {
             currentRequestId = null;
             currentEventSource = null;
             if (success) {
@@ -432,7 +433,7 @@
         }
 
         try {
-            const response = await fetch(`/api/cancel?request_id=${encodeURIComponent(reqId)}`);
+            const response = await apiFetch(`/api/cancel?request_id=${encodeURIComponent(reqId)}`);
             if (response.ok) {
                 if (currentEventSource) {
                     currentEventSource.close();

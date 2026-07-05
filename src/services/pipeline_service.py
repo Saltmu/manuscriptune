@@ -11,6 +11,7 @@ from src.pipeline.phase_integration import IntegrationPhase
 from src.pipeline.phase_review import ReviewPhase
 from src.utils import project_paths
 from src.utils.ai_exceptions import PipelineError
+from src.utils.cancellation import CancellationToken
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
 
@@ -47,11 +48,13 @@ class BaseReviewPipeline(ABC):
         output_dir_override: str | None = None,
         workers: int = 2,
         runner: CommandRunner | None = None,
+        cancel_token: CancellationToken | None = None,
     ):
         self.target_path = Path(target_file)
         self.model = model
         self.workers = workers
         self.runner = runner or CommandRunner()
+        self.cancel_token = cancel_token
         self.basename, self.output_dir = self._resolve_output_dir(output_dir_override)
 
         # Initialize phases
@@ -59,6 +62,15 @@ class BaseReviewPipeline(ABC):
         self.context_filter_phase = ContextFilterPhase(self.runner)
         self.review_phase = ReviewPhase(self.model, self.output_dir, self.workers)
         self.integration_phase = IntegrationPhase(self.model, self.output_dir)
+
+    def _check_cancelled(self) -> None:
+        """フェーズ境界での協調的キャンセルチェック。
+
+        subprocess方式と異なりインプロセス実行中のスレッドは強制終了できないため、
+        各フェーズの開始前にのみキャンセルを検知する(フェーズ実行中の途中中断は不可)。
+        """
+        if self.cancel_token:
+            self.cancel_token.check()
 
     def run_single_review_skill(
         self, skill_name: str, target_text: str, output_file: str
@@ -186,6 +198,7 @@ class TextReviewPipeline(BaseReviewPipeline):
         )
 
         # Step 1: Format
+        self._check_cancelled()
         if os.path.exists(findings_file):
             self.archive_previous_review(target_path=self.target_path)
             logger.info(f"Re-reviewing existing formatted draft: {formatted_draft}")
@@ -198,6 +211,7 @@ class TextReviewPipeline(BaseReviewPipeline):
             )
 
         # Step 2: Run Context Filter
+        self._check_cancelled()
         filtered_context = project_paths.get_filtered_context_path(self.output_dir)
         self.run_filter_context(formatted_draft, filtered_context)
 
@@ -205,9 +219,11 @@ class TextReviewPipeline(BaseReviewPipeline):
         target_text = read_file(formatted_draft)
 
         # Step 3: Run parallel reviews
+        self._check_cancelled()
         self.run_parallel_review_skills(target_text, project_paths.TEXT_REVIEW_SKILLS)
 
         # Step 4: Run integration report
+        self._check_cancelled()
         self._integrate_findings()
         logger.info("Reports integrated successfully.")
         logger.info(
@@ -218,6 +234,7 @@ class TextReviewPipeline(BaseReviewPipeline):
         )
 
         # Step 5: Start Review Editor Server
+        self._check_cancelled()
         if not no_server:
             logger.info("Starting Interactive Review Editor UI...")
             server_script = project_paths.get_src_path("review_server.py")
@@ -306,6 +323,7 @@ class PlotReviewPipeline(BaseReviewPipeline):
         logger.info(f"Output Directory: {self.output_dir}")
         logger.info(f"Model: {self.model}")
 
+        self._check_cancelled()
         self.archive_previous_review()
 
         from src.utils.file_io import read_file
@@ -315,9 +333,11 @@ class PlotReviewPipeline(BaseReviewPipeline):
             raise PipelineError(f"Could not read target plot file: {self.target_path}")
 
         # Step 2: Run parallel reviews
+        self._check_cancelled()
         self.run_parallel_review_skills(target_text, project_paths.PLOT_REVIEW_SKILLS)
 
         # Step 3: Run integration report
+        self._check_cancelled()
         self.integration_phase.integrate_plot_findings(str(self.target_path))
         logger.info("Plot reports integrated successfully.")
         logger.info(

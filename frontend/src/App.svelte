@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import { activeView, selectedNovelFile, isRunningProcess } from './store.js';
     import { showToast } from './utils.js';
+    import { apiFetch, setApiKey } from './lib/apiClient.js';
     
     // Import views
     import Dashboard from './views/Dashboard.svelte';
@@ -75,7 +76,7 @@
     async function executeGlobalShutdown() {
         showShutdownModal = false;
         try {
-            await fetch('/api/shutdown', { method: 'POST' });
+            await apiFetch('/api/shutdown', { method: 'POST' });
             window.close();
             document.body.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100vh; font-size:1.2rem; color:var(--text-muted)">サーバーを停止しました。ブラウザタブを閉じてください。</div>`;
         } catch (err) {
@@ -85,6 +86,17 @@
     }
 
     onMount(() => {
+        // サーバー起動時に発行されたAPIキーをブートストラップURLから取り込む
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        if (token) {
+            setApiKey(token);
+            urlParams.delete('token');
+            const cleanQuery = urlParams.toString();
+            const newUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : '') + window.location.hash;
+            history.replaceState(null, '', newUrl);
+        }
+
         window.addEventListener('hashchange', handleRouting);
         loadProjectConfig();
         

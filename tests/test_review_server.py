@@ -273,41 +273,12 @@ def test_novel_service_rollback_backup_rejects_version_traversal(tmp_path):
     assert excinfo.value.status_code == 403
 
 
-def test_novel_service_build_writer_cmd():
-    params = WriteParams(
-        episode="1",
-        novel_title="Title",
-        policy_global="global.txt",
-        policy_chapter="chapter.txt",
-        character="char.txt",
-        plot="plot.txt",
-        model="model-name",
-        step_by_step=True,
-        self_check=True,
-    )
-    cmd = novel_service.build_writer_cmd(params.model_dump())
-    cmd_normalized = [c.replace("\\", "/") for c in cmd]
-    assert "--episode" in cmd_normalized
-    assert "1" in cmd_normalized
-    assert "--title" in cmd_normalized
-    assert "Title" in cmd_normalized
-    assert "--policy-global" in cmd_normalized
-    assert "data/sources/global.txt" in cmd_normalized
-    assert "--policy-chapter" in cmd_normalized
-    assert "data/sources/chapter.txt" in cmd_normalized
-    assert "--character" in cmd_normalized
-    assert "data/sources/char.txt" in cmd_normalized
-    assert "--plot-file" in cmd_normalized
-    assert "data/sources/plot.txt" in cmd_normalized
-    assert "--step-by-step" in cmd_normalized
-    assert "--self-check" in cmd_normalized
-    assert "model-name" in cmd_normalized
+def test_routes_novels_write_params_to_kwargs_rejects_path_traversal():
+    from src.routes.novels import _write_params_to_kwargs
 
-
-def test_novel_service_build_writer_cmd_rejects_path_traversal():
     params = WriteParams(episode="1", character="../../etc/passwd")
     with pytest.raises(Exception) as excinfo:
-        novel_service.build_writer_cmd(params.model_dump())
+        _write_params_to_kwargs(params)
     assert excinfo.value.status_code == 403
 
 
@@ -419,7 +390,7 @@ def test_routes_api_stream_apply():
         iter(["data: line\n\n"]), media_type="text/event-stream"
     )
     with patch(
-        "src.services.novel_service.stream_process_output", return_value=mock_streaming
+        "src.services.stream_service.stream_service_call", return_value=mock_streaming
     ) as mock_stream:
         response = client.get("/api/stream/apply?file=dummy.txt")
         assert response.status_code == 200
@@ -454,7 +425,7 @@ def test_routes_api_stream_review():
     with (
         patch("os.path.exists", return_value=True),
         patch(
-            "src.services.novel_service.stream_process_output",
+            "src.services.stream_service.stream_service_call",
             return_value=mock_streaming,
         ) as mock_stream,
     ):
@@ -474,7 +445,7 @@ def test_routes_api_stream_write():
         iter(["data: line\n\n"]), media_type="text/event-stream"
     )
     with patch(
-        "src.services.novel_service.stream_process_output", return_value=mock_streaming
+        "src.services.stream_service.stream_service_call", return_value=mock_streaming
     ) as mock_stream:
         response = client.get("/api/stream/write?episode=1")
         assert response.status_code == 200
@@ -579,15 +550,10 @@ def test_routes_api_select_file_exception():
 
 
 def test_routes_api_get_write_prompt():
-    from unittest.mock import AsyncMock
-
-    mock_process = AsyncMock()
-    mock_process.communicate.return_value = (b"Generated Prompt Content", b"")
-    mock_process.returncode = 0
-
     with patch(
-        "asyncio.create_subprocess_exec", return_value=mock_process
-    ) as mock_exec:
+        "src.services.writer_service.WriterService.generate_prompt",
+        return_value="Generated Prompt Content",
+    ) as mock_generate:
         response = client.get(
             "/api/write/prompt?episode=%E7%AC%AC1%E8%A9%B1&novel_title=TestTitle"
         )
@@ -595,10 +561,21 @@ def test_routes_api_get_write_prompt():
         data = response.json()
         assert data["prompt"] == "Generated Prompt Content"
 
-        mock_exec.assert_called_once()
-        cmd_arg = mock_exec.call_args
-        # The first argument tuple to create_subprocess_exec has command parts
-        assert any("--prompt-only" in str(arg) for arg in cmd_arg[0])
+        mock_generate.assert_called_once()
+        _, kwargs = mock_generate.call_args
+        assert kwargs["episode"] == "第1話"
+        assert kwargs["title"] == "TestTitle"
+
+
+def test_routes_api_get_write_prompt_error():
+    from src.services.writer_service import WriterServiceError
+
+    with patch(
+        "src.services.writer_service.WriterService.generate_prompt",
+        side_effect=WriterServiceError("plot not found"),
+    ):
+        response = client.get("/api/write/prompt?episode=第1話")
+        assert response.status_code == 500
 
 
 def test_routes_api_list_plots(tmp_path):
@@ -641,7 +618,7 @@ def test_routes_api_stream_plot_review_success(tmp_path):
         mock_plot = tmp_path / "test_stream_plot.txt"
         mock_plot.write_text("プロットテスト本文", encoding="utf-8")
 
-        with patch("src.services.novel_service.stream_process_output") as mock_stream:
+        with patch("src.services.stream_service.stream_service_call") as mock_stream:
             mock_stream.return_value = StreamingResponse(iter([b"data: success\n\n"]))
             response = client.get(
                 "/api/stream/plot_review?file=test_stream_plot.txt&model=test-model"

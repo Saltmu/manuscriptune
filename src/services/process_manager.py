@@ -3,22 +3,30 @@
 実行中のストリーミングプロセス（LLM処理等）を管理し、キャンセル機能を提供する。
 """
 
-import asyncio
 import logging
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
+
+class Cancellable(Protocol):
+    """asyncio.Task(サブプロセス方式)とCancellationToken(インプロセス方式)の両方を
+    キャンセル対象として扱えるようにする最小限のインターフェース。"""
+
+    def cancel(self) -> object: ...
+
+
 # グローバルな実行中プロセス管理
-_active_processes: dict[str, asyncio.Task] = {}
+_active_processes: dict[str, Cancellable] = {}
 
 
-def register_process(request_id: str, task: asyncio.Task) -> None:
+def register_process(request_id: str, task: Cancellable) -> None:
     """
     プロセスを登録する。
 
     Args:
         request_id: リクエスト一意ID
-        task: 管理対象の asyncio.Task
+        task: 管理対象のオブジェクト(asyncio.Task または CancellationToken)
     """
     _active_processes[request_id] = task
     logger.debug(f"Process registered: {request_id}")
@@ -36,7 +44,7 @@ def unregister_process(request_id: str) -> None:
         logger.debug(f"Process unregistered: {request_id}")
 
 
-def get_process(request_id: str) -> asyncio.Task | None:
+def get_process(request_id: str) -> Cancellable | None:
     """
     登録済みプロセスを取得する。
 
@@ -44,12 +52,12 @@ def get_process(request_id: str) -> asyncio.Task | None:
         request_id: リクエスト一意ID
 
     Returns:
-        asyncio.Task または None（登録されていない場合）
+        Cancellable または None（登録されていない場合）
     """
     return _active_processes.get(request_id)
 
 
-def get_active_processes() -> dict[str, asyncio.Task]:
+def get_active_processes() -> dict[str, Cancellable]:
     """
     全ての登録済みプロセスを取得する。
 

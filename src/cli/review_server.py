@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import os
+import secrets
 import webbrowser
 from contextlib import asynccontextmanager
 
@@ -53,9 +54,9 @@ app.mount(
 app.include_router(api_router, dependencies=[Depends(verify_local_origin)])
 
 
-async def open_browser(port: int):
+async def open_browser(port: int, token: str) -> None:
     await asyncio.sleep(1)  # wait for server to start
-    webbrowser.open(f"http://localhost:{port}")
+    webbrowser.open(f"http://localhost:{port}/?token={token}")
 
 
 def main():
@@ -81,15 +82,20 @@ def main():
         initial_novel = os.path.basename(args.novel)
     app.state.initial_novel = initial_novel
 
+    # Generate a per-run API key to protect write/destructive endpoints.
+    # There is no persistent config for it (zero-config, single local user);
+    # it is only ever handed to the browser via the bootstrap URL below.
+    app.state.api_key = secrets.token_urlsafe(32)
+
     logger.info("=== Manuscriptune Server Running ===")
     if initial_novel:
         logger.info(f"Initial Novel: {initial_novel}")
-    logger.info(f"URL  : http://localhost:{args.port}")
+    logger.info(f"URL  : http://localhost:{args.port}/?token={app.state.api_key}")
 
     # Start browser auto-opener
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.create_task(open_browser(args.port))
+    loop.create_task(open_browser(args.port, app.state.api_key))
 
     # Start uvicorn
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")

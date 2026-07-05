@@ -2,19 +2,20 @@
     import { onMount } from 'svelte';
     import { isRunningProcess, consoleLogMap, consoleStatusMap } from '../store.js';
     import { startEventStream, showToast, initPanelResizer } from '../utils.js';
+    import { withToken } from '../lib/apiClient.js';
 
     let showConsole = false;
     let resizerEl;
     let rightPanelEl;
-    
+
     function toggleConsoleView() {
         showConsole = !showConsole;
     }
 
     function runSync() {
         showConsole = true; // Automatically show console when starting sync
-        
-        startEventStream('/api/stream/sync', 'sync', (success) => {
+
+        startEventStream(withToken('/api/stream/sync'), 'sync', (success) => {
             if (success) {
                 showToast('同期が正常に完了しました');
             } else {

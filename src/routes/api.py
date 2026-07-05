@@ -1,9 +1,10 @@
 import os
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from src.routes.deps import require_api_key
 from src.routes.novels import router as novels_router
 from src.routes.plots import router as plots_router
 from src.routes.sync import router as sync_router
@@ -82,7 +83,7 @@ async def list_available_models():
         return {"models": default_models}
 
 
-@router.get("/api/cancel")
+@router.get("/api/cancel", dependencies=[Depends(require_api_key)])
 async def cancel_process(request_id: str = Query(...)):
     """
     実行中のLLM処理（ストリーミング）をキャンセルする。
@@ -156,7 +157,7 @@ async def save_settings(req: SettingsRequest):
         )
 
 
-@router.post("/api/shutdown")
+@router.post("/api/shutdown", dependencies=[Depends(require_api_key)])
 async def shutdown(background_tasks: BackgroundTasks):
     background_tasks.add_task(novel_service.shutdown_server)
     return {"status": "success", "message": "Shutting down..."}

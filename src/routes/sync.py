@@ -2,8 +2,9 @@ import datetime
 import os
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from src.routes.deps import require_api_key
 from src.services import novel_service
 from src.utils import project_config as writer_helper
 from src.utils import project_paths
@@ -13,7 +14,7 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-@router.get("/api/stream/sync")
+@router.get("/api/stream/sync", dependencies=[Depends(require_api_key)])
 async def stream_sync():
     cmd = ["poetry", "run", "python", "-u", "src/cli/sync_gdrive.py"]
     return novel_service.stream_process_output(cmd)

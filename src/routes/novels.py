@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import os
 import re
@@ -7,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.routes.deps import require_api_key
 from src.routes.models.novels import (
     ChatRequest,
     ChatResponse,
@@ -22,7 +24,13 @@ from src.routes.models.novels import (
     WriteParams,
     WritePromptResponse,
 )
-from src.services import novel_service
+from src.services import (
+    findings_service,
+    novel_service,
+    pipeline_service,
+    stream_service,
+    writer_service,
+)
 from src.services.chat_service import ChatService
 from src.utils import path_safety, project_paths
 from src.utils import project_config as writer_helper
@@ -115,7 +123,11 @@ async def get_novel(file: str = Query(..., description="Novel filename")):
     }
 
 
-@router.post("/api/save_novel", response_model=StatusResponse)
+@router.post(
+    "/api/save_novel",
+    response_model=StatusResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def save_novel(req: SaveNovelRequest):
     try:
         novel_path, _ = novel_service.resolve_paths(req.novel_name)
@@ -147,7 +159,9 @@ async def save_novel(req: SaveNovelRequest):
         raise HTTPException(status_code=500, detail=f"Failed to save novel: {str(e)}")
 
 
-@router.post("/api/save", response_model=StatusResponse)
+@router.post(
+    "/api/save", response_model=StatusResponse, dependencies=[Depends(require_api_key)]
+)
 async def save_findings(req: SaveFindingsRequest):
     try:
         _, yaml_path = novel_service.resolve_paths(req.novel_name)
@@ -182,7 +196,11 @@ async def save_findings(req: SaveFindingsRequest):
         )
 
 
-@router.post("/api/backup", response_model=StatusResponse)
+@router.post(
+    "/api/backup",
+    response_model=StatusResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def create_backup(file: str = Query(..., description="Novel filename")):
     try:
         novel_path, yaml_path = novel_service.resolve_paths(file)
@@ -203,7 +221,11 @@ async def create_backup(file: str = Query(..., description="Novel filename")):
         )
 
 
-@router.post("/api/rollback", response_model=StatusResponse)
+@router.post(
+    "/api/rollback",
+    response_model=StatusResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def rollback_backup(
     file: str = Query(..., description="Novel filename"),
     version: str | None = Query(
@@ -218,7 +240,7 @@ async def rollback_backup(
     return novel_service.rollback_backup(novel_path, yaml_path, version=version)
 
 
-@router.get("/api/stream/apply")
+@router.get("/api/stream/apply", dependencies=[Depends(require_api_key)])
 async def stream_apply(file: str = Query(..., description="Novel filename")):
     try:
         novel_path, yaml_path = novel_service.resolve_paths(file)
@@ -231,26 +253,17 @@ async def stream_apply(file: str = Query(..., description="Novel filename")):
         # Automatically archive to history/v{next_version} before applying changes
         novel_service.archive_current_state(basename, extra_novel_path=novel_path)
         output_dir = project_paths.get_output_dir(basename)
-        script_path = project_paths.get_src_path("cli/apply_findings.py")
-        cmd = [
-            "poetry",
-            "run",
-            "python",
-            "-u",
-            script_path,
-            "--dir",
-            output_dir,
-            "--auto",
-        ]
 
         logger.info(f"Streaming apply_findings for novel: {file}")
-        return novel_service.stream_process_output(cmd)
+        return stream_service.stream_service_call(
+            findings_service.apply_findings_in_dir, output_dir, auto=True
+        )
     except Exception as e:
         logger.error(f"Error applying changes for novel '{file}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error applying changes: {str(e)}")
 
 
-@router.get("/api/stream/review")
+@router.get("/api/stream/review", dependencies=[Depends(require_api_key)])
 async def stream_review(
     file: str = Query(
         ..., description=f"Novel text filename in {project_paths.NOVELS_DIR}/"
@@ -262,29 +275,59 @@ async def stream_review(
     if not os.path.exists(novel_path):
         raise HTTPException(status_code=404, detail="Novel file not found.")
 
-    # We call run_review_pipeline.py with --no-server to prevent recursive server loops
-    cmd = [
-        "poetry",
-        "run",
-        "python",
-        "-u",
-        "src/cli/run_review_pipeline.py",
-        novel_path,
-        "--no-server",
-    ]
-    if model:
-        cmd.extend(["--model", model])
+    def _run_review(*, cancel_token=None, on_line=None):
+        pipeline_service.TextReviewPipeline(
+            target_file=novel_path,
+            model=model or "Gemini 3.5 Flash (High)",
+            cancel_token=cancel_token,
+        ).execute(no_server=True)
 
-    return novel_service.stream_process_output(cmd)
+    return stream_service.stream_service_call(_run_review)
 
 
-@router.get("/api/stream/write")
+def _resolve_safe_source_arg(field_name: str, value: str) -> str:
+    """DATA_SOURCES_DIR配下に収まることを確認した上でパスを組み立てる。範囲外なら403。"""
+    candidate = f"{project_paths.DATA_SOURCES_DIR}/{value}"
+    if not path_safety.is_within(project_paths.DATA_SOURCES_DIR, candidate):
+        raise HTTPException(status_code=403, detail=f"Invalid path for {field_name}.")
+    return candidate
+
+
+def _write_params_to_kwargs(params: WriteParams) -> dict[str, Any]:
+    """WebのWriteParams(短いbasename指定)をWriterServiceの引数(解決済みフルパス)に変換する。"""
+    kwargs: dict[str, Any] = {
+        "episode": params.episode,
+        "title": params.novel_title,
+        "model": params.model,
+        "step_by_step": params.step_by_step,
+        "self_check": params.self_check,
+        "include_neighbor_plots": params.include_neighbor_plots,
+    }
+    if params.policy_global:
+        kwargs["policy_global"] = _resolve_safe_source_arg(
+            "policy_global", params.policy_global
+        )
+    if params.policy_chapter:
+        kwargs["policy_chapter"] = _resolve_safe_source_arg(
+            "policy_chapter", params.policy_chapter
+        )
+    if params.character:
+        kwargs["character"] = _resolve_safe_source_arg("character", params.character)
+    if params.plot:
+        kwargs["plot_file"] = _resolve_safe_source_arg("plot", params.plot)
+    return kwargs
+
+
+@router.get("/api/stream/write", dependencies=[Depends(require_api_key)])
 async def stream_write(params: WriteParams = Depends()):  # noqa: B008
     # 執筆前に、もしすでにそのエピソードの小説ファイルが存在する場合は
     # レビュー時と同様に history/v{next_version}/ に退避させる
     try:
-        novel_path, basename = novel_service.resolve_novel_path_for_write(
-            params.episode, plot_file=params.plot
+        plot_file = (
+            _resolve_safe_source_arg("plot", params.plot) if params.plot else None
+        )
+        novel_path, basename = (
+            writer_service.WriterService().resolve_episode_output_path(params.episode, plot_file=plot_file)
         )
         if os.path.exists(novel_path):
             logger.info(
@@ -294,32 +337,29 @@ async def stream_write(params: WriteParams = Depends()):  # noqa: B008
     except Exception as e:
         logger.warning(f"Failed to archive prior to writing: {e}")
 
-    cmd = novel_service.build_writer_cmd(params.model_dump())
-    return novel_service.stream_process_output(cmd)
-
-
-@router.get("/api/write/prompt", response_model=WritePromptResponse)
-async def get_write_prompt(params: WriteParams = Depends()):  # noqa: B008
-    cmd = novel_service.build_writer_cmd(params.model_dump())
-    cmd.append("--prompt-only")
-
-    import asyncio
-    import subprocess
-
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+    kwargs = _write_params_to_kwargs(params)
+    return stream_service.stream_service_call(
+        writer_service.WriterService().execute, **kwargs
     )
-    stdout, stderr = await process.communicate()
 
-    if process.returncode != 0:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prompt generation failed: {stderr.decode('utf-8')}",
+
+@router.get(
+    "/api/write/prompt",
+    response_model=WritePromptResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_write_prompt(params: WriteParams = Depends()):  # noqa: B008
+    kwargs = _write_params_to_kwargs(params)
+    try:
+        prompt = await asyncio.to_thread(
+            writer_service.WriterService().generate_prompt, **kwargs
         )
+    except writer_service.WriterServiceError as e:
+        raise HTTPException(
+            status_code=500, detail=f"Prompt generation failed: {e}"
+        ) from e
 
-    return {"prompt": stdout.decode("utf-8")}
+    return {"prompt": prompt}
 
 
 @router.get("/api/preview", response_model=NovelPreviewResponse)

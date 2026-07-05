@@ -284,9 +284,10 @@ def test_main_default_to_interactive(tmp_path):
     with (
         patch("sys.argv", test_args),
         patch(
-            "src.cli.apply_findings._determine_accepted_findings", return_value=[]
+            "src.services.findings_service._determine_accepted_findings",
+            return_value=[],
         ) as mock_determine,
-        patch("src.cli.apply_findings._save_outputs_and_print_summary"),
+        patch("src.services.findings_service._save_outputs_and_print_summary"),
     ):
         main()
         mock_determine.assert_called_once()
