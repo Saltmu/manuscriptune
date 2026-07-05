@@ -33,7 +33,7 @@ poetry run mypy src tests
 
 # 5. Run backend tests with coverage fail-under check (defined in pyproject.toml)
 echo "[5/8] Running backend tests (pytest)..."
-poetry run pytest
+poetry run pytest -n auto
 
 # 6. Run frontend tests (vitest)
 echo "[6/8] Running frontend tests (vitest)..."

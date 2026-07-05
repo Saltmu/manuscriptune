@@ -1,4 +1,3 @@
-import os
 import unittest.mock
 
 from src.cli import filter_context
@@ -145,20 +144,15 @@ def test_filter_context_main_integration(tmp_path):
     output_file = tmp_path / "filtered_context.txt"
 
     # Patch the sources_dir and sys.argv, then run main
-    with unittest.mock.patch(
-        "sys.argv", ["filter_context.py", str(novel_file), str(output_file)]
+    with (
+        unittest.mock.patch(
+            "sys.argv", ["filter_context.py", str(novel_file), str(output_file)]
+        ),
+        unittest.mock.patch(
+            "src.utils.project_paths.get_sources_dir", return_value=str(sources_dir)
+        ),
     ):
-        original_join = os.path.join
-
-        def mock_join(*args):
-            # If the join points to .../data/sources, redirect to tmp_path/data/sources
-            joined = original_join(*args)
-            if joined.replace("\\", "/").endswith("data/sources"):
-                return str(sources_dir)
-            return joined
-
-        with unittest.mock.patch("os.path.join", side_effect=mock_join):
-            filter_context.main()
+        filter_context.main()
 
     # Verify the output
     assert output_file.exists()
