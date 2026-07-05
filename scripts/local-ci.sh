@@ -11,7 +11,20 @@ echo "========================================="
 # 1. Build the frontend (tests depend on frontend/dist/index.html existing,
 # mirroring the build step in .github/workflows/ci.yml)
 echo "[1/8] Building frontend (npm ci && npm run build)..."
-(cd frontend && npm ci && npm run build)
+(
+  cd frontend
+  LOCKFILE_HASH=$(sha256sum package-lock.json | cut -d" " -f1)
+  CACHE_FILE="node_modules/.ci-lockfile-hash"
+
+  if [ -d "node_modules" ] && [ -f "$CACHE_FILE" ] && [ "$(cat "$CACHE_FILE")" = "$LOCKFILE_HASH" ]; then
+    echo "npm ci is cached. Skipping..."
+  else
+    npm ci
+    mkdir -p node_modules
+    echo "$LOCKFILE_HASH" > "$CACHE_FILE"
+  fi
+  npm run build
+)
 
 # 2. Check code format & 3. Run Lint check
 if [[ " $* " == *" --fix "* ]]; then
@@ -49,7 +62,27 @@ echo "[8/8] Auditing dependencies (pip-audit)..."
 # issue on shared machines). Fix requires pytest 9 + pytest-asyncio 1.x, a
 # breaking major-version bump for a dev-only test dependency never shipped to
 # production. Accepted as a known risk; revisit when upgrading the test stack.
-poetry run pip-audit --ignore-vuln CVE-2025-71176
+SKIP_AUDIT=false
+POETRY_LOCK_HASH=$(sha256sum poetry.lock | cut -d" " -f1)
+AUDIT_CACHE_FILE=".pip-audit-last-run"
+
+if [ "${GITHUB_ACTIONS:-false}" != "true" ]; then
+  if [ -f "$AUDIT_CACHE_FILE" ]; then
+    read -r PREV_HASH PREV_TIME < "$AUDIT_CACHE_FILE"
+    CURRENT_TIME=$(date +%s)
+    TIME_DIFF=$((CURRENT_TIME - PREV_TIME))
+    if [ "$PREV_HASH" = "$POETRY_LOCK_HASH" ] && [ "$TIME_DIFF" -ge 0 ] && [ "$TIME_DIFF" -lt 86400 ]; then
+      SKIP_AUDIT=true
+    fi
+  fi
+fi
+
+if [ "$SKIP_AUDIT" = "true" ]; then
+  echo "pip-audit is cached. Skipping..."
+else
+  poetry run pip-audit --ignore-vuln CVE-2025-71176
+  echo "$POETRY_LOCK_HASH $(date +%s)" > "$AUDIT_CACHE_FILE"
+fi
 
 echo "========================================="
 echo "✨ Local CI passed successfully!"

@@ -46,3 +46,7 @@ logs/
 # Temporary and planning files
 implementation_plan.md
 walkthrough.md
+
+# Local CI caches
+.pip-audit-last-run
+.local_ci_logs/
