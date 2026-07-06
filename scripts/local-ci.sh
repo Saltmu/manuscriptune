@@ -78,6 +78,10 @@ check_changes() {
       has_backend=true
     elif [[ "$file" =~ ^(scripts/local-ci\.sh|\.github/workflows/) ]]; then
       has_ci=true
+    elif [[ "$file" =~ ^tools/ ]]; then
+      # tools/ 配下は独立したローカルCI（check_orchestrator_changes）で
+      # 別途検知・実行するため、本体のfrontend/backend判定には含めない。
+      :
     else
       # その他のファイルの変更（docsや設定など）は、念のためバックエンドのテストを走らせる
       has_backend=true
@@ -95,6 +99,43 @@ check_changes() {
   else
     echo "full"
   fi
+}
+
+# tools/orchestrator/ は独立したPoetry環境・ローカルCIを持つため本体の
+# frontend/backend判定からは隔離しているが、品質ゲートから漏れないよう
+# 差分の有無だけを別途検知し、該当ローカルCIを併走させる。
+check_orchestrator_changes() {
+  if [ "$FORCE_FULL" = "true" ]; then
+    echo "true"
+    return
+  fi
+
+  local base_commit
+  base_commit=$(git merge-base origin/main HEAD 2>/dev/null || git merge-base main HEAD 2>/dev/null || echo "")
+
+  # 追跡済みファイルの差分に加え、未追跡（新規追加）ファイルも
+  # git ls-files --others で拾う。tools/orchestrator/ は新規ディレクトリ
+  # として追加されることが多く、diffだけでは検知漏れするため。
+  local changed_files
+  changed_files=$( {
+    if [ -n "$base_commit" ]; then
+      git diff --name-only "${base_commit}...HEAD" 2>/dev/null
+    fi
+    git diff --name-only --cached 2>/dev/null
+    git diff --name-only 2>/dev/null
+    git ls-files --others --exclude-standard 2>/dev/null
+  } | sort -u )
+
+  if echo "$changed_files" | grep -q '^tools/orchestrator/'; then
+    echo "true"
+  else
+    echo "false"
+  fi
+}
+
+run_orchestrator_steps() {
+  echo "[orchestrator] Running tools/orchestrator/scripts/local-ci.sh..."
+  ./tools/orchestrator/scripts/local-ci.sh
 }
 
 run_frontend_steps() {
@@ -184,6 +225,9 @@ run_backend_steps() {
 CHANGE_TYPE=$(check_changes)
 echo "Detected change scope: $CHANGE_TYPE"
 
+ORCHESTRATOR_CHANGED=$(check_orchestrator_changes)
+echo "Orchestrator (tools/orchestrator) changes detected: $ORCHESTRATOR_CHANGED"
+
 LOG_DIR=".local_ci_logs"
 mkdir -p "$LOG_DIR"
 
@@ -194,9 +238,19 @@ trap cleanup EXIT
 
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 BACKEND_LOG="$LOG_DIR/backend.log"
+ORCHESTRATOR_LOG="$LOG_DIR/orchestrator.log"
 
 FE_EXIT=0
 BE_EXIT=0
+ORCH_EXIT=0
+ORCH_PID=""
+
+# tools/orchestrator に差分がある場合は、本体のfrontend/backend判定とは
+# 独立に、隔離されたローカルCIをバックグラウンドで併走させる。
+if [ "$ORCHESTRATOR_CHANGED" = "true" ]; then
+  run_orchestrator_steps > "$ORCHESTRATOR_LOG" 2>&1 &
+  ORCH_PID=$!
+fi
 
 if [ "$CHANGE_TYPE" = "full" ] || [ "$CHANGE_TYPE" = "both" ]; then
   echo "Running frontend and backend CI steps in parallel..."
@@ -243,12 +297,28 @@ elif [ "$CHANGE_TYPE" = "backend" ]; then
   run_backend_steps || BE_EXIT=$?
 fi
 
+if [ -n "$ORCH_PID" ]; then
+  wait "$ORCH_PID" || ORCH_EXIT=$?
+
+  echo ""
+  echo "========================================="
+  echo "=== Orchestrator (tools/orchestrator) Task Logs ==="
+  echo "========================================="
+  if [ -f "$ORCHESTRATOR_LOG" ]; then
+    cat "$ORCHESTRATOR_LOG"
+  else
+    echo "No orchestrator logs found."
+  fi
+  echo ""
+fi
+
 # Print final result and exit
-if [ $FE_EXIT -ne 0 ] || [ $BE_EXIT -ne 0 ]; then
+if [ $FE_EXIT -ne 0 ] || [ $BE_EXIT -ne 0 ] || [ $ORCH_EXIT -ne 0 ]; then
   echo "========================================="
   echo "❌ Local CI Check Failed!"
   [ $FE_EXIT -ne 0 ] && echo "  - Frontend steps failed (exit code: $FE_EXIT)"
   [ $BE_EXIT -ne 0 ] && echo "  - Backend steps failed (exit code: $BE_EXIT)"
+  [ $ORCH_EXIT -ne 0 ] && echo "  - Orchestrator steps failed (exit code: $ORCH_EXIT)"
   echo "========================================="
   exit 1
 fi
