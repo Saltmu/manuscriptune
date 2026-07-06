@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Move to the tools/orchestrator project root
+# Move to the tools/orchestune project root
 cd "$(dirname "$0")/.."
 
 echo "========================================="
-echo "Running Orchestrator Local CI Check..."
+echo "Running Orchestune Local CI Check..."
 echo "========================================="
 
 echo "[1/4] Checking code format (ruff format)..."
