@@ -323,6 +323,87 @@ class TestRealProjectSymbolCollision:
         assert touching_yaml == []
 
 
+class TestCommonUtilityPseudoCoupling:
+    """#191: LoggerやConfigのような、多くのサブタスクが触れる共通ユーティリティを
+    共有しているだけの疑似結合を、実質的な結合として誤検出しないことを確認する。"""
+
+    def _common_utility_plan(self) -> str:
+        # logger.Logger は5サブタスク全てが参照する「ありふれた共通ユーティリティ」。
+        # task-one/task-two は logger.Logger 以外に固有のfootprint/symbolのみを持つ。
+        return """\
+        ---
+        subtasks:
+          - id: task-one
+            description: "1番目の独立したタスク"
+            footprint: ["src/one.py"]
+            symbols: ["one.Foo", "shared.logger.Logger"]
+          - id: task-two
+            description: "2番目の独立したタスク"
+            footprint: ["src/two.py"]
+            symbols: ["two.Bar", "shared.logger.Logger"]
+          - id: task-three
+            description: "3番目の独立したタスク"
+            footprint: ["src/three.py"]
+            symbols: ["three.Baz", "shared.logger.Logger"]
+          - id: task-four
+            description: "4番目の独立したタスク"
+            footprint: ["src/four.py"]
+            symbols: ["four.Qux", "shared.logger.Logger"]
+          - id: task-five
+            description: "5番目の独立したタスク"
+            footprint: ["src/five.py"]
+            symbols: ["five.Quux", "shared.logger.Logger"]
+        ---
+        """
+
+    def test_shared_common_utility_alone_does_not_create_edge(self, tmp_path):
+        path = _write_plan(tmp_path, self._common_utility_plan())
+        dag_dict = build_dag_from_plan(path, threshold=0.2)
+
+        reasons = {(e["source"], e["target"]): e["reason"] for e in dag_dict["edges"]}
+        pair = ("task-one", "task-two")
+        alt_pair = ("task-two", "task-one")
+        assert reasons.get(pair) is None and reasons.get(alt_pair) is None
+
+    def test_genuine_shared_symbol_still_creates_edge(self, tmp_path):
+        """logger.Logger のような共通ユーティリティのノイズがあっても、
+        task-one/task-two だけが共有する固有シンボルがあれば結合は検出される。"""
+        plan = """\
+        ---
+        subtasks:
+          - id: task-one
+            description: "1番目のタスク"
+            footprint: ["src/one.py"]
+            symbols: ["one.Foo", "shared.logger.Logger", "shared_helper.parse"]
+          - id: task-two
+            description: "2番目のタスク"
+            footprint: ["src/two.py"]
+            symbols: ["two.Bar", "shared.logger.Logger", "shared_helper.parse"]
+          - id: task-three
+            description: "3番目の独立したタスク"
+            footprint: ["src/three.py"]
+            symbols: ["three.Baz", "shared.logger.Logger"]
+          - id: task-four
+            description: "4番目の独立したタスク"
+            footprint: ["src/four.py"]
+            symbols: ["four.Qux", "shared.logger.Logger"]
+          - id: task-five
+            description: "5番目の独立したタスク"
+            footprint: ["src/five.py"]
+            symbols: ["five.Quux", "shared.logger.Logger"]
+        ---
+        """
+        path = _write_plan(tmp_path, plan)
+        dag_dict = build_dag_from_plan(path, threshold=0.2)
+
+        reasons = {(e["source"], e["target"]): e["reason"] for e in dag_dict["edges"]}
+        pair = ("task-one", "task-two")
+        alt_pair = ("task-two", "task-one")
+        assert (
+            reasons.get(pair) == "similarity" or reasons.get(alt_pair) == "similarity"
+        )
+
+
 class TestRecomputeDagForFootprintChange:
     def test_detects_new_conflict_and_serializes(self):
         subtasks = {
