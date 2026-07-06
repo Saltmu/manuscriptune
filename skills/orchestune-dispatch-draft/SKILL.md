@@ -31,10 +31,20 @@ output_schema:
 - ディスパッチャーの書き込み系操作（ラベル更新・`git worktree`作成・エージェント起動）は、
   **`--apply`を明示指定しない限り一切実行されない**（既定はdry-run）。安全側に倒した設計であるため、
   パイロット中は必ずdry-run結果を人間が確認してから`--apply`を実行すること。
-- `dispatcher.py`の`command_builder`（実際にエージェントプロセスを起動するコマンドの組み立て）は
-  ダミー実装（`default_dry_run_command_builder`、`["true"]`を返すのみ）である。
-  実際にバックグラウンドエージェントを起動したい場合は、呼び出し側で実コマンドを組み立てる
-  `command_builder`を`DispatcherConfig`に注入する必要がある（本ドラフトのスコープ外）。
+- `dispatcher.py`のエージェント実起動先は`DispatcherConfig.dispatch_target`
+  （`src/dispatch_targets.py`の`DispatchTarget`を実装したクラス）で切り替え可能である（#215）。
+  既定は`LocalProcessDispatchTarget`（ローカルsubprocessを起動。`command_builder`未指定時は
+  ダミー実装`default_dry_run_command_builder`が`["true"]`を返すのみで実際には何もしない）。
+  `poetry run dispatch-cycle --apply --dispatch-target cloud-routine` を指定すると、
+  Claude Codeクラウドルーチン（[claude.ai/code/routines](https://claude.ai/code/routines)で
+  事前にAPIトリガー付きルーチンを作成しておく必要がある）の`/fire` APIへ実ディスパッチする
+  `ClaudeCodeCloudRoutineDispatchTarget`が使われる。ルーチンID・トークンは
+  `--routine-id`/`--routine-token`、または`ORCHESTUNE_ROUTINE_ID`/`ORCHESTUNE_ROUTINE_TOKEN`
+  環境変数で渡す（未設定の場合は警告を出した上でローカルのダミー動作へ自動フォールバックする）。
+  クラウドルーチンの完了判定は、セッション状態のポーリングAPIが現時点で公開されていないため、
+  対象ブランチにオープンなPRが立ったことをプロキシシグナルとして使う（既知の暫定仕様）。
+  別の起動方式に差し替えたい場合は、`DispatchTarget`を実装した新しいクラスを
+  `DispatcherConfig(dispatch_target=...)`に注入するだけでよい。
 
 ## ステージ1呼び出し手順（分解案生成）
 
@@ -108,11 +118,15 @@ output_schema:
 
    ```bash
    cd tools/orchestune
-   poetry run dispatch-cycle --apply
+   poetry run dispatch-cycle --apply --dispatch-target cloud-routine
    ```
 
-   このとき、`command_builder`がダミー実装のままだと実際にはエージェントプロセスは起動しない
-   （worktree作成・ラベル更新・`run_state.json`更新のみ行われる）ことに留意する。
+   （#215）このとき、`--dispatch-target cloud-routine`かつ`ORCHESTUNE_ROUTINE_ID`/
+   `ORCHESTUNE_ROUTINE_TOKEN`環境変数（または`--routine-id`/`--routine-token`）が
+   設定されていれば、Claude Codeクラウドルーチンの`/fire` APIへ実際にディスパッチされる。
+   未設定の場合や`--dispatch-target`を省略した場合は、既定の`LocalProcessDispatchTarget`
+   （ダミー実装のままなら実際にはエージェントプロセスは起動せず、worktree作成・ラベル更新・
+   `run_state.json`更新のみ行われる）にフォールバックする。
 
 ## ステージ2.1: footprint逸脱時の動的ロック要求・DAG再計算（#192, #200）
 
@@ -142,13 +156,16 @@ output_schema:
 ## タスク完了検知・クオータ解放・依存解決（#193）
 
 `dispatch-cycle`は毎サイクル冒頭で、`status:in-progress`のactive worktreeについて
-記録済み`pid`のプロセス生存確認（`os.kill(pid, 0)`）により完了を判定する。これにより、
+完了を判定する。判定方法は起動時に使った`dispatch_target`によって異なる（#215）。
 以前は一度dispatchしたタスクが`run_state.active_worktrees`に残り続けクオータが
 恒久的に枯渇していた問題（同一cycle内でクオータが解放され新規タスクが選出される）が解消されている。
 
-1. **完了判定**: プロセスが終了していれば完了とみなす。ダミー`command_builder`
-   （`["true"]`）はほぼ即座に終了するため、実エージェントが未接続の状態でも
-   次サイクルで即完了扱いになる点に注意する。
+1. **完了判定**:
+   - `LocalProcessDispatchTarget`（既定）: 記録済み`pid`のプロセス生存確認
+     （`os.kill(pid, 0)`）により完了を判定する。ダミー`command_builder`（`["true"]`）は
+     ほぼ即座に終了するため、実エージェントが未接続の状態でも次サイクルで即完了扱いになる点に注意する。
+   - `ClaudeCodeCloudRoutineDispatchTarget`: 対象ブランチにオープンなPRが立った時点で
+     完了とみなす（セッション状態のポーリングAPIが無いための暫定的なプロキシシグナル）。
 2. **未コミット変更が残る場合は安全側でスキップ**: `git status --porcelain`で
    worktreeに未コミットの変更が検知された場合、**worktree削除・ラベル遷移は行わず**
    （`completion_events`に`action: "completion_skipped_dirty_worktree"`として記録）、
