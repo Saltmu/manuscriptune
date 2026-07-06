@@ -131,7 +131,13 @@ def list_open_prs() -> list[PrRecord]:
 
 
 def branch_changed_files(branch: str, base: str = "origin/main") -> list[str]:
+    """#232: `base`と共通の祖先を持たない(orphanな)ブランチとの3点diffは
+    `fatal: no merge base`でexit 128になる。dispatch-cycle全体をクラッシュ
+    させないよう、footprint差分なし（ロック対象外）として扱う。"""
     _validate_ref_name(branch)
     _validate_ref_name(base)
-    stdout = _run(["git", "diff", "--name-only", f"{base}...{branch}"])
+    try:
+        stdout = _run(["git", "diff", "--name-only", f"{base}...{branch}"])
+    except (subprocess.CalledProcessError, OSError):
+        return []
     return [line.strip() for line in stdout.splitlines() if line.strip()]
