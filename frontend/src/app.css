@@ -1,5 +1,5 @@
 :root {
-    --bg-color: #0f172a;
+    --bg-color: #0a0d15;
     --panel-bg: #1e293b;
     --sidebar-bg: #0b0f19;
     --border-color: #334155;
@@ -7,14 +7,14 @@
     --text-muted: #94a3b8;
     --accent-color: #6366f1;
     --accent-hover: #4f46e5;
-    
-    --severity-high: #ef4444;
-    --severity-medium: #f97316;
-    --severity-low: #3b82f6;
+
+    --severity-high: #f43f5e;
+    --severity-medium: #f59e0b;
+    --severity-low: #38bdf8;
     --severity-info: #64748b;
-    
+
     --logic-color: #a855f7;
-    --style-color: #0d9488;
+    --style-color: #14b8a6;
 }
 
 * {
