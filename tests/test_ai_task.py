@@ -142,7 +142,9 @@ def test_review_skill_task_contexts(tmp_path, mock_client):
         patch("os.path.exists", mock_exists),
         patch(
             "src.utils.ai_tasks.review.read_file",
-            side_effect=lambda path: f"Instruction for {os.path.basename(os.path.dirname(path))}",
+            side_effect=lambda path: (
+                f"Instruction for {os.path.basename(os.path.dirname(path))}"
+            ),
         ),
         patch(
             "src.utils.ai_tasks.review.ReviewSkillTask._get_text_logic_context",
