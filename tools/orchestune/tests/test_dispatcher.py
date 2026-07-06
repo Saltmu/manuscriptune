@@ -7,6 +7,7 @@ from unittest.mock import ANY, MagicMock, patch
 import pytest
 
 from src.dag import FootprintConflict
+from src.dispatch_targets import DispatchHandle, LocalProcessDispatchTarget
 from src.dispatcher import (
     ActiveWorktree,
     DispatcherConfig,
@@ -622,16 +623,18 @@ class TestRemoveWorktree:
 class TestCreateWorktreeAndLaunch:
     def test_dry_run_does_not_call_subprocess(self, tmp_path):
         task = _task(1)
+        dispatch_target = LocalProcessDispatchTarget(
+            default_dry_run_command_builder, log_dir=tmp_path / "logs"
+        )
         with (
             patch("src.dispatcher.subprocess.run") as mock_run,
-            patch("src.dispatcher.subprocess.Popen") as mock_popen,
+            patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
             result = create_worktree_and_launch(
                 task,
                 branch_name="claude/issue-1-task-1",
                 worktree_root=tmp_path / "worktrees",
-                log_dir=tmp_path / "logs",
-                command_builder=default_dry_run_command_builder,
+                dispatch_target=dispatch_target,
                 apply=False,
             )
         mock_run.assert_not_called()
@@ -640,9 +643,12 @@ class TestCreateWorktreeAndLaunch:
 
     def test_apply_creates_worktree_and_launches_process(self, tmp_path):
         task = _task(1)
+        dispatch_target = LocalProcessDispatchTarget(
+            default_dry_run_command_builder, log_dir=tmp_path / "logs"
+        )
         with (
             patch("src.dispatcher.subprocess.run") as mock_run,
-            patch("src.dispatcher.subprocess.Popen") as mock_popen,
+            patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
@@ -652,8 +658,7 @@ class TestCreateWorktreeAndLaunch:
                 task,
                 branch_name="claude/issue-1-task-1",
                 worktree_root=tmp_path / "worktrees",
-                log_dir=tmp_path / "logs",
-                command_builder=default_dry_run_command_builder,
+                dispatch_target=dispatch_target,
                 apply=True,
             )
         assert mock_run.called
@@ -663,21 +668,26 @@ class TestCreateWorktreeAndLaunch:
 
     def test_rejects_invalid_branch_name(self, tmp_path):
         task = _task(1)
+        dispatch_target = LocalProcessDispatchTarget(
+            default_dry_run_command_builder, log_dir=tmp_path / "logs"
+        )
         with pytest.raises(ValueError):
             create_worktree_and_launch(
                 task,
                 branch_name="--upload-pack=evil",
                 worktree_root=tmp_path / "worktrees",
-                log_dir=tmp_path / "logs",
-                command_builder=default_dry_run_command_builder,
+                dispatch_target=dispatch_target,
                 apply=True,
             )
 
     def test_apply_failure_returns_launched_false_with_error(self, tmp_path):
         task = _task(1)
+        dispatch_target = LocalProcessDispatchTarget(
+            default_dry_run_command_builder, log_dir=tmp_path / "logs"
+        )
         with (
             patch("src.dispatcher.subprocess.run") as mock_run,
-            patch("src.dispatcher.subprocess.Popen") as mock_popen,
+            patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
             mock_run.side_effect = subprocess.CalledProcessError(
                 returncode=128,
@@ -688,13 +698,38 @@ class TestCreateWorktreeAndLaunch:
                 task,
                 branch_name="claude/issue-1-task-1",
                 worktree_root=tmp_path / "worktrees",
-                log_dir=tmp_path / "logs",
-                command_builder=default_dry_run_command_builder,
+                dispatch_target=dispatch_target,
                 apply=True,
             )
         assert result.launched is False
         assert "fatal: branch" in result.error_message
         mock_popen.assert_not_called()
+
+    def test_apply_uses_dispatch_target_and_captures_external_handle(self, tmp_path):
+        """#215: 差し替えたDispatchTargetのlaunch()結果がLaunchResultへ反映される。"""
+        task = _task(1)
+        fake_target = MagicMock()
+        fake_target.launch.return_value = DispatchHandle(
+            external_id="session_1",
+            external_url="https://claude.ai/code/session_1",
+            branch_name="claude/issue-1-task-1",
+        )
+        with patch("src.dispatcher.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+            result = create_worktree_and_launch(
+                task,
+                branch_name="claude/issue-1-task-1",
+                worktree_root=tmp_path / "worktrees",
+                dispatch_target=fake_target,
+                apply=True,
+            )
+        assert fake_target.launch.called
+        assert result.launched is True
+        assert result.pid is None
+        assert result.external_id == "session_1"
+        assert result.external_url == "https://claude.ai/code/session_1"
 
 
 class TestRunDispatchCycle:
@@ -716,7 +751,7 @@ class TestRunDispatchCycle:
             patch("src.dispatcher.github.add_label") as mock_add_label,
             patch("src.dispatcher.github.remove_label") as mock_remove_label,
             patch("src.dispatcher.subprocess.run") as mock_subproc_run,
-            patch("src.dispatcher.subprocess.Popen") as mock_popen,
+            patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
             mock_list.side_effect = (
                 lambda label: [queued_issue] if label == "status:queued" else []
@@ -749,7 +784,7 @@ class TestRunDispatchCycle:
             patch("src.dispatcher.github.add_label") as mock_add_label,
             patch("src.dispatcher.github.remove_label"),
             patch("src.dispatcher.subprocess.run") as mock_subproc_run,
-            patch("src.dispatcher.subprocess.Popen") as mock_popen,
+            patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
             mock_list.side_effect = (
                 lambda label: [queued_issue] if label == "status:queued" else []
@@ -972,7 +1007,7 @@ class TestRunDispatchCycleFootprintRecompute:
             patch("src.dispatcher.github.list_open_prs", return_value=[]),
             patch("src.dispatcher.github.add_label") as mock_add_label,
             patch("src.dispatcher.github.remove_label"),
-            patch("src.dispatcher.subprocess.Popen"),
+            patch("src.dispatch_targets.subprocess.Popen"),
             patch("src.dispatcher.is_process_alive", return_value=True),
             patch(
                 "src.dispatcher.check_footprint_deviation",
@@ -1352,7 +1387,7 @@ class TestRunDispatchCycleCompletion:
             ),
             patch("src.dispatcher.remove_worktree"),
             patch("src.dispatcher.subprocess.run") as mock_subproc_run,
-            patch("src.dispatcher.subprocess.Popen") as mock_popen,
+            patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
 
             def _list(label):

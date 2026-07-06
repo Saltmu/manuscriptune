@@ -8,7 +8,7 @@ import os
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +22,22 @@ except ImportError:
 
 from src import github
 from src.dag import FootprintConflict, SubTask, recompute_dag_for_footprint_change
+from src.dispatch_targets import (
+    DispatchHandle,
+    DispatchTarget,
+    LocalProcessDispatchTarget,
+    build_dispatch_target,
+    default_dry_run_command_builder,
+)
 from src.github import IssueRecord, PrRecord, _validate_ref_name
+
+__all__ = [
+    "DispatchHandle",
+    "DispatchTarget",
+    "LocalProcessDispatchTarget",
+    "build_dispatch_target",
+    "default_dry_run_command_builder",
+]
 
 BASE_PRIORITY = {"low": 1.0, "medium": 2.0, "high": 3.0}
 TIME_BONUS_WEIGHT = 0.5
@@ -107,6 +122,8 @@ class ActiveWorktree:
     declared_footprint: tuple[str, ...]
     recompute_count: int = 0
     forced_serial: bool = False
+    external_id: str | None = None
+    external_url: str | None = None
 
 
 @dataclass
@@ -130,6 +147,8 @@ def load_run_state(path: str | Path) -> RunState:
             declared_footprint=tuple(value["declared_footprint"]),
             recompute_count=value.get("recompute_count", 0),
             forced_serial=value.get("forced_serial", False),
+            external_id=value.get("external_id"),
+            external_url=value.get("external_url"),
         )
         for key, value in data.get("active_worktrees", {}).items()
     }
@@ -367,27 +386,25 @@ class LaunchResult:
     pid: int | None
     launched: bool
     error_message: str | None = None
-
-
-def default_dry_run_command_builder(task: Task, worktree_path: Path) -> list[str]:
-    return ["true"]
+    external_id: str | None = None
+    external_url: str | None = None
 
 
 def create_worktree_and_launch(
     task: Task,
     branch_name: str,
     worktree_root: str | Path,
-    log_dir: str | Path,
-    command_builder: Callable[[Task, Path], list[str]],
+    dispatch_target: DispatchTarget,
     apply: bool,
 ) -> LaunchResult:
     _validate_ref_name(branch_name)
     worktree_root = Path(worktree_root)
-    log_dir = Path(log_dir)
     slug = branch_name.replace("/", "-")
     worktree_path = worktree_root / slug
 
     pid: int | None = None
+    external_id: str | None = None
+    external_url: str | None = None
     launched = False
     error_message: str | None = None
 
@@ -406,7 +423,6 @@ def create_worktree_and_launch(
                     pass
 
             worktree_root.mkdir(parents=True, exist_ok=True)
-            log_dir.mkdir(parents=True, exist_ok=True)
 
             # 3. ブランチがすでに存在する場合は -B で強制リセットする
             subprocess.run(
@@ -415,17 +431,10 @@ def create_worktree_and_launch(
                 text=True,
                 check=True,
             )
-            cmd = command_builder(task, worktree_path)
-            log_path = log_dir / f"{slug}.log"
-            with open(log_path, "ab") as log_fh:
-                process = subprocess.Popen(
-                    cmd,
-                    cwd=str(worktree_path),
-                    stdout=log_fh,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            pid = process.pid
+            handle = dispatch_target.launch(task, branch_name, worktree_path)
+            pid = handle.pid
+            external_id = handle.external_id
+            external_url = handle.external_url
             launched = True
         except (subprocess.CalledProcessError, OSError) as e:
             import sys
@@ -446,6 +455,8 @@ def create_worktree_and_launch(
         pid=pid,
         launched=launched,
         error_message=error_message,
+        external_id=external_id,
+        external_url=external_url,
     )
 
 
@@ -510,9 +521,13 @@ class DispatcherConfig:
     log_dir: Path = Path("logs")
     parent_issue_number: int | None = None
     apply: bool = False
-    command_builder: Callable[[Task, Path], list[str]] = default_dry_run_command_builder
+    dispatch_target: DispatchTarget | None = None
     deviation_buffer_lines: int = 5
     max_recompute_retries: int = 2
+
+    def __post_init__(self) -> None:
+        if self.dispatch_target is None:
+            self.dispatch_target = LocalProcessDispatchTarget(log_dir=self.log_dir)
 
 
 @dataclass
@@ -634,6 +649,22 @@ def _finalize_completed_worktree(
     return event
 
 
+def _is_worktree_complete(active: ActiveWorktree, config: DispatcherConfig) -> bool:
+    """#215: `external_id`が設定されている（ローカルpid以外でディスパッチされた）
+    active worktreeは、設定されたdispatch_targetの`is_complete`に完了判定を委譲する。
+    それ以外（従来通りのローカルsubprocess起動）は`is_process_alive`ベースのまま。"""
+    if active.external_id is not None:
+        handle = DispatchHandle(
+            pid=active.pid,
+            external_id=active.external_id,
+            external_url=active.external_url,
+            branch_name=active.branch,
+        )
+        assert config.dispatch_target is not None
+        return config.dispatch_target.is_complete(handle)
+    return not is_process_alive(active.pid)
+
+
 def _process_active_worktrees(
     run_state: RunState,
     tasks_by_issue: dict[int, Task],
@@ -656,7 +687,7 @@ def _process_active_worktrees(
 
         active_task = tasks_by_issue.get(active.issue_number)
 
-        if not is_process_alive(active.pid):
+        if _is_worktree_complete(active, config):
             completion_event = _finalize_completed_worktree(active, active_task, config)
             completion_events.append(completion_event)
             if completion_event["action"] == "completed":
@@ -861,12 +892,12 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
                 branch_name = (
                     f"claude/issue-{task.issue_number}-{task.subtask_id or 'task'}"
                 )
+                assert config.dispatch_target is not None
                 launch = create_worktree_and_launch(
                     task,
                     branch_name,
                     config.worktree_root,
-                    config.log_dir,
-                    config.command_builder,
+                    config.dispatch_target,
                     apply=True,
                 )
                 if not launch.launched:
@@ -888,6 +919,8 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
                     pid=launch.pid,
                     started_at=now,
                     declared_footprint=task.footprint,
+                    external_id=launch.external_id,
+                    external_url=launch.external_url,
                 )
                 run_state.launch_history.append(now)
                 actually_selected.append(task)
@@ -953,6 +986,24 @@ def main(argv: list[str] | None = None) -> int:
         default=2,
         help="DAG再計算のリトライ上限。超過時は強制直列化にフォールバックする（#200）",
     )
+    parser.add_argument(
+        "--dispatch-target",
+        choices=["local", "cloud-routine"],
+        default="local",
+        help="#215: エージェントの実ディスパッチ先。'cloud-routine'はClaude Codeクラウド"
+        "ルーチンのfire APIへディスパッチする（要 --routine-id/--routine-token または"
+        "ORCHESTUNE_ROUTINE_ID/ORCHESTUNE_ROUTINE_TOKEN環境変数）",
+    )
+    parser.add_argument(
+        "--routine-id",
+        default=None,
+        help="#215: クラウドルーチンのID（未指定時はORCHESTUNE_ROUTINE_ID環境変数を使用）",
+    )
+    parser.add_argument(
+        "--routine-token",
+        default=None,
+        help="#215: クラウドルーチンのAPIトークン（未指定時はORCHESTUNE_ROUTINE_TOKEN環境変数を使用）",
+    )
     args = parser.parse_args(argv)
 
     config = DispatcherConfig(
@@ -964,6 +1015,9 @@ def main(argv: list[str] | None = None) -> int:
         log_dir=args.log_dir,
         parent_issue_number=args.parent_issue,
         apply=args.apply,
+        dispatch_target=build_dispatch_target(
+            args.dispatch_target, args.routine_id, args.routine_token, args.log_dir
+        ),
         deviation_buffer_lines=args.deviation_buffer_lines,
         max_recompute_retries=args.max_recompute_retries,
     )
