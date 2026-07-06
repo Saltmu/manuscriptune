@@ -1,5 +1,5 @@
 ---
-name: "orchestrator-dispatch-draft"
+name: "orchestune-dispatch-draft"
 description: "「大きな石」（複数タスクからなる大規模な作業）の分解案生成(dag.py)とディスパッチャー(dispatcher.py)のスケジュール登録を呼び出す、パイロット運用専用のドラフト版導線。"
 version: "0.1.0-draft"
 category: "Development"
@@ -11,7 +11,7 @@ output_schema:
   properties: {}
 ---
 
-# Orchestrator Dispatch Draft Skill (ドラフト版)
+# Orchestune Dispatch Draft Skill (ドラフト版)
 
 > **これはドラフト版です。** 正式なスキルとしての完成度（`local-ci-developer`スキルと同水準の作り込み）は目指しておらず、
 > Issue #181のパイロット運用を実行可能にすることだけを目的とした最小限の導線です。
@@ -26,7 +26,7 @@ output_schema:
 
 ## 前提
 
-- `tools/orchestrator/`（独立Poetry環境）に `src/dag.py`（分解案パース・DAG構築、#183）と
+- `tools/orchestune/`（独立Poetry環境）に `src/dag.py`（分解案パース・DAG構築、#183）と
   `src/dispatcher.py`（クオータ管理・優先度選出・外部排他制御・worktree起動、#184）が実装済みであること。
 - ディスパッチャーの書き込み系操作（ラベル更新・`git worktree`作成・エージェント起動）は、
   **`--apply`を明示指定しない限り一切実行されない**（既定はdry-run）。安全側に倒した設計であるため、
@@ -62,7 +62,7 @@ output_schema:
 3. DAGを構築する:
 
    ```bash
-   cd tools/orchestrator
+   cd tools/orchestune
    poetry run python -c "
    from src.dag import build_dag_from_plan
    import json
@@ -99,7 +99,7 @@ output_schema:
 1. パイロット運用者が `mcp__Claude_Code_Remote__create_trigger` で定期実行トリガーを実登録する。例:
    - `cron_expression`: `"*/30 * * * *"`（30分毎。実際の分は :00/:30 を避けてずらすこと）
    - `create_new_session_on_fire`: `true`（毎回まっさらなセッションから実行し、クオータ消費を抑える）
-   - `prompt`: 「`cd tools/orchestrator && poetry run dispatch-cycle` を実行し、選出結果・quota状況・
+   - `prompt`: 「`cd tools/orchestune && poetry run dispatch-cycle` を実行し、選出結果・quota状況・
      external-lock変更・footprint逸脱イベントを人間に要約報告せよ。リスクフラグ付き・quota枯渇の場合は
      その旨を明記せよ。」
 2. `dispatch-cycle` は既定でdry-runである。ラベル更新・worktree作成・エージェント起動は一切行わず、
@@ -107,7 +107,7 @@ output_schema:
 3. 人間がレポートを見て問題ないと判断した場合のみ、以下を手動実行し実際にdispatchする:
 
    ```bash
-   cd tools/orchestrator
+   cd tools/orchestune
    poetry run dispatch-cycle --apply
    ```
 

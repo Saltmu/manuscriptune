@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "orchestrator"
+name = "orchestune"
 version = "0.1.0"
 description = "Manuscriptune マルチエージェント実装オーケストレーター (分解案パース・結合度スコア算出・DAG構築)"
 authors = ["sshioyama"]
