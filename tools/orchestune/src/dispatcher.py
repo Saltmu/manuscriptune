@@ -762,8 +762,9 @@ def file_lock(lock_path: Path) -> Iterator[None]:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_fd = open(lock_path, "w")
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        yield
     except BlockingIOError:
+        if lock_fd:
+            lock_fd.close()
         raise RuntimeError(
             f"Another instance is already running (locked on {lock_path})"
         ) from None
@@ -771,6 +772,19 @@ def file_lock(lock_path: Path) -> Iterator[None]:
         import sys
 
         print(f"Warning: Failed to acquire lock: {e}", file=sys.stderr)
+        if lock_fd:
+            lock_fd.close()
+        yield
+        return
+
+    # #227: ロック取得成功後のbody実行は別のtry/finallyに分離する。
+    # ロック取得(mkdir/open/flock)の例外処理と同じtry内でyieldしていると、
+    # body側で発生した例外がこのgeneratorへ再スローされ、下のexcept Exceptionに
+    # 捕捉されて再度yieldしてしまい、Pythonが
+    # `RuntimeError: generator didn't stop after throw()` を送出して
+    # 元の例外を握り潰してしまう（body側の例外はロック取得の失敗ではないため
+    # ここで処理すべきではない）。
+    try:
         yield
     finally:
         if lock_fd:
