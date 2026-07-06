@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import re
 import subprocess
 import time
@@ -35,12 +36,14 @@ class Task:
     progress_partial: bool
     status_labels: tuple[str, ...]
     created_at: str
+    depends_on: tuple[str, ...] = ()
 
 
 def parse_task_from_issue(issue: IssueRecord) -> Task:
     subtask_id = ""
     footprint: tuple[str, ...] = ()
     symbols: tuple[str, ...] = ()
+    depends_on: tuple[str, ...] = ()
 
     match = _FOOTPRINT_BLOCK_PATTERN.search(issue.body)
     if match:
@@ -49,6 +52,7 @@ def parse_task_from_issue(issue: IssueRecord) -> Task:
             subtask_id = str(data.get("subtask_id", ""))
             footprint = tuple(str(f) for f in (data.get("footprint") or []))
             symbols = tuple(str(s) for s in (data.get("symbols") or []))
+            depends_on = tuple(str(d) for d in (data.get("depends_on") or []))
 
     priority = "medium"
     risk = False
@@ -71,6 +75,7 @@ def parse_task_from_issue(issue: IssueRecord) -> Task:
         progress_partial=progress_partial,
         status_labels=tuple(issue.labels),
         created_at=issue.created_at,
+        depends_on=depends_on,
     )
 
 
@@ -396,6 +401,57 @@ def create_worktree_and_launch(
     )
 
 
+def is_process_alive(pid: int | None) -> bool:
+    """#193: 記録済みpidのプロセス生存確認によるタスク完了判定。
+
+    シグナル送信権限がない場合（別ユーザー所有のPID再利用等）は、
+    安全側に倒し「生存している」とみなす。
+    """
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def worktree_has_uncommitted_changes(worktree_path: str | Path) -> bool:
+    """#193: worktree削除前の未コミット変更確認。
+
+    `git status`自体が失敗する場合（worktreeが既に手動削除済み等）は、
+    クオータ解放を優先し安全側でクリーン（変更なし）として扱う。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(worktree_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return False
+    return bool(result.stdout.strip())
+
+
+def remove_worktree(worktree_path: str | Path) -> None:
+    """#193: 完了したworktreeを撤去する。既に手動削除済み等の失敗は無視する
+    （run_stateからのクオータ解放を妨げないことを優先する）。"""
+    try:
+        subprocess.run(
+            ["git", "worktree", "remove", str(worktree_path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        pass
+
+
 @dataclass
 class DispatcherConfig:
     max_concurrent: int = 2
@@ -417,6 +473,8 @@ class CycleReport:
     quota_slots_available: int
     lock_changes: dict[str, list[Task]]
     deviation_events: list[dict]
+    completion_events: list[dict]
+    promotion_events: list[dict]
     applied: bool
 
 
@@ -499,28 +557,66 @@ def _handle_footprint_deviation(
     return event
 
 
-def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
-    run_state = load_run_state(config.run_state_path)
-    now = time.time()
+def _finalize_completed_worktree(
+    active: ActiveWorktree,
+    active_task: Task | None,
+    config: DispatcherConfig,
+) -> dict:
+    """#193: プロセス終了を検知したactive worktreeの完了後処理。
 
-    queued_issues = github.list_issues_by_label("status:queued")
-    locked_issues = github.list_issues_by_label("status:external-lock")
-    in_progress_issues = github.list_issues_by_label("status:in-progress")
-    tasks_by_issue = {
-        issue.number: parse_task_from_issue(issue)
-        for issue in [*queued_issues, *locked_issues, *in_progress_issues]
-    }
-    issue_number_by_subtask_id = {
-        task.subtask_id: task.issue_number
-        for task in tasks_by_issue.values()
-        if task.subtask_id
+    未コミットの変更が残っている場合は、削除・ラベル遷移を行わず人間の
+    確認を待つ（安全側に倒し、作業内容の消失を防ぐ）。
+    """
+    event: dict = {
+        "issue_number": active.issue_number,
+        "worktree_path": active.worktree_path,
     }
 
+    if worktree_has_uncommitted_changes(active.worktree_path):
+        event["action"] = "completion_skipped_dirty_worktree"
+        return event
+
+    if config.apply:
+        remove_worktree(active.worktree_path)
+        github.remove_label(active.issue_number, "status:in-progress")
+        github.add_label(active.issue_number, "status:done")
+
+    event["action"] = "completed"
+    event["subtask_id"] = active_task.subtask_id if active_task else ""
+    return event
+
+
+def _process_active_worktrees(
+    run_state: RunState,
+    tasks_by_issue: dict[int, Task],
+    issue_number_by_subtask_id: dict[str, int],
+    config: DispatcherConfig,
+) -> tuple[list[dict], list[dict], bool, set[str]]:
+    """#192/#193/#200: active worktreeごとの完了検知・footprint逸脱処理。
+
+    完了と判定したエントリは（apply時）run_state.active_worktreesから
+    除去してクオータを解放し、以後のfootprint逸脱チェックはスキップする。
+    """
+    completion_events: list[dict] = []
     deviation_events: list[dict] = []
     any_forced_serial = False
-    for active in run_state.active_worktrees.values():
+    completed_subtask_ids: set[str] = set()
+
+    for key, active in list(run_state.active_worktrees.items()):
         if active.forced_serial:
             any_forced_serial = True
+
+        active_task = tasks_by_issue.get(active.issue_number)
+
+        if not is_process_alive(active.pid):
+            completion_event = _finalize_completed_worktree(active, active_task, config)
+            completion_events.append(completion_event)
+            if completion_event["action"] == "completed":
+                if active_task is not None and active_task.subtask_id:
+                    completed_subtask_ids.add(active_task.subtask_id)
+                if config.apply:
+                    del run_state.active_worktrees[key]
+                continue
 
         deviated = check_footprint_deviation(
             active.worktree_path,
@@ -537,6 +633,79 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             any_forced_serial = True
         deviation_events.append(event)
 
+    return completion_events, deviation_events, any_forced_serial, completed_subtask_ids
+
+
+def _promote_blocked_tasks(
+    blocked_issues: list[IssueRecord],
+    done_issues: list[IssueRecord],
+    completed_subtask_ids: set[str],
+    config: DispatcherConfig,
+) -> list[dict]:
+    """#193: 依存先が全て解決したstatus:blockedタスクをstatus:queuedへ昇格する。"""
+    done_subtask_ids = {
+        task.subtask_id
+        for task in (parse_task_from_issue(issue) for issue in done_issues)
+        if task.subtask_id
+    } | completed_subtask_ids
+
+    events: list[dict] = []
+    for issue in blocked_issues:
+        task = parse_task_from_issue(issue)
+        if not task.depends_on:
+            continue
+        if not all(dep in done_subtask_ids for dep in task.depends_on):
+            continue
+        if config.apply:
+            github.remove_label(task.issue_number, "status:blocked")
+            github.add_label(task.issue_number, "status:queued")
+        events.append(
+            {"issue_number": task.issue_number, "subtask_id": task.subtask_id}
+        )
+    return events
+
+
+def _strip_remote_prefix(branch: str, remote: str = "origin") -> str:
+    """#194: `git branch -r`由来のリモート名プレフィックスを剥がし、
+    PRのheadRefName・ディスパッチャ自身のブランチ名と同じ名前空間に正規化する。"""
+    prefix = f"{remote}/"
+    return branch[len(prefix) :] if branch.startswith(prefix) else branch
+
+
+def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
+    run_state = load_run_state(config.run_state_path)
+    now = time.time()
+
+    queued_issues = github.list_issues_by_label("status:queued")
+    locked_issues = github.list_issues_by_label("status:external-lock")
+    in_progress_issues = github.list_issues_by_label("status:in-progress")
+    blocked_issues = github.list_issues_by_label("status:blocked")
+    done_issues = github.list_issues_by_label("status:done")
+    tasks_by_issue = {
+        issue.number: parse_task_from_issue(issue)
+        for issue in [
+            *queued_issues,
+            *locked_issues,
+            *in_progress_issues,
+            *blocked_issues,
+        ]
+    }
+    issue_number_by_subtask_id = {
+        task.subtask_id: task.issue_number
+        for task in tasks_by_issue.values()
+        if task.subtask_id
+    }
+
+    completion_events, deviation_events, any_forced_serial, completed_subtask_ids = (
+        _process_active_worktrees(
+            run_state, tasks_by_issue, issue_number_by_subtask_id, config
+        )
+    )
+
+    promotion_events = _promote_blocked_tasks(
+        blocked_issues, done_issues, completed_subtask_ids, config
+    )
+
     remote_branch_names = github.list_remote_branches()
     prs = github.list_open_prs()
     active_branches = [aw.branch for aw in run_state.active_worktrees.values()]
@@ -544,10 +713,12 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
     bare_branches = [
         b
         for b in remote_branch_names
-        if b.rsplit("/", 1)[-1] not in pr_head_refs and b not in active_branches
+        if _strip_remote_prefix(b) not in pr_head_refs
+        and _strip_remote_prefix(b) not in active_branches
     ]
     remote_branch_footprints = [
-        (branch, tuple(github.branch_changed_files(branch))) for branch in bare_branches
+        (_strip_remote_prefix(branch), tuple(github.branch_changed_files(branch)))
+        for branch in bare_branches
     ]
 
     all_tasks = list(tasks_by_issue.values())
@@ -625,6 +796,8 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             "to_unlock": lock_result.to_unlock,
         },
         deviation_events=deviation_events,
+        completion_events=completion_events,
+        promotion_events=promotion_events,
         applied=config.apply,
     )
 
@@ -641,6 +814,8 @@ def _report_to_dict(report: CycleReport) -> dict:
             ],
         },
         "deviation_events": report.deviation_events,
+        "completion_events": report.completion_events,
+        "promotion_events": report.promotion_events,
     }
 
 
