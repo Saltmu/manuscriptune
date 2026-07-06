@@ -223,3 +223,14 @@ class TestBranchChangedFiles:
             with pytest.raises(ValueError):
                 branch_changed_files("--upload-pack=evil")
             mock_run.assert_not_called()
+
+    def test_returns_empty_list_when_branch_has_no_merge_base(self):
+        """#232: mainと共通の祖先を持たない(orphanな)ブランチとの3点diffは
+        `fatal: no merge base`でexit 128になる。dispatch-cycle全体をクラッシュ
+        させず、footprint差分なし（ロック対象外）として扱うべき。"""
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(
+                128, ["git", "diff", "--name-only", "origin/main...origin/orphan"]
+            )
+            files = branch_changed_files("origin/orphan")
+        assert files == []
