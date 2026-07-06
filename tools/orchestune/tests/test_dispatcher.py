@@ -17,6 +17,7 @@ from src.dispatcher import (
     compute_priority_score,
     create_worktree_and_launch,
     default_dry_run_command_builder,
+    file_lock,
     is_process_alive,
     load_run_state,
     notify_force_serial,
@@ -1667,3 +1668,26 @@ class TestDispatcherLocking:
                 ):
                     run_dispatch_cycle(config)
             assert "Another instance is already running" in str(exc_info.value)
+
+    def test_file_lock_propagates_exception_raised_inside_body(self, tmp_path):
+        """#227: dispatch cycle本体（`with file_lock(...):`のbody）で発生した例外は、
+        ロック機構によってマスクされず、元の例外のまま呼び出し元に伝播しなければならない。
+        GitHub Actions実行時、`gh issue edit --add-label`のCalledProcessErrorが
+        `RuntimeError: generator didn't stop after throw()`に化けてしまう回帰を防ぐ。"""
+        lock_path = tmp_path / "test.lock"
+
+        with pytest.raises(ValueError, match="boom"):
+            with file_lock(lock_path):
+                raise ValueError("boom")
+
+    def test_file_lock_still_yields_when_lock_acquisition_itself_fails(self, tmp_path):
+        """ロック取得（mkdir/open/flock）自体が失敗した場合は、従来通り警告を出して
+        フォールバックし、bodyは実行される（安全側に倒す既存の意図は維持する）。"""
+        unwritable_dir = tmp_path / "no_such_parent"
+        lock_path = unwritable_dir / "test.lock"
+
+        with patch("pathlib.Path.mkdir", side_effect=OSError("boom-mkdir")):
+            executed = False
+            with file_lock(lock_path):
+                executed = True
+            assert executed
