@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Restore run_state.json from state branch
         run: |
@@ -46,7 +46,7 @@ jobs:
 
       - name: Set up Python 3.12
         id: setup-python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -57,7 +57,7 @@ jobs:
           virtualenvs-in-project: true
 
       - name: Load cached venv
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tools/orchestune/.venv
           key: orchestune-venv-v1-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('tools/orchestune/poetry.lock') }}
