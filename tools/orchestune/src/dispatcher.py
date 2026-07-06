@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import os
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 import yaml
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
 
 from src import github
 from src.dag import FootprintConflict, SubTask, recompute_dag_for_footprint_change
@@ -37,6 +43,7 @@ class Task:
     status_labels: tuple[str, ...]
     created_at: str
     depends_on: tuple[str, ...] = ()
+    yaml_error: bool = False
 
 
 def parse_task_from_issue(issue: IssueRecord) -> Task:
@@ -44,15 +51,25 @@ def parse_task_from_issue(issue: IssueRecord) -> Task:
     footprint: tuple[str, ...] = ()
     symbols: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
+    yaml_error = False
 
     match = _FOOTPRINT_BLOCK_PATTERN.search(issue.body)
     if match:
-        data = yaml.safe_load(match.group(1))
-        if isinstance(data, dict):
-            subtask_id = str(data.get("subtask_id", ""))
-            footprint = tuple(str(f) for f in (data.get("footprint") or []))
-            symbols = tuple(str(s) for s in (data.get("symbols") or []))
-            depends_on = tuple(str(d) for d in (data.get("depends_on") or []))
+        try:
+            data = yaml.safe_load(match.group(1))
+            if isinstance(data, dict):
+                subtask_id = str(data.get("subtask_id", ""))
+                footprint = tuple(str(f) for f in (data.get("footprint") or []))
+                symbols = tuple(str(s) for s in (data.get("symbols") or []))
+                depends_on = tuple(str(d) for d in (data.get("depends_on") or []))
+        except yaml.YAMLError as e:
+            import sys
+
+            print(
+                f"Warning: Failed to parse YAML from issue #{issue.number}: {e}",
+                file=sys.stderr,
+            )
+            yaml_error = True
 
     priority = "medium"
     risk = False
@@ -76,6 +93,7 @@ def parse_task_from_issue(issue: IssueRecord) -> Task:
         status_labels=tuple(issue.labels),
         created_at=issue.created_at,
         depends_on=depends_on,
+        yaml_error=yaml_error,
     )
 
 
@@ -181,6 +199,7 @@ def select_next_tasks(
         t
         for t in candidate_tasks
         if not t.risk
+        and not t.yaml_error
         and "status:external-lock" not in t.status_labels
         and t.issue_number not in active_issue_numbers
     ]
@@ -347,6 +366,7 @@ class LaunchResult:
     worktree_path: str
     pid: int | None
     launched: bool
+    error_message: str | None = None
 
 
 def default_dry_run_command_builder(task: Task, worktree_path: Path) -> list[str]:
@@ -369,28 +389,55 @@ def create_worktree_and_launch(
 
     pid: int | None = None
     launched = False
+    error_message: str | None = None
 
     if apply:
-        worktree_root.mkdir(parents=True, exist_ok=True)
-        log_dir.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["git", "worktree", "add", str(worktree_path), "-b", branch_name],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        cmd = command_builder(task, worktree_path)
-        log_path = log_dir / f"{slug}.log"
-        with open(log_path, "ab") as log_fh:
-            process = subprocess.Popen(
-                cmd,
-                cwd=str(worktree_path),
-                stdout=log_fh,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
+        try:
+            # 1. 無効なworktreeの整理
+            subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
+
+            # 2. すでにディレクトリが存在する場合のクリーンアップ
+            if worktree_path.exists():
+                import shutil
+
+                try:
+                    shutil.rmtree(worktree_path)
+                except Exception:
+                    pass
+
+            worktree_root.mkdir(parents=True, exist_ok=True)
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            # 3. ブランチがすでに存在する場合は -B で強制リセットする
+            subprocess.run(
+                ["git", "worktree", "add", str(worktree_path), "-B", branch_name],
+                capture_output=True,
+                text=True,
+                check=True,
             )
-        pid = process.pid
-        launched = True
+            cmd = command_builder(task, worktree_path)
+            log_path = log_dir / f"{slug}.log"
+            with open(log_path, "ab") as log_fh:
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=str(worktree_path),
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            pid = process.pid
+            launched = True
+        except (subprocess.CalledProcessError, OSError) as e:
+            import sys
+
+            error_details = ""
+            if isinstance(e, subprocess.CalledProcessError):
+                error_details = f" (stderr: {e.stderr.strip() if e.stderr else ''})"
+            print(
+                f"Error: Failed to create worktree or launch for issue #{task.issue_number}: {e}{error_details}",
+                file=sys.stderr,
+            )
+            error_message = f"{e}{error_details}"
 
     return LaunchResult(
         issue_number=task.issue_number,
@@ -398,6 +445,7 @@ def create_worktree_and_launch(
         worktree_path=str(worktree_path),
         pid=pid,
         launched=launched,
+        error_message=error_message,
     )
 
 
@@ -672,134 +720,192 @@ def _strip_remote_prefix(branch: str, remote: str = "origin") -> str:
     return branch[len(prefix) :] if branch.startswith(prefix) else branch
 
 
+@contextlib.contextmanager
+def file_lock(lock_path: Path) -> Iterator[None]:
+    if fcntl is None:
+        yield
+        return
+
+    lock_fd = None
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd = open(lock_path, "w")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    except BlockingIOError:
+        raise RuntimeError(
+            f"Another instance is already running (locked on {lock_path})"
+        ) from None
+    except Exception as e:
+        import sys
+
+        print(f"Warning: Failed to acquire lock: {e}", file=sys.stderr)
+        yield
+    finally:
+        if lock_fd:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except Exception:
+                pass
+            lock_fd.close()
+
+
 def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
-    run_state = load_run_state(config.run_state_path)
-    now = time.time()
+    lock_path = Path(config.run_state_path).with_suffix(".lock")
+    with file_lock(lock_path):
+        run_state = load_run_state(config.run_state_path)
+        now = time.time()
 
-    queued_issues = github.list_issues_by_label("status:queued")
-    locked_issues = github.list_issues_by_label("status:external-lock")
-    in_progress_issues = github.list_issues_by_label("status:in-progress")
-    blocked_issues = github.list_issues_by_label("status:blocked")
-    done_issues = github.list_issues_by_label("status:done")
-    tasks_by_issue = {
-        issue.number: parse_task_from_issue(issue)
-        for issue in [
-            *queued_issues,
-            *locked_issues,
-            *in_progress_issues,
-            *blocked_issues,
-        ]
-    }
-    issue_number_by_subtask_id = {
-        task.subtask_id: task.issue_number
-        for task in tasks_by_issue.values()
-        if task.subtask_id
-    }
+        queued_issues = github.list_issues_by_label("status:queued")
+        locked_issues = github.list_issues_by_label("status:external-lock")
+        in_progress_issues = github.list_issues_by_label("status:in-progress")
+        blocked_issues = github.list_issues_by_label("status:blocked")
+        done_issues = github.list_issues_by_label("status:done")
+        tasks_by_issue = {
+            issue.number: parse_task_from_issue(issue)
+            for issue in [
+                *queued_issues,
+                *locked_issues,
+                *in_progress_issues,
+                *blocked_issues,
+            ]
+        }
+        issue_number_by_subtask_id = {
+            task.subtask_id: task.issue_number
+            for task in tasks_by_issue.values()
+            if task.subtask_id
+        }
 
-    completion_events, deviation_events, any_forced_serial, completed_subtask_ids = (
-        _process_active_worktrees(
+        (
+            completion_events,
+            deviation_events,
+            any_forced_serial,
+            completed_subtask_ids,
+        ) = _process_active_worktrees(
             run_state, tasks_by_issue, issue_number_by_subtask_id, config
         )
-    )
 
-    promotion_events = _promote_blocked_tasks(
-        blocked_issues, done_issues, completed_subtask_ids, config
-    )
-
-    remote_branch_names = github.list_remote_branches()
-    prs = github.list_open_prs()
-    active_branches = [aw.branch for aw in run_state.active_worktrees.values()]
-    pr_head_refs = {pr.head_ref for pr in prs}
-    bare_branches = [
-        b
-        for b in remote_branch_names
-        if _strip_remote_prefix(b) not in pr_head_refs
-        and _strip_remote_prefix(b) not in active_branches
-    ]
-    remote_branch_footprints = [
-        (_strip_remote_prefix(branch), tuple(github.branch_changed_files(branch)))
-        for branch in bare_branches
-    ]
-
-    all_tasks = list(tasks_by_issue.values())
-    lock_result = scan_external_locks(
-        all_tasks, remote_branch_footprints, prs, active_branches
-    )
-
-    if config.apply:
-        for task in lock_result.to_lock:
-            github.add_label(task.issue_number, "status:external-lock")
-        for task in lock_result.to_unlock:
-            github.remove_label(task.issue_number, "status:external-lock")
-            github.add_label(task.issue_number, "status:queued")
-
-    newly_locked = {t.issue_number for t in lock_result.to_lock}
-    candidate_tasks = [
-        tasks_by_issue[issue.number]
-        for issue in queued_issues
-        if issue.number not in newly_locked
-    ]
-
-    if any_forced_serial:
-        # #200: リトライ上限を超えたサブタスクを直列実行させるため、
-        # 完了するまで新規タスクのdispatchを凍結する。
-        quota_slots = 0
-        selected: list[Task] = []
-    else:
-        quota_slots = quota_available(
-            run_state,
-            now,
-            config.max_concurrent,
-            config.max_launches_per_window,
-            config.window_seconds,
-        )
-        selected = select_next_tasks(
-            candidate_tasks,
-            run_state,
-            now,
-            config.max_concurrent,
-            config.max_launches_per_window,
-            config.window_seconds,
+        promotion_events = _promote_blocked_tasks(
+            blocked_issues, done_issues, completed_subtask_ids, config
         )
 
-    if config.apply:
-        for task in selected:
-            branch_name = (
-                f"claude/issue-{task.issue_number}-{task.subtask_id or 'task'}"
-            )
-            launch = create_worktree_and_launch(
-                task,
-                branch_name,
-                config.worktree_root,
-                config.log_dir,
-                config.command_builder,
-                apply=True,
-            )
-            github.remove_label(task.issue_number, "status:queued")
-            github.add_label(task.issue_number, "status:in-progress")
-            run_state.active_worktrees[str(task.issue_number)] = ActiveWorktree(
-                issue_number=task.issue_number,
-                branch=branch_name,
-                worktree_path=launch.worktree_path,
-                pid=launch.pid,
-                started_at=now,
-                declared_footprint=task.footprint,
-            )
-            run_state.launch_history.append(now)
-        save_run_state(run_state, config.run_state_path)
+        remote_branch_names = github.list_remote_branches()
+        prs = github.list_open_prs()
+        active_branches = [aw.branch for aw in run_state.active_worktrees.values()]
+        pr_head_refs = {pr.head_ref for pr in prs}
+        bare_branches = [
+            b
+            for b in remote_branch_names
+            if _strip_remote_prefix(b) not in pr_head_refs
+            and _strip_remote_prefix(b) not in active_branches
+        ]
+        remote_branch_footprints = [
+            (_strip_remote_prefix(branch), tuple(github.branch_changed_files(branch)))
+            for branch in bare_branches
+        ]
 
-    return CycleReport(
-        selected=selected,
-        quota_slots_available=quota_slots,
-        lock_changes={
-            "to_lock": lock_result.to_lock,
-            "to_unlock": lock_result.to_unlock,
-        },
-        deviation_events=deviation_events,
-        completion_events=completion_events,
-        promotion_events=promotion_events,
-        applied=config.apply,
-    )
+        all_tasks = list(tasks_by_issue.values())
+        lock_result = scan_external_locks(
+            all_tasks, remote_branch_footprints, prs, active_branches
+        )
+
+        if config.apply:
+            for task in lock_result.to_lock:
+                github.add_label(task.issue_number, "status:external-lock")
+            for task in lock_result.to_unlock:
+                github.remove_label(task.issue_number, "status:external-lock")
+                github.add_label(task.issue_number, "status:queued")
+
+        newly_locked = {t.issue_number for t in lock_result.to_lock}
+        candidate_tasks = [
+            tasks_by_issue[issue.number]
+            for issue in queued_issues
+            if issue.number not in newly_locked
+        ]
+
+        if any_forced_serial:
+            # #200: リトライ上限を超えたサブタスクを直列実行させるため、
+            # 完了するまで新規タスクのdispatchを凍結する。
+            quota_slots = 0
+            selected: list[Task] = []
+        else:
+            quota_slots = quota_available(
+                run_state,
+                now,
+                config.max_concurrent,
+                config.max_launches_per_window,
+                config.window_seconds,
+            )
+            selected = select_next_tasks(
+                candidate_tasks,
+                run_state,
+                now,
+                config.max_concurrent,
+                config.max_launches_per_window,
+                config.window_seconds,
+            )
+
+        if config.apply:
+            # YAMLパースエラーになっているタスクをブロックする
+            for task in candidate_tasks:
+                if task.yaml_error:
+                    github.remove_label(task.issue_number, "status:queued")
+                    github.add_label(task.issue_number, "status:blocked")
+                    github.add_comment(
+                        task.issue_number,
+                        "YAMLのパースに失敗したため、タスクをブロックしました。フォーマットを確認してください。",
+                    )
+
+            actually_selected = []
+            for task in selected:
+                branch_name = (
+                    f"claude/issue-{task.issue_number}-{task.subtask_id or 'task'}"
+                )
+                launch = create_worktree_and_launch(
+                    task,
+                    branch_name,
+                    config.worktree_root,
+                    config.log_dir,
+                    config.command_builder,
+                    apply=True,
+                )
+                if not launch.launched:
+                    github.remove_label(task.issue_number, "status:queued")
+                    github.add_label(task.issue_number, "status:blocked")
+                    github.add_comment(
+                        task.issue_number,
+                        f"Git worktreeの作成またはエージェントの起動に失敗しました。\n"
+                        f"エラー内容:\n```\n{launch.error_message}\n```",
+                    )
+                    continue
+
+                github.remove_label(task.issue_number, "status:queued")
+                github.add_label(task.issue_number, "status:in-progress")
+                run_state.active_worktrees[str(task.issue_number)] = ActiveWorktree(
+                    issue_number=task.issue_number,
+                    branch=branch_name,
+                    worktree_path=launch.worktree_path,
+                    pid=launch.pid,
+                    started_at=now,
+                    declared_footprint=task.footprint,
+                )
+                run_state.launch_history.append(now)
+                actually_selected.append(task)
+            selected = actually_selected
+            save_run_state(run_state, config.run_state_path)
+
+        return CycleReport(
+            selected=selected,
+            quota_slots_available=quota_slots,
+            lock_changes={
+                "to_lock": lock_result.to_lock,
+                "to_unlock": lock_result.to_unlock,
+            },
+            deviation_events=deviation_events,
+            completion_events=completion_events,
+            promotion_events=promotion_events,
+            applied=config.apply,
+        )
 
 
 def _report_to_dict(report: CycleReport) -> dict:
@@ -861,8 +967,14 @@ def main(argv: list[str] | None = None) -> int:
         deviation_buffer_lines=args.deviation_buffer_lines,
         max_recompute_retries=args.max_recompute_retries,
     )
-    report = run_dispatch_cycle(config)
-    print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
+    try:
+        report = run_dispatch_cycle(config)
+        print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
+    except RuntimeError as e:
+        import sys
+
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
     return 0
 
 

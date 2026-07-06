@@ -1,6 +1,7 @@
 import json
 import subprocess
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -134,6 +135,26 @@ class TestParseTaskFromIssue:
             created_at="2026-01-01T00:00:00+00:00",
         )
         assert parse_task_from_issue(issue).depends_on == ()
+
+    def test_invalid_yaml_sets_yaml_error(self):
+        body = (
+            "## Footprint\n"
+            "```yaml\n"
+            "subtask_id: task-invalid\n"
+            "footprint:\n"
+            "  - [invalid-yaml-structure:\n"
+            "```\n"
+        )
+        issue = IssueRecord(
+            number=9,
+            title="t",
+            body=body,
+            labels=(),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+        task = parse_task_from_issue(issue)
+        assert task.yaml_error is True
+        assert task.subtask_id == ""
 
 
 class TestRunState:
@@ -651,6 +672,29 @@ class TestCreateWorktreeAndLaunch:
                 command_builder=default_dry_run_command_builder,
                 apply=True,
             )
+
+    def test_apply_failure_returns_launched_false_with_error(self, tmp_path):
+        task = _task(1)
+        with (
+            patch("src.dispatcher.subprocess.run") as mock_run,
+            patch("src.dispatcher.subprocess.Popen") as mock_popen,
+        ):
+            mock_run.side_effect = subprocess.CalledProcessError(
+                returncode=128,
+                cmd="git worktree add",
+                stderr="fatal: branch 'claude/issue-1-task-1' already exists",
+            )
+            result = create_worktree_and_launch(
+                task,
+                branch_name="claude/issue-1-task-1",
+                worktree_root=tmp_path / "worktrees",
+                log_dir=tmp_path / "logs",
+                command_builder=default_dry_run_command_builder,
+                apply=True,
+            )
+        assert result.launched is False
+        assert "fatal: branch" in result.error_message
+        mock_popen.assert_not_called()
 
 
 class TestRunDispatchCycle:
@@ -1490,3 +1534,101 @@ class TestRunDispatchCycleBlockedPromotion:
         mock_add_label.assert_not_called()
         mock_remove_label.assert_not_called()
         assert report.promotion_events == [{"issue_number": 2, "subtask_id": "task-b"}]
+
+    def test_yaml_error_transitions_to_blocked(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            apply=True,
+        )
+        body = (
+            "## Footprint\n"
+            "```yaml\n"
+            "subtask_id: task-invalid\n"
+            "footprint:\n"
+            "  - [invalid-yaml-structure:\n"
+            "```\n"
+        )
+        issue = IssueRecord(
+            number=9,
+            title="t",
+            body=body,
+            labels=("status:queued",),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+        ):
+            mock_list.side_effect = (
+                lambda label: [issue] if label == "status:queued" else []
+            )
+
+            report = run_dispatch_cycle(config)
+
+            assert report.selected == []
+            mock_remove_label.assert_any_call(9, "status:queued")
+            mock_add_label.assert_any_call(9, "status:blocked")
+            mock_add_comment.assert_called_once_with(9, ANY)
+
+    def test_worktree_launch_failure_transitions_to_blocked(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            apply=True,
+        )
+        issue = _issue(1)
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.subprocess.run") as mock_run,
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+        ):
+            mock_list.side_effect = (
+                lambda label: [issue] if label == "status:queued" else []
+            )
+            mock_run.side_effect = subprocess.CalledProcessError(
+                returncode=128,
+                cmd="git worktree add",
+                stderr="fatal: something went wrong",
+            )
+
+            report = run_dispatch_cycle(config)
+
+            assert report.selected == []
+            mock_remove_label.assert_any_call(1, "status:queued")
+            mock_add_label.assert_any_call(1, "status:blocked")
+            mock_add_comment.assert_called_once_with(1, ANY)
+
+
+class TestDispatcherLocking:
+    def test_run_dispatch_cycle_raises_runtime_error_if_locked(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            apply=False,
+        )
+        lock_path = Path(config.run_state_path).with_suffix(".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        import fcntl
+
+        with open(lock_path, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            with pytest.raises(RuntimeError) as exc_info:
+                with (
+                    patch(
+                        "src.dispatcher.github.list_issues_by_label", return_value=[]
+                    ),
+                    patch(
+                        "src.dispatcher.github.list_remote_branches", return_value=[]
+                    ),
+                    patch("src.dispatcher.github.list_open_prs", return_value=[]),
+                ):
+                    run_dispatch_cycle(config)
+            assert "Another instance is already running" in str(exc_info.value)
