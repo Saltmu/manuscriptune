@@ -75,7 +75,8 @@ output_schema:
    「人間の承認ゲートを1点に絞る」方針に従う）。
 5. 承認後、既存の`local-ci-developer`スキルのワークフローに従い、サブタスクごとにGitHub Issueを起票する。
    Issue本文には、`dispatcher.py`の`parse_task_from_issue`が読み取れるよう、以下の形式で
-   footprint/symbols/subtask_idを埋め込む:
+   footprint/symbols/subtask_id/depends_onを埋め込む（#193: `depends_on`は依存解決による
+   `status:blocked` → `status:queued`昇格判定に使われるため、依存先がある場合は必ず記載する）:
 
    ```markdown
    ## Footprint
@@ -85,6 +86,8 @@ output_schema:
      - src/foo.py
    symbols:
      - foo.Foo
+   depends_on:
+     - task-x
    ```
    ```
 
@@ -135,6 +138,38 @@ output_schema:
 4. dry-run時（`--apply`未指定）は、上記のコメント投稿・ラベル付与は一切行われず、
    `deviation_events`にどのアクションが実行される見込みかのみが記録される
    （`recompute_count`・`forced_serial`の状態も永続化されない）。
+
+## タスク完了検知・クオータ解放・依存解決（#193）
+
+`dispatch-cycle`は毎サイクル冒頭で、`status:in-progress`のactive worktreeについて
+記録済み`pid`のプロセス生存確認（`os.kill(pid, 0)`）により完了を判定する。これにより、
+以前は一度dispatchしたタスクが`run_state.active_worktrees`に残り続けクオータが
+恒久的に枯渇していた問題（同一cycle内でクオータが解放され新規タスクが選出される）が解消されている。
+
+1. **完了判定**: プロセスが終了していれば完了とみなす。ダミー`command_builder`
+   （`["true"]`）はほぼ即座に終了するため、実エージェントが未接続の状態でも
+   次サイクルで即完了扱いになる点に注意する。
+2. **未コミット変更が残る場合は安全側でスキップ**: `git status --porcelain`で
+   worktreeに未コミットの変更が検知された場合、**worktree削除・ラベル遷移は行わず**
+   （`completion_events`に`action: "completion_skipped_dirty_worktree"`として記録）、
+   人間の確認を待つ。作業内容を自動では失わせない設計判断である。
+3. **クリーンな場合の後処理**: `git worktree remove`（`--force`は使わない）で
+   worktreeを撤去し、`run_state.active_worktrees`から除去してクオータを解放、
+   ラベルを`status:in-progress` → `status:done`へ遷移する。
+4. **依存解決による昇格**: `status:blocked`のサブタスクについて、`depends_on`に
+   列挙された全サブタスクIDが`status:done`（または当サイクルで完了したもの）に
+   含まれていれば、`status:blocked` → `status:queued`へ自動昇格する
+   （`promotion_events`に記録）。昇格したタスク自体は次サイクル以降で選出対象になる。
+5. dry-run時は上記の`git worktree remove`・ラベル遷移は一切行われず、
+   `completion_events`・`promotion_events`にプレビューのみが記録される。
+
+## リモートブランチの自己ロック誤検知修正（#194）
+
+外部作業スキャン（ステージ2.3）で`git branch -r`由来のブランチ名
+（`origin/`プレフィックス付き）をPRの`headRefName`・ディスパッチャ自身のブランチ名
+と正規化してから突き合わせるよう修正済み。以前はこの正規化が欠けていたため、
+ディスパッチャが自分自身の起動ブランチを「外部の変更」と誤認し、footprintが
+重複するqueuedタスクを誤って`status:external-lock`にし得た。
 
 ## #183・#184完了後の疎通確認チェックリスト
 
