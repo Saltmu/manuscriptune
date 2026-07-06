@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from src import github
-from src.dag import FootprintConflict
+from src.dag import FootprintConflict, SubTask, recompute_dag_for_footprint_change
 from src.github import IssueRecord, PrRecord, _validate_ref_name
 
 BASE_PRIORITY = {"low": 1.0, "medium": 2.0, "high": 3.0}
@@ -82,6 +82,8 @@ class ActiveWorktree:
     pid: int | None
     started_at: float
     declared_footprint: tuple[str, ...]
+    recompute_count: int = 0
+    forced_serial: bool = False
 
 
 @dataclass
@@ -103,6 +105,8 @@ def load_run_state(path: str | Path) -> RunState:
             pid=value["pid"],
             started_at=value["started_at"],
             declared_footprint=tuple(value["declared_footprint"]),
+            recompute_count=value.get("recompute_count", 0),
+            forced_serial=value.get("forced_serial", False),
         )
         for key, value in data.get("active_worktrees", {}).items()
     }
@@ -229,10 +233,18 @@ def check_footprint_deviation(
     worktree_path: str | Path,
     declared_footprint: tuple[str, ...],
     base: str = "origin/main",
+    min_changed_lines: int = 0,
 ) -> list[str]:
+    """宣言footprint外のファイル変更を検知する。
+
+    #200: ライブロック（チャーン）防止のため、`min_changed_lines`以下の
+    変更行数（追加+削除）しかない微小な逸脱はバッファとして無視する。
+    バイナリファイル（`git diff --numstat`が行数の代わりに`-`を返す）は
+    行数で測れないため、バッファに関わらず常に逸脱として報告する。
+    """
     try:
         result = subprocess.run(
-            ["git", "-C", str(worktree_path), "diff", "--name-only", f"{base}...HEAD"],
+            ["git", "-C", str(worktree_path), "diff", "--numstat", f"{base}...HEAD"],
             capture_output=True,
             text=True,
             check=True,
@@ -240,9 +252,25 @@ def check_footprint_deviation(
     except (subprocess.CalledProcessError, OSError):
         return []
 
-    touched = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     declared = set(declared_footprint)
-    return [f for f in touched if f not in declared]
+    deviated: list[str] = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        added_str, deleted_str, path = parts
+        if path in declared:
+            continue
+        if added_str == "-" or deleted_str == "-":
+            changed_lines = min_changed_lines + 1
+        else:
+            changed_lines = int(added_str) + int(deleted_str)
+        if changed_lines > min_changed_lines:
+            deviated.append(path)
+    return deviated
 
 
 def notify_recompute(
@@ -283,6 +311,28 @@ def notify_recompute(
             github.add_label(blocked_issue, "status:blocked-recompute")
 
     return bodies
+
+
+def notify_force_serial(
+    subtask_id: str,
+    issue_number: int,
+    parent_issue_number: int | None,
+    retry_count: int,
+    apply: bool,
+) -> str:
+    """#200: DAG再計算のリトライ上限超過を親Issueへ通知し、強制直列化を告知する。"""
+    body = (
+        "footprint逸脱によるDAG再計算のリトライ上限に達しました。\n\n"
+        f"- サブタスク: {subtask_id}\n"
+        f"- 対象Issue: #{issue_number}\n"
+        f"- 再計算試行回数: {retry_count}\n\n"
+        "ライブロック（チャーン）を防ぐため、このサブタスクを単独で直列実行する"
+        "フォールバックに切り替えます。新規タスクのdispatchは、このサブタスクが"
+        "完了するまで一時停止します。\n"
+    )
+    if apply and parent_issue_number is not None:
+        github.add_comment(parent_issue_number, body)
+    return body
 
 
 @dataclass
@@ -357,6 +407,8 @@ class DispatcherConfig:
     parent_issue_number: int | None = None
     apply: bool = False
     command_builder: Callable[[Task, Path], list[str]] = default_dry_run_command_builder
+    deviation_buffer_lines: int = 5
+    max_recompute_retries: int = 2
 
 
 @dataclass
@@ -368,26 +420,122 @@ class CycleReport:
     applied: bool
 
 
+def _build_subtasks_for_recompute(
+    tasks_by_issue: dict[int, Task],
+) -> dict[str, SubTask]:
+    return {
+        task.subtask_id: SubTask(
+            id=task.subtask_id,
+            description="",
+            footprint=task.footprint,
+            symbols=task.symbols,
+            depends_on=(),
+            risk=task.risk,
+            risk_reasons=(),
+        )
+        for task in tasks_by_issue.values()
+        if task.subtask_id
+    }
+
+
+def _handle_footprint_deviation(
+    active: ActiveWorktree,
+    deviated: list[str],
+    tasks_by_issue: dict[int, Task],
+    issue_number_by_subtask_id: dict[str, int],
+    config: DispatcherConfig,
+) -> dict:
+    """#192/#200: 1つのactive worktreeのfootprint逸脱を処理し、イベントを返す。
+
+    既に強制直列化済みなら何もしない（チャーン防止）。リトライ上限超過なら
+    強制直列化にフォールバックし、それ以外はDAG再計算・通知を実行する。
+    """
+    event: dict = {"issue_number": active.issue_number, "deviated_files": deviated}
+
+    if active.forced_serial:
+        event["action"] = "already_forced_serial"
+        return event
+
+    active_task = tasks_by_issue.get(active.issue_number)
+    if active_task is None or not active_task.subtask_id:
+        event["action"] = "skipped_unknown_subtask"
+        return event
+
+    if active.recompute_count >= config.max_recompute_retries:
+        notify_force_serial(
+            active_task.subtask_id,
+            active.issue_number,
+            config.parent_issue_number,
+            active.recompute_count,
+            apply=config.apply,
+        )
+        event["action"] = "forced_serial"
+        event["recompute_count"] = active.recompute_count
+        if config.apply:
+            active.forced_serial = True
+            github.add_label(active.issue_number, "status:force-serial")
+        return event
+
+    merged_footprint = tuple(dict.fromkeys([*active.declared_footprint, *deviated]))
+    _, conflicts = recompute_dag_for_footprint_change(
+        _build_subtasks_for_recompute(tasks_by_issue),
+        active_task.subtask_id,
+        updated_footprint=merged_footprint,
+    )
+
+    for conflict in conflicts:
+        notify_recompute(
+            conflict,
+            work_summary=f"{', '.join(deviated)} への逸脱を検知",
+            parent_issue_number=config.parent_issue_number,
+            apply=config.apply,
+            issue_number_by_subtask_id=issue_number_by_subtask_id,
+        )
+
+    event["action"] = "recomputed"
+    event["conflicts"] = [dataclasses.asdict(c) for c in conflicts]
+    if config.apply:
+        active.recompute_count += 1
+    return event
+
+
 def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
     run_state = load_run_state(config.run_state_path)
     now = time.time()
 
     queued_issues = github.list_issues_by_label("status:queued")
     locked_issues = github.list_issues_by_label("status:external-lock")
+    in_progress_issues = github.list_issues_by_label("status:in-progress")
     tasks_by_issue = {
         issue.number: parse_task_from_issue(issue)
-        for issue in [*queued_issues, *locked_issues]
+        for issue in [*queued_issues, *locked_issues, *in_progress_issues]
+    }
+    issue_number_by_subtask_id = {
+        task.subtask_id: task.issue_number
+        for task in tasks_by_issue.values()
+        if task.subtask_id
     }
 
     deviation_events: list[dict] = []
+    any_forced_serial = False
     for active in run_state.active_worktrees.values():
+        if active.forced_serial:
+            any_forced_serial = True
+
         deviated = check_footprint_deviation(
-            active.worktree_path, active.declared_footprint
+            active.worktree_path,
+            active.declared_footprint,
+            min_changed_lines=config.deviation_buffer_lines,
         )
-        if deviated:
-            deviation_events.append(
-                {"issue_number": active.issue_number, "deviated_files": deviated}
-            )
+        if not deviated:
+            continue
+
+        event = _handle_footprint_deviation(
+            active, deviated, tasks_by_issue, issue_number_by_subtask_id, config
+        )
+        if event["action"] in ("forced_serial", "already_forced_serial"):
+            any_forced_serial = True
+        deviation_events.append(event)
 
     remote_branch_names = github.list_remote_branches()
     prs = github.list_open_prs()
@@ -420,21 +568,28 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
         for issue in queued_issues
         if issue.number not in newly_locked
     ]
-    quota_slots = quota_available(
-        run_state,
-        now,
-        config.max_concurrent,
-        config.max_launches_per_window,
-        config.window_seconds,
-    )
-    selected = select_next_tasks(
-        candidate_tasks,
-        run_state,
-        now,
-        config.max_concurrent,
-        config.max_launches_per_window,
-        config.window_seconds,
-    )
+
+    if any_forced_serial:
+        # #200: リトライ上限を超えたサブタスクを直列実行させるため、
+        # 完了するまで新規タスクのdispatchを凍結する。
+        quota_slots = 0
+        selected: list[Task] = []
+    else:
+        quota_slots = quota_available(
+            run_state,
+            now,
+            config.max_concurrent,
+            config.max_launches_per_window,
+            config.window_seconds,
+        )
+        selected = select_next_tasks(
+            candidate_tasks,
+            run_state,
+            now,
+            config.max_concurrent,
+            config.max_launches_per_window,
+            config.window_seconds,
+        )
 
     if config.apply:
         for task in selected:
@@ -505,6 +660,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--worktree-root", type=Path, default=Path("worktrees"))
     parser.add_argument("--log-dir", type=Path, default=Path("logs"))
     parser.add_argument("--parent-issue", type=int, default=None)
+    parser.add_argument(
+        "--deviation-buffer-lines",
+        type=int,
+        default=5,
+        help="footprint逸脱として扱わない変更行数の許容バッファ（#200: ライブロック防止）",
+    )
+    parser.add_argument(
+        "--max-recompute-retries",
+        type=int,
+        default=2,
+        help="DAG再計算のリトライ上限。超過時は強制直列化にフォールバックする（#200）",
+    )
     args = parser.parse_args(argv)
 
     config = DispatcherConfig(
@@ -516,6 +683,8 @@ def main(argv: list[str] | None = None) -> int:
         log_dir=args.log_dir,
         parent_issue_number=args.parent_issue,
         apply=args.apply,
+        deviation_buffer_lines=args.deviation_buffer_lines,
+        max_recompute_retries=args.max_recompute_retries,
     )
     report = run_dispatch_cycle(config)
     print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
