@@ -1,0 +1,61 @@
+version: "1.0"
+project:
+  name: "novel-tools-system"
+  description: "小説の整合性と世界観をチェックするエージェント環境"
+  novel:
+    # 作品ごとの主要キャラクター名のリスト（自動抽出を補完するためにマージされます）
+    main_characters:
+      - "キャラクターA"
+      - "キャラクターB"
+
+# 使用するAIモデルや基本動作の設定
+agent:
+  name: "Editor-AI"
+  model: "gemini-3.5-flash"
+  temperature: 0.2
+  context_caching: true
+  system_prompt: |
+    あなたはプロの編集者であり、設定考証の専門家です。
+    提供されたスキルを活用し、物語の矛盾を厳格に指摘してください。
+
+# Google Drive 同期設定
+google_drive:
+  type: "google-drive"
+  folder_id: "YOUR_GOOGLE_DRIVE_FOLDER_ID"  # フォルダURLの末尾部分
+  auth_file: "./credentials/your-service-account-key.json"  # サービスアカウントキーのパス
+
+skills:
+  # === 1. Writing (執筆) ===
+  # 小説執筆 (Antigravity CLI版)：Antigravity CLIを利用した小説執筆
+  - path: "./skills/novel-writer-antigravitycli"
+
+  # === 2. Core Verification (基本検証) ===
+  # 世界観設定・過去プロット・キャラ設定との矛盾・伏線の統合レビュー
+  - path: "./skills/text-reviewer-logic"
+
+  # === 3. Formatting & Style (フォーマット・スタイル) ===
+  # 描写力（Show, Don't Tell）、文章リズム・語彙、口調、ペーシングの統合レビュー
+  - path: "./skills/text-reviewer-style"
+
+  # 小説フォーマッター：NotebookLMなどの出力をウェブ小説向けに成形
+  - path: "./skills/novel-formatter"
+
+  # === 4. Plot Review (プロットレビュー) ===
+  # 各シーン・章のGMCO（目標・障害・葛藤・結果）の検証
+  - path: "./skills/plot-reviewer-conflict"
+
+  # プロット全体の物語構造（三幕構成・感情の山場・カタルシス）の評価
+  - path: "./skills/plot-reviewer-structure"
+
+  # === 5. Development (開発) ===
+  # WebUI（Novel Studioなど）のフロントエンド・バックエンド実装・修正
+  - path: "./skills/webui-developer"
+
+# === 6. Logging (ログ設定) ===
+logging:
+  level: "INFO"
+  dir: "logs"
+  filename: "app.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+

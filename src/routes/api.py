@@ -1,0 +1,184 @@
+import os
+import secrets
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
+from src.routes.deps import require_api_key
+from src.routes.novels import router as novels_router
+from src.routes.plots import router as plots_router
+from src.routes.sync import router as sync_router
+from src.services import novel_service, process_manager
+from src.utils import project_config as writer_helper
+from src.utils import project_paths
+from src.utils.ai_client import AgyClient
+from src.utils.logger import get_logger
+
+router = APIRouter()
+logger = get_logger(__name__)
+
+
+class SettingsRequest(BaseModel):
+    """ユーザー設定リクエストモデル"""
+
+    title: str | None = None
+    model: str | None = None
+    policy_global: str | None = None
+    policy_chapter: str | None = None
+    character: str | None = None
+
+
+# Include the split sub-routers
+router.include_router(novels_router)
+router.include_router(plots_router)
+router.include_router(sync_router)
+
+
+@router.get("/", response_class=HTMLResponse)
+async def get_index():
+    root_dir = project_paths.PROJECT_ROOT
+    vite_index = os.path.join(root_dir, "frontend/dist/index.html")
+    if not os.path.exists(vite_index):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Frontend build not found. Run `npm ci && npm run build` "
+                "in the frontend/ directory."
+            ),
+        )
+    with open(vite_index, encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@router.get("/api/config")
+async def get_config(request: Request):
+    novel_title = writer_helper.get_novel_setting("title", "重天の調律師")
+    initial_novel = getattr(request.app.state, "initial_novel", "")
+    return {"novel_title": novel_title, "initial_novel": initial_novel}
+
+
+@router.get("/api/models")
+async def list_available_models():
+    default_models = [
+        "Gemini 3.5 Flash (High)",
+        "Gemini 3.5 Flash (Medium)",
+        "Gemini 3.5 Flash (Low)",
+    ]
+    try:
+        raw_models = AgyClient.list_models()
+        models = []
+        for m in raw_models:
+            if "Fetching available models" in m:
+                continue
+            if m not in models:
+                models.append(m)
+
+        if not models:
+            models = default_models
+        return {"models": models}
+    except Exception as e:
+        logger.error(f"Error fetching models: {e}", exc_info=True)
+        return {"models": default_models}
+
+
+@router.post("/api/auth/token")
+async def issue_api_token(request: Request):
+    """クライアント(ブラウザタブ)ごとに自己発行APIトークンを新規発行する。
+
+    require_api_key の保護対象には含めない(トークンを得るためにトークンが要る、
+    という鶏卵問題を避けるため)。ただし api_router のメンバーであるため、
+    review_server.py で全体に適用されている verify_local_origin
+    (Origin/Refererの不一致を拒否する)は自動的に効く。
+
+    POSTである点が本エンドポイントの安全性にとって必須: ブラウザはクロスオリジン
+    POSTに対しページJSから抑制できない正規のOriginヘッダーを必ず付与するため、
+    悪意ある別タブが<img src=...>のような単純GETでこのエンドポイントを叩いて
+    トークンを窃取することを防げる(GETにした場合、Originヘッダーは付与されない
+    ためこの防御は成立しない)。
+    """
+    if not hasattr(request.app.state, "api_keys"):
+        request.app.state.api_keys = set()
+    token = secrets.token_urlsafe(32)
+    request.app.state.api_keys.add(token)
+    return {"token": token}
+
+
+@router.get("/api/cancel", dependencies=[Depends(require_api_key)])
+async def cancel_process(request_id: str = Query(...)):
+    """
+    実行中のLLM処理（ストリーミング）をキャンセルする。
+
+    Args:
+        request_id: キャンセル対象のリクエストID
+
+    Returns:
+        {"status": "cancelled"} - キャンセル成功時
+        404 - プロセスが見つからない場合
+    """
+    if not process_manager.cancel_process(request_id):
+        raise HTTPException(status_code=404, detail="Process not found")
+
+    return {"status": "cancelled"}
+
+
+@router.get("/api/settings")
+async def get_settings():
+    """
+    ユーザーの設定を取得する。
+
+    Returns:
+        {
+            "title": str,
+            "model": str,
+            "policy_global": str,
+            "policy_chapter": str,
+            "character": str
+        }
+    """
+    return {
+        "title": writer_helper.get_novel_setting("title", "重天の調律師"),
+        "model": writer_helper.get_novel_setting("model", "Gemini 3.5 Flash (High)"),
+        "policy_global": writer_helper.get_novel_setting("policy_global", ""),
+        "policy_chapter": writer_helper.get_novel_setting("policy_chapter", ""),
+        "character": writer_helper.get_novel_setting("character", ""),
+    }
+
+
+@router.post("/api/settings")
+async def save_settings(req: SettingsRequest):
+    """
+    ユーザーの設定を保存する。
+
+    Args:
+        req: SettingsRequest（title, model, policy_global, policy_chapter, character）
+
+    Returns:
+        {"status": "success"}
+    """
+    try:
+        # 各設定を保存
+        if req.title:
+            writer_helper.set_novel_setting("title", req.title)
+        if req.model:
+            writer_helper.set_novel_setting("model", req.model)
+        if req.policy_global is not None:
+            writer_helper.set_novel_setting("policy_global", req.policy_global)
+        if req.policy_chapter is not None:
+            writer_helper.set_novel_setting("policy_chapter", req.policy_chapter)
+        if req.character is not None:
+            writer_helper.set_novel_setting("character", req.character)
+
+        logger.info("Settings saved successfully")
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error saving settings: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to save settings: {str(e)}"
+        )
+
+
+@router.post("/api/shutdown", dependencies=[Depends(require_api_key)])
+async def shutdown(background_tasks: BackgroundTasks):
+    background_tasks.add_task(novel_service.shutdown_server)
+    return {"status": "success", "message": "Shutting down..."}

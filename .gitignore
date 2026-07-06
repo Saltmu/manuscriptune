@@ -1,0 +1,55 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Python caching
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE settings
+.vscode/
+.idea/
+
+# Configuration
+antigravity.yaml
+!antigravity.yaml.example
+
+# Credentials and secrets (IMPORTANT)
+credentials/
+*.json
+!.agents/skills.json
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/jsconfig.json
+
+# Local data and cache
+.sync_cache
+data/
+index/
+
+# System files
+.DS_Store
+Thumbs.db
+novels/
+reviews/
+
+# Test and Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# App Logs
+logs/
+
+# Orchestune dispatcher runtime worktrees (tools/orchestune/dispatcher.py)
+tools/orchestune/worktrees/
+
+# Temporary and planning files
+implementation_plan.md
+walkthrough.md
+
+# Local CI caches
+.pip-audit-last-run
+.local_ci_logs/

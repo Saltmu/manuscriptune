@@ -1,0 +1,74 @@
+<script>
+    import { onMount } from 'svelte';
+    import { isRunningProcess, consoleLogMap, consoleStatusMap } from '../store.js';
+    import { startEventStream, showToast, initPanelResizer } from '../utils.js';
+    import { withFreshToken } from '../lib/apiClient.js';
+
+    let showConsole = false;
+    let resizerEl;
+    let rightPanelEl;
+
+    function toggleConsoleView() {
+        showConsole = !showConsole;
+    }
+
+    async function runSync() {
+        showConsole = true; // Automatically show console when starting sync
+
+        const freshUrl = await withFreshToken('/api/stream/sync');
+        startEventStream(freshUrl, 'sync', (success) => {
+            if (success) {
+                showToast('同期が正常に完了しました');
+            } else {
+                showToast('同期中にエラーが発生しました');
+            }
+        });
+    }
+
+    onMount(() => {
+        if (resizerEl && rightPanelEl) {
+            initPanelResizer(resizerEl, rightPanelEl);
+        }
+    });
+</script>
+
+<div class="view-content split-view-content active" id="view-sync">
+    <div class="split-container">
+        <!-- 左ペイン: 設定 -->
+        <div class="left-panel">
+            <div class="left-panel-content">
+                <div class="view-title-area">
+                    <h2>設定資料同期</h2>
+                    <p>Google Driveに保管された最新の設定資料集、キャラクター概要、プロットをローカルへ同期します。</p>
+                </div>
+
+                <div class="card">
+                    <h3>同期の実行</h3>
+                    <p style="font-size: 0.9rem; color: var(--text-muted)">
+                        スキル実行前の自動同期は無効化されています。設定資料を更新した場合は、ここから明示的に同期を実行してください。
+                    </p>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <button class="btn-primary" id="btn-run-sync" disabled={$isRunningProcess} on:click={runSync}>
+                            🔄 同期処理を開始する
+                        </button>
+                        <button class="console-toggle-btn" on:click={toggleConsoleView}>
+                            {showConsole ? '🖥️ コンソール非表示' : '🖥️ コンソール表示'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右ペイン: リアルタイムコンソール -->
+        <div class="right-panel {showConsole ? 'show' : ''}" bind:this={rightPanelEl}>
+            <div class="console-header">
+                <span>Terminal Log Stream</span>
+                <span>{$consoleStatusMap.sync}</span>
+            </div>
+            <div class="console-log" id="sync-console-log">{$consoleLogMap.sync}</div>
+        </div>
+        
+        <!-- ドラッグリサイザー -->
+        <div class="resizer-bar" bind:this={resizerEl}></div>
+    </div>
+</div>

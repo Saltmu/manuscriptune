@@ -1,0 +1,5 @@
+name: "Custom CodeQL Config"
+
+query-filters:
+  - exclude:
+      id: py/path-injection

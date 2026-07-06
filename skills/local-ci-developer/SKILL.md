@@ -1,0 +1,95 @@
+---
+name: "local-ci-developer"
+description: "設計・実装プラン作成、GitHubでのIssue起票、TDDによる実装、ローカルCI検証、Walkthroughを記載したPR作成、マージ時のIssue自動クローズまでの一連の開発ワークフローを統制するスキル。"
+version: "1.0.0"
+category: "Development"
+input_schema:
+  type: "object"
+  properties: {}
+output_schema:
+  type: "object"
+  properties: {}
+---
+
+# Local CI & TDD Developer Skill
+
+本スキルは、開発における設計プラン作成から、GitHub上でのIssue起票、テスト駆動開発（TDD）による実装、プッシュ前のローカルでの統合CI検証、PR（Pull Request）作成、およびIssueの自動クローズにいたるまでの一連の標準開発ワークフローと品質管理手順を定めたものです。
+
+## 適用トリガー
+ソースコードの編集、テストの作成・実行、リファクタリング、Gitへのコミット/プッシュ操作など、コードの変更作業を伴うすべての開発タスクの際に必ずロードして実行してください。
+
+## ワークフロー
+
+### 1. 設計・実装プラン作成
+- 変更を伴うタスクの開始前に、必ず `planning_mode` に従い `implementation_plan.md` を作成します。
+- 実装アプローチや影響範囲、オープンな疑問点をまとめ、必ずユーザーの承認を得てから実装フェーズへ進みます。
+
+### 2. GitHub Issueの起票
+- プランが承認された段階で、GitHub上でIssueを起票します。環境に応じて、以下のいずれかの手段を用いてください。
+  - **手段A: GitHub CLI (推奨)**
+    `gh` コマンドを使用して起票します。
+    ```bash
+    gh issue create --title "Issueのタイトル" --body-file .github/issue_template.md
+    ```
+  - **手段B: GitHub MCP (MCP利用可能な環境)**
+    GitHub MCPサーバーの `create_issue` ツールを呼び出します。引数には、タイトルと `.github/issue_template.md` の内容に沿って記述した本文を指定します。
+  - **手段C: Web UI (Web/手動環境)**
+    ブラウザでGitHubのリポジトリにアクセスし、`.github/issue_template.md` の内容をコピー＆ペーストして手動でIssueを作成します。
+- 起票したIssue番号（例: `#123`）を記録しておきます。
+
+### 3. 実装前のテスト作成 (テストファースト)
+- 実装を開始する前に、まず `tests/` ディレクトリ配下に、新規機能や改修仕様（正常系の主要シナリオ）を満たすテストケースを先に記述します。
+- この段階で `poetry run pytest` を実行し、追加したテストが期待通り失敗（Red）することを確認します。
+
+### 4. 機能の実装とテスト通過
+- テストをパスさせるために必要なコードを実装します。
+- `poetry run pytest` を実行し、すべてのテストがパス（Green）することを確認します。
+
+### 5. エッジケースと異常系のカバレッジ補強
+- カバレッジが **75%** に満たない場合や、品質向上のため、エッジケースやエラーハンドリング（異常系）のテストを追加で記述し、カバレッジを向上させます。
+- pytest実行時にカバレッジレポートが出力されるため、未カバーの行がないか確認します。
+
+### 6. ローカルCIの一括実行とエラー解消
+コードの修正が完了したら、以下のコマンドをプロジェクトルートで実行します。
+
+```bash
+./scripts/local-ci.sh
+```
+
+このスクリプトは以下の順にチェックを行います。失敗した場合はそれぞれのステップに応じてエラーを解消してください。
+
+#### ① Ruff Format/Lint エラーの場合
+- 自動フォーマットを実行: `poetry run ruff format`
+- 自動Lint修正を実行: `poetry run ruff check --fix`
+- 自動修正できなかったエラーは手動で修正します。
+
+#### ② Mypy 型チェックエラーの場合
+- 型注釈（Type Hints）の不整合を確認します。
+- 必要に応じて、`# type: ignore` は最終手段とし、可能な限り正しい型を定義してください。
+
+#### ③ Pytest テスト失敗の場合
+- テストコード、または実装コードのバグを特定し、修正します。
+- カバレッジが75%に達していない場合は、不足しているテストを追加します。
+
+#### ④ Detect Bloat 警告の場合
+- ファイルやスキルのサイズが肥大化（目安としてコード: 1,000行以上、スキル: 500行以上）していたり、複雑度が高すぎる警告（`poetry run detect-bloat`等）を検知した場合は、そのままコード修正を進めずに作業を一時停止し、まずユーザーにモジュールやプロンプトの分割リファクタリング計画を提示し、承認を得てください。
+
+### 7. すべてがパスした後の確認とPR作成
+- `./scripts/local-ci.sh` が `✨ Local CI passed successfully!` と出力して正常終了したことを確認します。
+- `walkthrough.md` を作成し、実施した変更やテスト内容、Local CI の結果をまとめます。
+- GitHub上にPRを作成します。その際、PRテンプレート（`.github/pull_request_template.md`）の内容に沿って、変更内容（Walkthrough）やローカルCIの合格有無、関連するIssue番号（`Closes #<Issue番号>`）を記述してPRを送信します。
+  環境に応じて、以下のいずれかの手段を用いてください。
+  - **手段A: GitHub CLI (推奨)**
+    `gh` コマンドを使用してPRを作成します。
+    ```bash
+    gh pr create --title "PRのタイトル" --body-file .github/pull_request_template.md
+    ```
+  - **手段B: GitHub MCP (MCP利用可能な環境)**
+    GitHub MCPサーバーの `create_pull_request` ツールなどを呼び出します。
+  - **手段C: Web UI (Web/手動環境)**
+    作業ブランチをリモートにプッシュし（`git push origin <branch-name>`）、ブラウザでGitHubのリポジトリにアクセスし、PRテンプレートに沿って手動でPull Requestを作成します。
+- PR作成後、ユーザーにPR上でのレビューを依頼します。
+
+### 8. PRマージとIssueの自動クローズ
+- ユーザーによるPRレビューおよびマージを待ちます。
+- PRがマージされたら、関連するGitHub Issueが自動的にクローズされたことを確認します。

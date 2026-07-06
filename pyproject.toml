@@ -1,0 +1,78 @@
+[tool.poetry]
+name = "manuscriptune"
+version = "0.1.0"
+description = "小説の整合性と世界観をチェックするエージェント環境（Manuscriptune）"
+authors = ["sshioyama"]
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+google-auth = "^2.55.1"
+google-api-python-client = "^2.198.0"
+pyyaml = "^6.0.3"
+fastapi = "^0.139.0"
+uvicorn = "^0.50.1"
+jinja2 = "^3.1.6"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.15.20"
+mypy = "^2.1.0"
+types-pyyaml = "^6.0.12.20260518"
+pytest = "^9.1.1"
+pytest-asyncio = "^1.4.0"
+# httpx2 is intentional, not a typo for "httpx": starlette.testclient requires
+# it (using httpx here is deprecated), so this is the correct dependency.
+httpx2 = "^2.5.0"
+pytest-cov = "^7.1.0"
+pip-audit = "^2.10.1"
+pytest-xdist = "^3.8.0"
+
+
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+# tools/ 配下（例: tools/orchestune/）は独立したPoetry環境・ローカルCIを持つため、
+# 本体側のスキャン対象から除外する。
+extend-exclude = ["tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C90", "PLR"]
+ignore = ["E501", "B007", "B904", "PLR0913", "PLR2004"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+explicit_package_bases = true
+
+
+[tool.poetry.scripts]
+run-review = "src.cli.run_review_pipeline:main"
+server = "src.cli.review_server:main"
+apply-findings = "src.cli.apply_findings:main"
+sync-gdrive = "src.cli.sync_gdrive:main"
+detect-bloat = "src.utils.detect_bloat:main"
+detect-coverage-gaps = "src.utils.detect_coverage_gaps:main"
+create-issue = "src.utils.github_helper:create_issue_cli"
+create-pr = "src.utils.github_helper:create_pr_cli"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+# tools/ 配下は独立したPoetry環境・テストスイートを持つため、
+# 本体のテスト収集対象を tests/ に限定して隔離する。
+testpaths = ["tests"]
+addopts = "--cov=src --cov-fail-under=75 --cov-report=term-missing"

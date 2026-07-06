@@ -1,0 +1,118 @@
+name: Orchestune Dispatch Cycle
+
+on:
+  schedule:
+    # 毎時17分（:00ちょうどのGitHub側混雑を避けるためオフセット）
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "ラベル更新・worktree作成・実dispatchまで行う場合はtrue（未指定はdry-run）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: orchestune-dispatch
+  cancel-in-progress: false
+
+env:
+  STATE_BRANCH: orchestune-state
+  RUN_STATE_PATH: run_state.json
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/orchestune
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore run_state.json from state branch
+        run: |
+          if git ls-remote --exit-code --heads origin "$STATE_BRANCH" > /dev/null 2>&1; then
+            git fetch origin "$STATE_BRANCH"
+            git show "origin/${STATE_BRANCH}:${RUN_STATE_PATH}" > "$RUN_STATE_PATH" 2>/dev/null || echo "{}" > "$RUN_STATE_PATH"
+          else
+            echo "{}" > "$RUN_STATE_PATH"
+          fi
+
+      - name: Set up Python 3.12
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        uses: actions/cache@v4
+        with:
+          path: tools/orchestune/.venv
+          key: orchestune-venv-v1-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('tools/orchestune/poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Run dispatch cycle (scheduled)
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORCHESTUNE_ROUTINE_ID: ${{ secrets.ORCHESTUNE_ROUTINE_ID }}
+          ORCHESTUNE_ROUTINE_TOKEN: ${{ secrets.ORCHESTUNE_ROUTINE_TOKEN }}
+        run: |
+          poetry run dispatch-cycle --apply --dispatch-target cloud-routine \
+            --run-state-path "$RUN_STATE_PATH"
+
+      - name: Run dispatch cycle (manual)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORCHESTUNE_ROUTINE_ID: ${{ secrets.ORCHESTUNE_ROUTINE_ID }}
+          ORCHESTUNE_ROUTINE_TOKEN: ${{ secrets.ORCHESTUNE_ROUTINE_TOKEN }}
+        run: |
+          APPLY_FLAG=""
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            APPLY_FLAG="--apply"
+          fi
+          poetry run dispatch-cycle $APPLY_FLAG --dispatch-target cloud-routine \
+            --run-state-path "$RUN_STATE_PATH"
+
+      - name: Persist run_state.json to state branch
+        if: always()
+        run: |
+          git config user.name "orchestune-bot"
+          git config user.email "orchestune-bot@users.noreply.github.com"
+
+          STATE_DIR=$(mktemp -d)
+          cp "$RUN_STATE_PATH" "$STATE_DIR/$RUN_STATE_PATH"
+
+          if git ls-remote --exit-code --heads origin "$STATE_BRANCH" > /dev/null 2>&1; then
+            git fetch origin "$STATE_BRANCH"
+            git checkout -B "$STATE_BRANCH" "origin/$STATE_BRANCH"
+          else
+            git checkout --orphan "$STATE_BRANCH"
+            git rm -rf . > /dev/null 2>&1 || true
+          fi
+
+          cp "$STATE_DIR/$RUN_STATE_PATH" "$RUN_STATE_PATH"
+          # ルートの.gitignore(*.json)に引っかかるため、この状態専用ブランチでは明示的にforce-add する
+          git add -f "$RUN_STATE_PATH"
+
+          if git diff --cached --quiet; then
+            echo "run_state.json unchanged, skipping commit."
+          else
+            git commit -m "chore(orchestune): update run_state.json"
+            git push origin "$STATE_BRANCH"
+          fi
