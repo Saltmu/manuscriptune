@@ -327,7 +327,9 @@ async def stream_write(params: WriteParams = Depends()):  # noqa: B008
             _resolve_safe_source_arg("plot", params.plot) if params.plot else None
         )
         novel_path, basename = (
-            writer_service.WriterService().resolve_episode_output_path(params.episode, plot_file=plot_file)
+            writer_service.WriterService().resolve_episode_output_path(
+                params.episode, plot_file=plot_file
+            )
         )
         if os.path.exists(novel_path):
             logger.info(

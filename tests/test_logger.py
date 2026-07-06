@@ -97,12 +97,12 @@ def test_logger_rotation_and_generations(temp_log_dir):
         # backup_count が 5 なので、.1 から .5 までのファイルが作成されるはず
         for g in range(1, 6):
             backup_path = f"{log_file_path}.{g}"
-            assert os.path.exists(
-                backup_path
-            ), f"Backup file {backup_path} should exist"
+            assert os.path.exists(backup_path), (
+                f"Backup file {backup_path} should exist"
+            )
 
         # 6世代目のファイルが存在しないことを確認 (5世代までの管理)
         no_backup_path = f"{log_file_path}.6"
-        assert not os.path.exists(
-            no_backup_path
-        ), f"Backup file {no_backup_path} should not exist"
+        assert not os.path.exists(no_backup_path), (
+            f"Backup file {no_backup_path} should not exist"
+        )
