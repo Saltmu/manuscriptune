@@ -43,8 +43,7 @@ class AgyCLIExecutor:
 
         if process.returncode != 0:
             logger.error(
-                "agy execution failed with return code"
-                f" {process.returncode}: {stderr}"
+                f"agy execution failed with return code {process.returncode}: {stderr}"
             )
             raise AgyClientError(
                 f"agy error (exit code {process.returncode}): {stderr}"

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 from src.utils.ai_client import AgyClient
 
@@ -7,7 +7,7 @@ InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
 
 
-class AgyTask(ABC, Generic[InputT, OutputT]):
+class AgyTask[InputT, OutputT](ABC):
     """Base class representing a task to be processed via AgyClient.
 
     Encapsulates preprocessing, prompt rendering, execution, and postprocessing.

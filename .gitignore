@@ -43,6 +43,9 @@ htmlcov/
 # App Logs
 logs/
 
+# Orchestrator dispatcher runtime worktrees (tools/orchestrator/dispatcher.py)
+tools/orchestrator/worktrees/
+
 # Temporary and planning files
 implementation_plan.md
 walkthrough.md

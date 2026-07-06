@@ -1,0 +1,122 @@
+---
+name: "orchestrator-dispatch-draft"
+description: "「大きな石」（複数タスクからなる大規模な作業）の分解案生成(dag.py)とディスパッチャー(dispatcher.py)のスケジュール登録を呼び出す、パイロット運用専用のドラフト版導線。"
+version: "0.1.0-draft"
+category: "Development"
+input_schema:
+  type: "object"
+  properties: {}
+output_schema:
+  type: "object"
+  properties: {}
+---
+
+# Orchestrator Dispatch Draft Skill (ドラフト版)
+
+> **これはドラフト版です。** 正式なスキルとしての完成度（`local-ci-developer`スキルと同水準の作り込み）は目指しておらず、
+> Issue #181のパイロット運用を実行可能にすることだけを目的とした最小限の導線です。
+> パイロット運用で得られた知見（DAG推定精度・クオータ消費・コンフリクト有無）を反映し、
+> `skill-creator`スキルを用いて本格版スキルへ更新される予定です（Issue #181のToDo参照）。
+> ステージ2.2（ブランチスタッキング, #185）・ステージ3（統合コーディネーター, #186）は未実装であり、
+> 本ドラフトのパイロット対象外です。
+
+## トリガー条件
+
+**人間が複数タスクからなる「大きな石」を提示し、並列実装したいと述べた場合**にロードする。
+
+## 前提
+
+- `tools/orchestrator/`（独立Poetry環境）に `src/dag.py`（分解案パース・DAG構築、#183）と
+  `src/dispatcher.py`（クオータ管理・優先度選出・外部排他制御・worktree起動、#184）が実装済みであること。
+- ディスパッチャーの書き込み系操作（ラベル更新・`git worktree`作成・エージェント起動）は、
+  **`--apply`を明示指定しない限り一切実行されない**（既定はdry-run）。安全側に倒した設計であるため、
+  パイロット中は必ずdry-run結果を人間が確認してから`--apply`を実行すること。
+- `dispatcher.py`の`command_builder`（実際にエージェントプロセスを起動するコマンドの組み立て）は
+  ダミー実装（`default_dry_run_command_builder`、`["true"]`を返すのみ）である。
+  実際にバックグラウンドエージェントを起動したい場合は、呼び出し側で実コマンドを組み立てる
+  `command_builder`を`DispatcherConfig`に注入する必要がある（本ドラフトのスコープ外）。
+
+## ステージ1呼び出し手順（分解案生成）
+
+1. 人間から受けた「大きな石」の説明を、サブタスク単位に分解する。各サブタスクについて
+   `id` / `description` / `footprint`（想定変更ファイル一覧）/ `symbols`（想定シンボル一覧）/
+   `depends_on`（明示的な依存先ID一覧）を洗い出す。
+2. `decomposition_plan.md` を作成する。`dag.py`の`parse_decomposition_plan`が期待するYAMLフロントマター形式:
+
+   ```markdown
+   ---
+   subtasks:
+     - id: task-a
+       description: "Aを実装する"
+       footprint:
+         - src/foo.py
+       symbols:
+         - foo.Foo
+       depends_on: []
+   ---
+
+   # Decomposition Plan
+   （本文は自由記述、パース対象外）
+   ```
+
+3. DAGを構築する:
+
+   ```bash
+   cd tools/orchestrator
+   poetry run python -c "
+   from src.dag import build_dag_from_plan
+   import json
+   print(json.dumps(build_dag_from_plan('../../decomposition_plan.md'), ensure_ascii=False, indent=2))
+   "
+   ```
+
+4. 出力されたトポロジカル順・並列実行可能leaf・`risky_subtask_ids`（リスクフラグ付きサブタスク）を
+   人間に提示し、**この分解案のみ**の承認を得る（個別サブタスクごとの承認は不要。Issue #181の
+   「人間の承認ゲートを1点に絞る」方針に従う）。
+5. 承認後、既存の`local-ci-developer`スキルのワークフローに従い、サブタスクごとにGitHub Issueを起票する。
+   Issue本文には、`dispatcher.py`の`parse_task_from_issue`が読み取れるよう、以下の形式で
+   footprint/symbols/subtask_idを埋め込む:
+
+   ```markdown
+   ## Footprint
+   ```yaml
+   subtask_id: task-a
+   footprint:
+     - src/foo.py
+   symbols:
+     - foo.Foo
+   ```
+   ```
+
+   ラベルは `status:queued`（`depends_on`が未解決なら`status:blocked`）、`priority:low|medium|high`、
+   リスクフラグ付きなら`risk:flagged`を付与する。
+
+## ステージ2呼び出し手順（ディスパッチャーのスケジュール登録）
+
+1. パイロット運用者が `mcp__Claude_Code_Remote__create_trigger` で定期実行トリガーを実登録する。例:
+   - `cron_expression`: `"*/30 * * * *"`（30分毎。実際の分は :00/:30 を避けてずらすこと）
+   - `create_new_session_on_fire`: `true`（毎回まっさらなセッションから実行し、クオータ消費を抑える）
+   - `prompt`: 「`cd tools/orchestrator && poetry run dispatch-cycle` を実行し、選出結果・quota状況・
+     external-lock変更・footprint逸脱イベントを人間に要約報告せよ。リスクフラグ付き・quota枯渇の場合は
+     その旨を明記せよ。」
+2. `dispatch-cycle` は既定でdry-runである。ラベル更新・worktree作成・エージェント起動は一切行わず、
+   選出結果・クオータ状況・ロック判定のみをJSONで出力する。
+3. 人間がレポートを見て問題ないと判断した場合のみ、以下を手動実行し実際にdispatchする:
+
+   ```bash
+   cd tools/orchestrator
+   poetry run dispatch-cycle --apply
+   ```
+
+   このとき、`command_builder`がダミー実装のままだと実際にはエージェントプロセスは起動しない
+   （worktree作成・ラベル更新・`run_state.json`更新のみ行われる）ことに留意する。
+
+## #183・#184完了後の疎通確認チェックリスト
+
+- [ ] `decomposition_plan.md`のサンプルを1件作成し、上記ステージ1手順3で`build_dag_from_plan`が
+      例外なくJSONを返すことを確認した
+- [ ] `poetry run dispatch-cycle`（dry-run、`--run-state-path`等はテスト用一時ディレクトリを指定）が
+      実際のGitHub Issue（またはモックした`gh`コマンド）に対して例外なくJSONレポートを出力することを確認した
+- [ ] `poetry run dispatch-cycle --apply` を隔離環境で1回実行し、`git worktree`が実際に作成され、
+      `run_state.json`が正しく更新されることを確認した
+- [ ] パイロット運用でこのドラフト導線を実際に使用した

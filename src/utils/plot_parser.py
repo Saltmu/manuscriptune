@@ -72,7 +72,7 @@ def parse_plot(file_path):
 
 def list_chapters(chapters):
     for i, chapter in enumerate(chapters):
-        logger.info(f"{i+1}. {chapter['title']}: {chapter['name']}")
+        logger.info(f"{i + 1}. {chapter['title']}: {chapter['name']}")
         for j, ep in enumerate(chapter["episodes"]):
             logger.info(f"   - {ep['title']}: {ep['name']}")
 
