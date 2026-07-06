@@ -111,6 +111,31 @@ output_schema:
    このとき、`command_builder`がダミー実装のままだと実際にはエージェントプロセスは起動しない
    （worktree作成・ラベル更新・`run_state.json`更新のみ行われる）ことに留意する。
 
+## ステージ2.1: footprint逸脱時の動的ロック要求・DAG再計算（#192, #200）
+
+`dispatch-cycle`は実行中（`status:in-progress`）のworktreeについて、宣言footprintを
+超えて変更されたファイルがないかを毎サイクル検知する。逸脱を検知した場合の挙動は以下の通り。
+
+1. **微小逸脱の許容バッファ**（#200）: 変更行数（追加+削除）が`--deviation-buffer-lines`
+   （既定5行）以下の逸脱は、ライブロック（チャーン）防止のため無視される。バイナリファイルの
+   変更は行数で測れないため、バッファに関わらず常に逸脱として扱われる。
+2. **DAG再計算・通知**（#192）: バッファを超える逸脱を検知すると、GitHub Issue
+   （`status:queued` / `status:in-progress` / `status:external-lock`）から動的にサブタスク群を
+   再構築し、`dag.recompute_dag_for_footprint_change`でDAGを再計算する。新たな結合度衝突
+   （`FootprintConflict`）が見つかった場合、`notify_recompute`が発覚サブタスク・競合相手・
+   親Issueへコメントを投稿し、ブロックされるサブタスクに`status:blocked-recompute`ラベルを
+   付与する。**この記録は省略不可の手順である**（分解プロンプトの改善サイクルを回すため）。
+3. **リトライ上限と強制直列化フォールバック**（#200）: 同一サブタスクの逸脱によるDAG再計算が
+   `--max-recompute-retries`（既定2回）を超えて発生した場合、それ以上の再計算・通知は行わず
+   （タスク間の「お互いに退避し合う」ライブロックを防ぐため）、そのサブタスクに
+   `status:force-serial`ラベルを付与し親Issueへ通知した上で、**新規タスクのdispatchを
+   このサブタスクが完了するまで凍結する**（`quota_slots_available`は0として報告される）。
+   一度強制直列化されたサブタスクは、以後の逸脱検知でも再計算・通知を行わない
+   （`deviation_events`に`action: "already_forced_serial"`として記録されるのみ）。
+4. dry-run時（`--apply`未指定）は、上記のコメント投稿・ラベル付与は一切行われず、
+   `deviation_events`にどのアクションが実行される見込みかのみが記録される
+   （`recompute_count`・`forced_serial`の状態も永続化されない）。
+
 ## #183・#184完了後の疎通確認チェックリスト
 
 - [ ] `decomposition_plan.md`のサンプルを1件作成し、上記ステージ1手順3で`build_dag_from_plan`が

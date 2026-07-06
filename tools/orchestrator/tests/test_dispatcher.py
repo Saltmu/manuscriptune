@@ -1,7 +1,7 @@
 import json
 import subprocess
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -16,6 +16,7 @@ from src.dispatcher import (
     create_worktree_and_launch,
     default_dry_run_command_builder,
     load_run_state,
+    notify_force_serial,
     notify_recompute,
     parse_task_from_issue,
     quota_available,
@@ -359,7 +360,7 @@ class TestCheckFootprintDeviation:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
-                stdout="src/foo.py\nsrc/unexpected.py\n",
+                stdout="1\t0\tsrc/foo.py\n20\t0\tsrc/unexpected.py\n",
                 stderr="",
             )
             deviated = check_footprint_deviation(
@@ -370,12 +371,55 @@ class TestCheckFootprintDeviation:
     def test_no_deviation_returns_empty(self):
         with patch("src.dispatcher.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="src/foo.py\n", stderr=""
+                args=[], returncode=0, stdout="1\t0\tsrc/foo.py\n", stderr=""
             )
             deviated = check_footprint_deviation(
                 "worktrees/w1", declared_footprint=("src/foo.py",)
             )
         assert deviated == []
+
+    def test_small_deviation_within_buffer_is_ignored(self):
+        """#200: 数行程度の微小な逸脱はライブロック防止のバッファとして無視する。"""
+        with patch("src.dispatcher.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="2\t1\tsrc/tiny_new_file.py\n",
+                stderr="",
+            )
+            deviated = check_footprint_deviation(
+                "worktrees/w1",
+                declared_footprint=("src/foo.py",),
+                min_changed_lines=5,
+            )
+        assert deviated == []
+
+    def test_large_deviation_exceeding_buffer_is_reported(self):
+        with patch("src.dispatcher.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="10\t2\tsrc/large_new_file.py\n",
+                stderr="",
+            )
+            deviated = check_footprint_deviation(
+                "worktrees/w1",
+                declared_footprint=("src/foo.py",),
+                min_changed_lines=5,
+            )
+        assert deviated == ["src/large_new_file.py"]
+
+    def test_binary_file_change_always_reported_regardless_of_buffer(self):
+        with patch("src.dispatcher.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="-\t-\tsrc/image.png\n", stderr=""
+            )
+            deviated = check_footprint_deviation(
+                "worktrees/w1",
+                declared_footprint=(),
+                min_changed_lines=100,
+            )
+        assert deviated == ["src/image.png"]
 
 
 class TestNotifyRecompute:
@@ -421,6 +465,44 @@ class TestNotifyRecompute:
             )
         assert mock_comment.call_count >= 3  # task-a issue, task-b issue, parent issue
         mock_label.assert_any_call(2, "status:blocked-recompute")
+
+
+class TestNotifyForceSerial:
+    """#200: リトライ上限超過時の強制直列化フォールバック通知。"""
+
+    def test_dry_run_does_not_call_github(self):
+        with patch("src.dispatcher.github.add_comment") as mock_comment:
+            body = notify_force_serial(
+                "task-a",
+                issue_number=1,
+                parent_issue_number=181,
+                retry_count=2,
+                apply=False,
+            )
+        mock_comment.assert_not_called()
+        assert "task-a" in body
+
+    def test_apply_posts_comment_to_parent_issue(self):
+        with patch("src.dispatcher.github.add_comment") as mock_comment:
+            notify_force_serial(
+                "task-a",
+                issue_number=1,
+                parent_issue_number=181,
+                retry_count=2,
+                apply=True,
+            )
+        mock_comment.assert_called_once_with(181, ANY)
+
+    def test_apply_without_parent_issue_skips_comment(self):
+        with patch("src.dispatcher.github.add_comment") as mock_comment:
+            notify_force_serial(
+                "task-a",
+                issue_number=1,
+                parent_issue_number=None,
+                retry_count=2,
+                apply=True,
+            )
+        mock_comment.assert_not_called()
 
 
 class TestCreateWorktreeAndLaunch:
@@ -582,3 +664,269 @@ class TestRunDispatchCycle:
 
         assert report.selected == []
         assert report.quota_slots_available == 0
+
+
+class TestRunDispatchCycleFootprintRecompute:
+    """#192: footprint逸脱検知 → DAG再計算 → notify_recompute の配線。"""
+
+    def _config(self, tmp_path, run_state_path, **overrides):
+        defaults = dict(
+            max_concurrent=2,
+            max_launches_per_window=2,
+            window_seconds=3600,
+            run_state_path=run_state_path,
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+            parent_issue_number=181,
+        )
+        defaults.update(overrides)
+        return DispatcherConfig(**defaults)
+
+    def test_significant_deviation_triggers_recompute_and_notify(self, tmp_path):
+        run_state_path = tmp_path / "run_state.json"
+        save_run_state(
+            RunState(
+                active_worktrees={
+                    "1": ActiveWorktree(
+                        issue_number=1,
+                        branch="claude/issue-1-task-a",
+                        worktree_path=str(tmp_path / "w1"),
+                        pid=111,
+                        started_at=1_699_999_000.0,
+                        declared_footprint=("src/foo.py",),
+                    )
+                },
+                launch_history=[],
+            ),
+            run_state_path,
+        )
+        config = self._config(tmp_path, run_state_path)
+        in_progress_issue = _issue(
+            1,
+            labels=("status:in-progress",),
+            footprint=("src/foo.py",),
+            symbols=("foo.Foo",),
+            subtask_id="task-a",
+        )
+        conflict = FootprintConflict(
+            subtask_id="task-a",
+            other_subtask_id="task-b",
+            similarity=0.5,
+            blocked_subtask_id="task-b",
+        )
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label"),
+            patch("src.dispatcher.subprocess.Popen"),
+            patch(
+                "src.dispatcher.check_footprint_deviation",
+                return_value=["src/unexpected.py"],
+            ) as mock_check_deviation,
+            patch(
+                "src.dispatcher.recompute_dag_for_footprint_change"
+            ) as mock_recompute,
+            patch(
+                "src.dispatcher.notify_recompute", return_value=["body"]
+            ) as mock_notify,
+        ):
+            mock_list.side_effect = (
+                lambda label: [in_progress_issue]
+                if label == "status:in-progress"
+                else []
+            )
+            mock_recompute.return_value = (MagicMock(), [conflict])
+
+            report = run_dispatch_cycle(config)
+
+        mock_add_label.assert_not_called()
+        mock_check_deviation.assert_called_once()
+        mock_recompute.assert_called_once()
+        assert mock_recompute.call_args.args[1] == "task-a"
+        mock_notify.assert_called_once()
+        assert mock_notify.call_args.kwargs["apply"] is True
+        assert len(report.deviation_events) == 1
+        event = report.deviation_events[0]
+        assert event["issue_number"] == 1
+        assert event["action"] == "recomputed"
+        assert event["deviated_files"] == ["src/unexpected.py"]
+
+        persisted = json.loads(run_state_path.read_text())
+        assert persisted["active_worktrees"]["1"]["recompute_count"] == 1
+
+    def test_dry_run_recompute_does_not_persist_or_call_github(self, tmp_path):
+        run_state_path = tmp_path / "run_state.json"
+        save_run_state(
+            RunState(
+                active_worktrees={
+                    "1": ActiveWorktree(
+                        issue_number=1,
+                        branch="claude/issue-1-task-a",
+                        worktree_path=str(tmp_path / "w1"),
+                        pid=111,
+                        started_at=1_699_999_000.0,
+                        declared_footprint=("src/foo.py",),
+                    )
+                },
+                launch_history=[],
+            ),
+            run_state_path,
+        )
+        config = self._config(tmp_path, run_state_path, apply=False)
+        in_progress_issue = _issue(
+            1, labels=("status:in-progress",), subtask_id="task-a"
+        )
+        conflict = FootprintConflict(
+            subtask_id="task-a",
+            other_subtask_id="task-b",
+            similarity=0.5,
+            blocked_subtask_id="task-b",
+        )
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch(
+                "src.dispatcher.check_footprint_deviation",
+                return_value=["src/unexpected.py"],
+            ),
+            patch(
+                "src.dispatcher.recompute_dag_for_footprint_change"
+            ) as mock_recompute,
+            patch(
+                "src.dispatcher.notify_recompute", return_value=["dry body"]
+            ) as mock_notify,
+        ):
+            mock_list.side_effect = (
+                lambda label: [in_progress_issue]
+                if label == "status:in-progress"
+                else []
+            )
+            mock_recompute.return_value = (MagicMock(), [conflict])
+
+            run_dispatch_cycle(config)
+
+        mock_add_label.assert_not_called()
+        mock_add_comment.assert_not_called()
+        assert mock_notify.call_args.kwargs["apply"] is False
+
+        persisted = json.loads(run_state_path.read_text())
+        assert persisted["active_worktrees"]["1"]["recompute_count"] == 0
+
+    def test_retry_limit_exceeded_triggers_forced_serialization(self, tmp_path):
+        """#200: リトライ上限超過時は再計算せず強制直列化にフォールバックする。"""
+        run_state_path = tmp_path / "run_state.json"
+        save_run_state(
+            RunState(
+                active_worktrees={
+                    "1": ActiveWorktree(
+                        issue_number=1,
+                        branch="claude/issue-1-task-a",
+                        worktree_path=str(tmp_path / "w1"),
+                        pid=111,
+                        started_at=1_699_999_000.0,
+                        declared_footprint=("src/foo.py",),
+                        recompute_count=2,
+                    )
+                },
+                launch_history=[],
+            ),
+            run_state_path,
+        )
+        config = self._config(tmp_path, run_state_path, max_recompute_retries=2)
+        in_progress_issue = _issue(
+            1, labels=("status:in-progress",), subtask_id="task-a"
+        )
+        other_queued_issue = _issue(2, labels=("status:queued",), subtask_id="task-b")
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label"),
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch(
+                "src.dispatcher.check_footprint_deviation",
+                return_value=["src/unexpected.py"],
+            ),
+            patch(
+                "src.dispatcher.recompute_dag_for_footprint_change"
+            ) as mock_recompute,
+        ):
+
+            def _list(label):
+                if label == "status:queued":
+                    return [other_queued_issue]
+                if label == "status:in-progress":
+                    return [in_progress_issue]
+                return []
+
+            mock_list.side_effect = _list
+
+            report = run_dispatch_cycle(config)
+
+        mock_recompute.assert_not_called()
+        mock_add_label.assert_any_call(1, "status:force-serial")
+        mock_add_comment.assert_called_once()
+        assert report.selected == []
+        assert report.deviation_events[0]["action"] == "forced_serial"
+
+        persisted = json.loads(run_state_path.read_text())
+        assert persisted["active_worktrees"]["1"]["forced_serial"] is True
+
+    def test_already_forced_serial_does_not_recompute_again(self, tmp_path):
+        """一度強制直列化された後は、再度の再計算・通知でチャーンさせない。"""
+        run_state_path = tmp_path / "run_state.json"
+        save_run_state(
+            RunState(
+                active_worktrees={
+                    "1": ActiveWorktree(
+                        issue_number=1,
+                        branch="claude/issue-1-task-a",
+                        worktree_path=str(tmp_path / "w1"),
+                        pid=111,
+                        started_at=1_699_999_000.0,
+                        declared_footprint=("src/foo.py",),
+                        recompute_count=2,
+                        forced_serial=True,
+                    )
+                },
+                launch_history=[],
+            ),
+            run_state_path,
+        )
+        config = self._config(tmp_path, run_state_path, max_recompute_retries=2)
+        in_progress_issue = _issue(
+            1, labels=("status:in-progress",), subtask_id="task-a"
+        )
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch(
+                "src.dispatcher.check_footprint_deviation",
+                return_value=["src/unexpected.py"],
+            ),
+            patch(
+                "src.dispatcher.recompute_dag_for_footprint_change"
+            ) as mock_recompute,
+        ):
+            mock_list.side_effect = (
+                lambda label: [in_progress_issue]
+                if label == "status:in-progress"
+                else []
+            )
+            report = run_dispatch_cycle(config)
+
+        mock_recompute.assert_not_called()
+        mock_add_comment.assert_not_called()
+        mock_add_label.assert_not_called()
+        assert report.selected == []
+        assert report.deviation_events[0]["action"] == "already_forced_serial"
