@@ -107,7 +107,8 @@ jobs:
           fi
 
           cp "$STATE_DIR/$RUN_STATE_PATH" "$RUN_STATE_PATH"
-          git add "$RUN_STATE_PATH"
+          # ルートの.gitignore(*.json)に引っかかるため、この状態専用ブランチでは明示的にforce-add する
+          git add -f "$RUN_STATE_PATH"
 
           if git diff --cached --quiet; then
             echo "run_state.json unchanged, skipping commit."
