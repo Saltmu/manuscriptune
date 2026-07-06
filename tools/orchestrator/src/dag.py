@@ -189,6 +189,53 @@ def _otsuka_ochiai(set_a: frozenset[str], set_b: frozenset[str]) -> float:
     return intersection / math.sqrt(len(set_a) * len(set_b))
 
 
+def _document_frequencies(subtasks: list[SubTask]) -> dict[str, int]:
+    """footprint/symbolsの各アイテムが、いくつのサブタスクのtouch集合に
+    出現するか（文書頻度）を数える。"""
+    freq: dict[str, int] = {}
+    for subtask in subtasks:
+        for item in subtask.touch_set():
+            freq[item] = freq.get(item, 0) + 1
+    return freq
+
+
+def _idf_weights(subtasks: list[SubTask]) -> dict[str, float]:
+    """#191: IDF（逆文書頻度）風の重み付け。
+
+    Logger・Configのような、多くのサブタスクが触れる共通ユーティリティは
+    文書頻度(df)が高くなるため、重みが1.0に近づき結合度スコアへの寄与が
+    小さくなる。固有のシンボル/ファイル（dfが低い）ほど重みが大きくなり、
+    実質的な結合は引き続き強く検出される。
+
+    smooth-idf: ln((n+1) / (df+1)) + 1.0 （nはサブタスク総数）。
+    """
+    n = len(subtasks)
+    freq = _document_frequencies(subtasks)
+    return {item: math.log((n + 1) / (df + 1)) + 1.0 for item, df in freq.items()}
+
+
+def _weighted_otsuka_ochiai(
+    set_a: frozenset[str], set_b: frozenset[str], weights: dict[str, float]
+) -> float:
+    """アイテムごとのIDF重みを考慮した重み付きOtsuka-Ochiai係数（重み付きコサイン類似度）。
+
+    出現頻度が高い（＝疑似結合を招きやすい）アイテムほど重みが1.0に近づき、
+    スコアへの寄与が小さくなる。重みを与えない場合（全アイテムが一意）は
+    `_otsuka_ochiai` と同じ結果になる。
+    """
+    if not set_a or not set_b:
+        return 0.0
+    shared = set_a & set_b
+    if not shared:
+        return 0.0
+    weighted_intersection = sum(weights.get(item, 1.0) ** 2 for item in shared)
+    norm_a = math.sqrt(sum(weights.get(item, 1.0) ** 2 for item in set_a))
+    norm_b = math.sqrt(sum(weights.get(item, 1.0) ** 2 for item in set_b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return weighted_intersection / (norm_a * norm_b)
+
+
 def _find_candidate_pairs(subtasks: list[SubTask]) -> set[tuple[str, str]]:
     """一次探索: 共有ファイル/シンボル単位の軽量な逆引きインデックスから、
     交差が非ゼロになり得るペアだけを安価に絞り込む（総当りO(n^2)を回避）。"""
@@ -211,11 +258,20 @@ def _find_candidate_pairs(subtasks: list[SubTask]) -> set[tuple[str, str]]:
 def build_similarity_edges(
     subtasks: list[SubTask], threshold: float = DEFAULT_SIMILARITY_THRESHOLD
 ) -> list[DagEdge]:
-    """二次探索: 一次探索の候補ペアに対してのみ、精緻な結合度スコアを算出する。"""
+    """二次探索: 一次探索の候補ペアに対してのみ、精緻な結合度スコアを算出する。
+
+    #191: 出現頻度に応じたIDF風の重み付け（`_idf_weights`）を適用し、Logger・
+    Configのような多くのサブタスクが共有する高頻度アイテムのみに基づく疑似結合を
+    抑制する。固有シンボル/ファイルの共有による実質的な結合は、重みが1.0に
+    近づかないため引き続き検出される。
+    """
     by_id = {s.id: s for s in subtasks}
+    weights = _idf_weights(subtasks)
     edges: list[DagEdge] = []
     for a_id, b_id in sorted(_find_candidate_pairs(subtasks)):
-        score = _otsuka_ochiai(by_id[a_id].touch_set(), by_id[b_id].touch_set())
+        score = _weighted_otsuka_ochiai(
+            by_id[a_id].touch_set(), by_id[b_id].touch_set(), weights
+        )
         if score > threshold:
             edges.append(
                 DagEdge(source=a_id, target=b_id, reason="similarity", score=score)
