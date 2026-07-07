@@ -1,5 +1,27 @@
 {
-  "active_worktrees": {},
-  "launch_history": [],
+  "active_worktrees": {
+    "247": {
+      "issue_number": 247,
+      "branch": "claude/issue-247-plot-feature-contracts",
+      "worktree_path": "worktrees/claude-issue-247-plot-feature-contracts",
+      "pid": null,
+      "started_at": 1783423174.7666795,
+      "declared_footprint": [
+        "src/utils/ai_tasks/plotting.py",
+        "src/utils/ai_task.py",
+        "src/utils/project_paths.py",
+        "src/services/plot_writer_service.py",
+        "src/routes/models/plots.py",
+        "src/routes/plots.py"
+      ],
+      "recompute_count": 0,
+      "forced_serial": false,
+      "external_id": "session_012Xv3UHLHc9BUujyo7NTRHF",
+      "external_url": "https://claude.ai/code/session_012Xv3UHLHc9BUujyo7NTRHF"
+    }
+  },
+  "launch_history": [
+    1783423174.7666795
+  ],
   "completed_worktrees": []
 }
