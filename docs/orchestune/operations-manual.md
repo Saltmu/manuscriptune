@@ -1,0 +1,86 @@
+# Orchestune 運用マニュアル
+
+`tools/orchestune`（マルチエージェント実装オーケストレーション）を、GitHub Actions経由での
+定期dispatch運用も含めて安全に回すための実務マニュアル。設計思想・API仕様は
+`skills/orchestune-dispatch-draft/SKILL.md`を参照し、本ドキュメントは日々の運用手順・
+ラベル状態の見方・トラブルシューティングに特化する。
+
+## 全体像
+
+1. **Stage 1（分解案生成・承認・Issue起票）**: 人間が提示した「大きな石」をサブタスクに分解し、
+   `dag.py`でDAGを構築、人間が分解案を承認した後、サブタスクごとにGitHub Issueを起票する。
+2. **Stage 2（ディスパッチ）**: GitHub Actions（`.github/workflows/orchestune-dispatch.yml`）が
+   毎時17分に`dispatch-cycle --apply --dispatch-target cloud-routine`を実行し、
+   `status:queued`のIssueをClaude Codeクラウドルーチンへ実際にdispatchする。
+
+## ラベルの意味と状態遷移
+
+| ラベル | 意味 |
+| --- | --- |
+| `status:queued` | dispatch待ちで即時実行可能 |
+| `status:blocked` | `depends_on`未解決のため実行不可 |
+| `status:in-progress` | dispatch済み・実行中 |
+| `status:done` | 完了 |
+| `status:external-lock` | 他ブランチ/PRとのfootprint衝突により一時停止中 |
+| `status:blocked-recompute` | footprint逸脱によるDAG再計算でブロック中 |
+| `status:force-serial` | リトライ上限超過により強制直列化 |
+| `risk:flagged` | リスクフラグ付き（要人間確認） |
+
+正常な状態遷移は以下の通り、**すべてdispatcher（GitHub Actions）が自動で行う**。
+
+```
+(Issue起票時)
+  depends_on解決済み → status:queued
+  depends_on未解決   → status:blocked
+
+status:blocked --(依存先がstatus:doneになる)--> status:queued
+status:queued  --(dispatch実行)--> status:in-progress
+status:in-progress --(完了検知: 対象ブランチにPRオープン)--> status:done
+status:queued/in-progress --(他ブランチとのfootprint衝突検知)--> status:external-lock
+status:external-lock --(衝突解消)--> status:queued
+```
+
+## 【最重要】運用ルール: dispatcher管理下のIssueに人間が直接触らない
+
+`status:*`ラベルが付いた（＝Orchestuneのパイプラインに乗った）Issueは、**ラベル変更・Close操作を
+人間が直接行わないこと**。理由は以下の通り、上記の自動状態遷移がずれると連鎖的に壊れるため。
+
+- `list_issues_by_label`は`--state open`のIssueしか見ない。人間が完了Issueを直接Closeすると、
+  たとえ`status:done`ラベルを付けても`_promote_blocked_tasks`から見えなくなり、
+  依存先タスクが永久に`status:blocked`のまま昇格しなくなる。
+- dispatcherの管理外（`run_state.json`の`active_worktrees`に記録されていない）で
+  手動dispatchしたIssueは、完了検知（`is_process_alive`/対象ブランチのPRオープン確認）の
+  対象にならないため、`status:in-progress`のまま放置される。
+
+**例外的にdispatcher管理下のIssueを人間が直接操作する必要が生じた場合**は、
+上記の自動遷移がやるはずだった操作をそのまま手動で再現すること（例:
+完了させたいなら「Issueは**Openのまま**」`status:in-progress`を外し`status:done`を付ける。
+Closeはしない）。
+
+## GitHub Actionsワークフローの設定
+
+`.github/workflows/orchestune-dispatch.yml`
+
+- **トリガー**: `schedule`（毎時17分、`--apply`込みで実dispatch）+ `workflow_dispatch`
+  （`apply`入力、既定`false`＝dry-run。動作確認時はこちらを使う）
+- **状態永続化**: `run_state.json`（quota・完了検知の状態）は、runnerが使い捨てのため
+  専用ブランチ`orchestune-state`にコミットして引き継ぐ。このブランチは`main`と共通の祖先を
+  持たないorphanブランチであり、**通常のfeatureブランチとして扱わないこと**（マージ・削除・
+  rebase等の対象にしない）。
+- **必要なSecrets**（リポジトリ管理者が事前に登録）:
+  - `ORCHESTUNE_ROUTINE_ID` / `ORCHESTUNE_ROUTINE_TOKEN`:
+    [claude.ai/code/routines](https://claude.ai/code/routines)でAPIトリガー付きルーチンを
+    作成し、発行されたIDとトークンを登録する。
+
+## 動作確認・トラブルシューティング
+
+- **まず`workflow_dispatch`（`apply: false`）でdry-run実行し、`selected`/`quota_slots_available`/
+  `lock_changes`等のJSON出力を確認する。**
+- **`status:queued`のIssueが0件で何もdispatchされない場合**: バグではなく、単に
+  ディスパッチ待ちのタスクが無いだけの可能性が高い。Issueのラベル状態を確認すること
+  （起票時に`status:queued`/`status:blocked`が正しく付与されているか）。
+- **scheduled実行が毎回失敗する場合**: まずGitHub Actionsの実行ログ（失敗ジョブのログ）を確認する。
+  `gh`コマンドのエラー（`CalledProcessError`）が出ている場合、対象ラベルがリポジトリに
+  実在するか（`gh label create`で作成済みか）を疑う。
+- **必要なラベルが存在しない場合**: `gh label create "<label>" --color <hex> --description "<desc>" --repo Saltmu/manuscriptune`
+  で作成する。少なくとも上記の状態遷移表に出てくる全ラベルが必要。
