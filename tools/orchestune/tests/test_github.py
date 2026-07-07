@@ -236,6 +236,54 @@ class TestListOpenPrs:
             )
         ]
 
+    def test_includes_closing_issue_references(self):
+        """#239: ブランチ名がAIセッションの指示通りにならない場合でも
+        自己PR判定できるよう、PRが閉じるIssue番号一覧も取得する。"""
+        list_payload = '[{"number": 5, "headRefName": "claude/elegant-noether-5rli7u"}]'
+        detail_payload = (
+            '{"files": [{"path": "src/a.py"}], '
+            '"closingIssuesReferences": [{"number": 218}]}'
+        )
+
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=list_payload, stderr=""
+                ),
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=detail_payload, stderr=""
+                ),
+            ]
+            prs = list_open_prs()
+            called_args = mock_run.call_args_list[1].args[0]
+
+        assert "closingIssuesReferences" in called_args[called_args.index("--json") + 1]
+        assert prs == [
+            PrRecord(
+                number=5,
+                head_ref="claude/elegant-noether-5rli7u",
+                changed_files=("src/a.py",),
+                closes_issue_numbers=(218,),
+            )
+        ]
+
+    def test_closes_issue_numbers_defaults_to_empty_tuple(self):
+        list_payload = '[{"number": 5, "headRefName": "feat/x"}]'
+        detail_payload = '{"files": []}'
+
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=list_payload, stderr=""
+                ),
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=detail_payload, stderr=""
+                ),
+            ]
+            prs = list_open_prs()
+
+        assert prs[0].closes_issue_numbers == ()
+
 
 class TestBranchChangedFiles:
     def test_calls_git_diff_name_only(self):

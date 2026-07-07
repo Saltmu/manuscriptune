@@ -15,6 +15,7 @@ from src.dispatcher import (
     DispatcherConfig,
     RunState,
     Task,
+    _is_worktree_complete,
     append_event_log,
     build_event_log_entry,
     check_footprint_deviation,
@@ -449,6 +450,44 @@ class TestScanExternalLocks:
             queued, remote_branches=[], prs=prs, active_branches=["claude/issue-5-x"]
         )
         assert result.to_lock == []
+
+    def test_does_not_lock_task_against_its_own_closing_pr(self):
+        """#239: AIセッションがブランチ名指示に従わず、run_stateのブランチ名と
+        一致しないPRを作成した場合でも、そのPRが自タスク自身のIssueを
+        closesしているなら「他人の変更」として誤ロックしない。"""
+        queued = [_task(218, footprint=("src/routes/review_history.py",))]
+        prs = [
+            PrRecord(
+                number=238,
+                head_ref="claude/elegant-noether-5rli7u",
+                changed_files=("src/routes/review_history.py",),
+                closes_issue_numbers=(218,),
+            )
+        ]
+        result = scan_external_locks(
+            queued,
+            remote_branches=[],
+            prs=prs,
+            active_branches=["claude/issue-218-review-history-backend-api"],
+        )
+        assert result.to_lock == []
+
+    def test_still_locks_other_task_overlapping_unrelated_closing_pr(self):
+        """自PRの除外は「そのタスク自身のIssueをclosesする場合」のみに限定され、
+        他タスクに対しては引き続き外部衝突として扱われる。"""
+        queued = [_task(1, footprint=("src/shared.py",))]
+        prs = [
+            PrRecord(
+                number=238,
+                head_ref="claude/elegant-noether-5rli7u",
+                changed_files=("src/shared.py",),
+                closes_issue_numbers=(218,),
+            )
+        ]
+        result = scan_external_locks(
+            queued, remote_branches=[], prs=prs, active_branches=[]
+        )
+        assert [t.issue_number for t in result.to_lock] == [1]
 
     def test_unlocks_previously_locked_task_with_no_more_overlap(self):
         locked_task = Task(
@@ -1289,6 +1328,35 @@ class TestRunDispatchCycleFootprintRecompute:
         mock_add_label.assert_not_called()
         assert report.selected == []
         assert report.deviation_events[0]["action"] == "already_forced_serial"
+
+
+class TestIsWorktreeComplete:
+    """#239: external_id経由の完了判定に、issue_numberが正しく引き渡されること。"""
+
+    def test_passes_issue_number_to_dispatch_target_handle(self, tmp_path):
+        fake_target = MagicMock()
+        fake_target.is_complete.return_value = True
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            dispatch_target=fake_target,
+        )
+        active = ActiveWorktree(
+            issue_number=218,
+            branch="claude/issue-218-review-history-backend-api",
+            worktree_path=str(tmp_path / "w1"),
+            pid=None,
+            started_at=1_699_999_000.0,
+            declared_footprint=("src/foo.py",),
+            external_id="session_1",
+            external_url="https://claude.ai/code/session_1",
+        )
+
+        result = _is_worktree_complete(active, config)
+
+        assert result is True
+        handle = fake_target.is_complete.call_args.args[0]
+        assert handle.issue_number == 218
+        assert handle.branch_name == "claude/issue-218-review-history-backend-api"
 
 
 class TestRunDispatchCycleCompletion:

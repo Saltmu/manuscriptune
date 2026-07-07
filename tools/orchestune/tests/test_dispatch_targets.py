@@ -186,6 +186,48 @@ class TestClaudeCodeCloudRoutineDispatchTarget:
         target = ClaudeCodeCloudRoutineDispatchTarget("trig_1", "token")
         assert target.is_complete(DispatchHandle(external_id="session_1")) is False
 
+    def test_is_complete_true_via_closing_issue_reference_when_branch_mismatches(self):
+        """#239: AIセッションがブランチ名指示に従わなかった場合でも、
+        PRのclosingIssuesReferences経由で完了を検知できる。"""
+        target = ClaudeCodeCloudRoutineDispatchTarget("trig_1", "token")
+        with patch(
+            "src.dispatch_targets.github.list_open_prs",
+            return_value=[
+                PrRecord(
+                    number=1,
+                    head_ref="claude/elegant-noether-5rli7u",
+                    changed_files=(),
+                    closes_issue_numbers=(218,),
+                )
+            ],
+        ):
+            handle = DispatchHandle(
+                external_id="session_1",
+                branch_name="claude/issue-218-review-history-backend-api",
+                issue_number=218,
+            )
+            assert target.is_complete(handle) is True
+
+    def test_is_complete_false_when_neither_branch_nor_issue_match(self):
+        target = ClaudeCodeCloudRoutineDispatchTarget("trig_1", "token")
+        with patch(
+            "src.dispatch_targets.github.list_open_prs",
+            return_value=[
+                PrRecord(
+                    number=1,
+                    head_ref="other-branch",
+                    changed_files=(),
+                    closes_issue_numbers=(999,),
+                )
+            ],
+        ):
+            handle = DispatchHandle(
+                external_id="session_1",
+                branch_name="claude/issue-218-review-history-backend-api",
+                issue_number=218,
+            )
+            assert target.is_complete(handle) is False
+
 
 class TestBuildDispatchTarget:
     def test_local_name_returns_local_process_target(self, tmp_path):
