@@ -1833,6 +1833,7 @@ class TestRunDispatchCycleBlockedPromotion:
             mock_run.side_effect = subprocess.CalledProcessError(
                 returncode=128,
                 cmd="git worktree add",
+            )
             report = run_dispatch_cycle(config)
 
             assert report.selected == []
@@ -1931,7 +1932,7 @@ class TestBranchStacking:
             patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
         ):
             mock_list.side_effect = (
-                lambda label: [blocked_issue]
+                lambda label, **_: [blocked_issue]
                 if label == "status:blocked"
                 else [parent_issue]
                 if label == "status:in-progress"
@@ -1943,6 +1944,8 @@ class TestBranchStacking:
                 branch="claude/issue-2-task-2",
                 worktree_path="worktrees/claude-issue-2-task-2",
                 error_message=None,
+                external_id=None,
+                external_url=None,
             )
 
             report = run_dispatch_cycle(config)
@@ -1950,7 +1953,6 @@ class TestBranchStacking:
         mock_launch.assert_called_once_with(
             ANY,
             "claude/issue-2-task-2",
-            ANY,
             ANY,
             ANY,
             apply=True,
@@ -2001,7 +2003,7 @@ class TestBranchStacking:
             patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
         ):
             mock_list.side_effect = (
-                lambda label: [issue_b, issue_c]
+                lambda label, **_: [issue_b, issue_c]
                 if label == "status:blocked"
                 else [issue_a]
                 if label == "status:in-progress"
@@ -2013,6 +2015,8 @@ class TestBranchStacking:
                 branch="claude/issue-2-task-2",
                 worktree_path="worktrees/claude-issue-2-task-2",
                 error_message=None,
+                external_id=None,
+                external_url=None,
             )
 
             run_dispatch_cycle(config)
@@ -2020,7 +2024,6 @@ class TestBranchStacking:
         mock_launch.assert_called_once_with(
             ANY,
             "claude/issue-2-task-2",
-            ANY,
             ANY,
             ANY,
             apply=True,
@@ -2086,7 +2089,7 @@ class TestBranchStacking:
             patch("src.dispatcher.subprocess.run") as mock_run,
         ):
 
-            def list_issues_by_label_mock(label):
+            def list_issues_by_label_mock(label, **_):
                 if label == "status:in-progress":
                     return [issue_a, issue_b]
                 return []
@@ -2151,7 +2154,7 @@ class TestBranchStacking:
         with (
             patch(
                 "src.dispatcher.github.list_issues_by_label",
-                side_effect=lambda label: [issue_a, issue_b]
+                side_effect=lambda label, **_: [issue_a, issue_b]
                 if label == "status:in-progress"
                 else [],
             ),
@@ -2249,7 +2252,7 @@ class TestGC:
             patch("src.dispatcher.subprocess.run") as mock_run,
         ):
             mock_list.side_effect = (
-                lambda label: [issue_a] if label == "status:in-progress" else []
+                lambda label, **_: [issue_a] if label == "status:in-progress" else []
             )
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout=""
@@ -2311,7 +2314,7 @@ class TestGC:
             patch("src.dispatcher.subprocess.run") as mock_run,
         ):
             mock_list.side_effect = (
-                lambda label: [issue_a] if label == "status:in-progress" else []
+                lambda label, **_: [issue_a] if label == "status:in-progress" else []
             )
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout=""

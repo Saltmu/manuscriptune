@@ -798,6 +798,7 @@ def _process_active_worktrees(
                 continue
 
         # 自動リベース判定＆実行 (#201)
+        process_alive = is_process_alive(active.pid)
         if process_alive and _try_auto_rebase(
             active,
             active_task,
@@ -884,22 +885,13 @@ def _try_auto_rebase(
                             text=True,
                             check=True,
                         )
-                        config.log_dir.mkdir(parents=True, exist_ok=True)
-                        cmd = config.command_builder(
-                            active_task, Path(active.worktree_path)
+                        assert config.dispatch_target is not None
+                        handle = config.dispatch_target.launch(
+                            active_task, active.branch, Path(active.worktree_path)
                         )
-                        log_path = (
-                            config.log_dir / f"{child_branch.replace('/', '-')}.log"
-                        )
-                        with open(log_path, "ab") as log_fh:
-                            process = subprocess.Popen(
-                                cmd,
-                                cwd=active.worktree_path,
-                                stdout=log_fh,
-                                stderr=subprocess.STDOUT,
-                                start_new_session=True,
-                            )
-                        active.pid = process.pid
+                        active.pid = handle.pid
+                        active.external_id = handle.external_id
+                        active.external_url = handle.external_url
                     except (subprocess.CalledProcessError, OSError):
                         try:
                             subprocess.run(
