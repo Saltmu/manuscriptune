@@ -40,22 +40,23 @@ status:queued/in-progress --(他ブランチとのfootprint衝突検知)--> stat
 status:external-lock --(衝突解消)--> status:queued
 ```
 
-## 【最重要】運用ルール: dispatcher管理下のIssueに人間が直接触らない
+## 運用ルール: dispatcher管理下のIssueに人間が直接触る際の注意
 
-`status:*`ラベルが付いた（＝Orchestuneのパイプラインに乗った）Issueは、**ラベル変更・Close操作を
-人間が直接行わないこと**。理由は以下の通り、上記の自動状態遷移がずれると連鎖的に壊れるため。
+`status:*`ラベルが付いた（＝Orchestuneのパイプラインに乗った）Issueへ人間が直接ラベル変更・
+Close操作を行うこと自体は問題ない。ただし以下の1点だけは引き続き注意すること。
 
-- `list_issues_by_label`は`--state open`のIssueしか見ない。人間が完了Issueを直接Closeすると、
-  たとえ`status:done`ラベルを付けても`_promote_blocked_tasks`から見えなくなり、
-  依存先タスクが永久に`status:blocked`のまま昇格しなくなる。
-- dispatcherの管理外（`run_state.json`の`active_worktrees`に記録されていない）で
+- **dispatcher管理外（`run_state.json`の`active_worktrees`に記録されていない）で
   手動dispatchしたIssueは、完了検知（`is_process_alive`/対象ブランチのPRオープン確認）の
-  対象にならないため、`status:in-progress`のまま放置される。
+  対象にならない**ため、そのままでは`status:in-progress`のまま放置される。手動dispatchした
+  タスクを完了させる場合は、`status:in-progress`/`status:external-lock`等を外し
+  `status:done`を付けてから、通常通りCloseしてよい（PRのマージによる`Closes #N`での
+  自動Closeも問題ない）。
 
-**例外的にdispatcher管理下のIssueを人間が直接操作する必要が生じた場合**は、
-上記の自動遷移がやるはずだった操作をそのまま手動で再現すること（例:
-完了させたいなら「Issueは**Openのまま**」`status:in-progress`を外し`status:done`を付ける。
-Closeはしない）。
+> **#236で修正済み（旧ルールの補足）**: 以前は「完了Issueを直接Closeすると
+> `_promote_blocked_tasks`が`--state open`しか見ないため依存先が永久に昇格しない」という
+> 制約があり、「Closeしない」運用ルールで回避していた。現在は`status:done`の検索のみ
+> `state="all"`でclosedなIssueも含めて検索するよう修正済みのため、完了Issueを通常通り
+> Closeしても依存解決の自動昇格は正しく動作する。
 
 ## GitHub Actionsワークフローの設定
 
@@ -84,3 +85,9 @@ Closeはしない）。
   実在するか（`gh label create`で作成済みか）を疑う。
 - **必要なラベルが存在しない場合**: `gh label create "<label>" --color <hex> --description "<desc>" --repo Saltmu/manuscriptune`
   で作成する。少なくとも上記の状態遷移表に出てくる全ラベルが必要。
+- **`status:queued`が付いているのにdispatchされない場合**: `status:external-lock`が同時に
+  付いていないか確認する（`status:queued`はロック時に外されないため、この2つは併存し得る）。
+  dispatcher管理外で手動dispatchしたIssueは、その成果物（同じfootprintを変更するPR/ブランチ）が
+  「外部ブランチとの衝突」として誤検知され、`status:external-lock`が付くことがある
+  （タスク自身の完了物を「他人の変更」と誤認するケース）。この場合は、対応するPRをマージ後、
+  Issueを完了状態（`status:done`）に更新すればロックも解消される。
