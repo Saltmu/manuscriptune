@@ -10,6 +10,7 @@
     import PlotReview from './views/PlotReview.svelte';
     import Editor from './views/Editor.svelte';
     import Settings from './views/Settings.svelte';
+    import ReviewHistory from './views/ReviewHistory.svelte';
 
     let novelTitle = '重天の調律師';
     let showShutdownModal = false;
@@ -31,7 +32,7 @@
         }
 
         const { view, file } = parseHash();
-        const validViews = ['dashboard', 'sync', 'editor', 'plot_review', 'settings'];
+        const validViews = ['dashboard', 'sync', 'editor', 'plot_review', 'review_history', 'settings'];
         if (!validViews.includes(view)) {
             window.location.hash = '#/dashboard';
             return;
@@ -144,6 +145,12 @@
         </li>
         <!-- svelte-ignore a11y-invalid-attribute -->
         <li>
+            <a class="nav-item {$activeView === 'review_history' ? 'active' : ''}" href="javascript:void(0)" on:click={() => switchView('review_history')}>
+                📜 レビュー履歴
+            </a>
+        </li>
+        <!-- svelte-ignore a11y-invalid-attribute -->
+        <li>
             <a class="nav-item {$activeView === 'settings' ? 'active' : ''}" href="javascript:void(0)" on:click={() => switchView('settings')}>
                 ⚙️ 設定
             </a>
@@ -165,6 +172,8 @@
         <PlotReview />
     {:else if $activeView === 'editor'}
         <Editor />
+    {:else if $activeView === 'review_history'}
+        <ReviewHistory />
     {:else if $activeView === 'settings'}
         <Settings />
     {/if}

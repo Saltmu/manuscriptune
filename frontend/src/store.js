@@ -27,6 +27,9 @@ export const activeEditorTab = writable('preview'); // 'preview', 'findings', 'c
 export const novelMetadata = writable({});
 export const novelFilename = writable('');
 
+// Review History Specific States
+export const selectedReviewHistoryVersion = writable(null);
+
 // Console log states (for streaming output)
 export const consoleLogMap = writable({
     sync: '--- プロセスを開始します ---\n',
