@@ -1,4 +1,10 @@
 from src.utils.ai_tasks.base import AgyTask, InputT, OutputT
+from src.utils.ai_tasks.plotting import (
+    PlotExpansionInput,
+    PlotExpansionTask,
+    PlotRevisionInput,
+    PlotRevisionTask,
+)
 from src.utils.ai_tasks.replacement import (
     BlockReplacementInput,
     BlockReplacementTask,
@@ -42,4 +48,8 @@ __all__ = [
     "NovelPolicyCheckTask",
     "NovelRewriteInput",
     "NovelRewriteTask",
+    "PlotExpansionInput",
+    "PlotExpansionTask",
+    "PlotRevisionInput",
+    "PlotRevisionTask",
 ]

@@ -8,12 +8,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.routes.deps import require_api_key
 from src.routes.models.plots import (
     PlotDetailResponse,
+    PlotDraftResponse,
     PlotEpisodesStatusResponse,
     PlotListResponse,
 )
-from src.services import novel_service, pipeline_service, stream_service
+from src.services import (
+    novel_service,
+    pipeline_service,
+    plot_writer_service,
+    stream_service,
+)
 from src.utils import plot_parser, project_paths
 from src.utils import project_config as writer_helper
+from src.utils.file_io import read_file
 from src.utils.logger import get_logger
 from src.utils.yaml_handler import YamlHandler
 
@@ -105,6 +112,77 @@ async def stream_plot_review(
         ).execute()
 
     return stream_service.stream_service_call(_run_plot_review)
+
+
+@router.get("/api/plot/draft", response_model=PlotDraftResponse)
+async def get_plot_draft(
+    file: str = Query(
+        ..., description=f"Plot filename in {project_paths.DATA_SOURCES_DIR}/"
+    ),
+):
+    safe_file = os.path.basename(file)
+    plot_stem = Path(safe_file).stem
+    draft_path = project_paths.get_plot_draft_path(
+        project_paths.get_output_dir(plot_stem), plot_stem
+    )
+    if not os.path.exists(draft_path):
+        raise HTTPException(status_code=404, detail="Plot draft not found.")
+
+    return {
+        "draft_name": os.path.basename(draft_path),
+        "content": read_file(draft_path),
+        "source_plot": safe_file,
+        "saved_path": draft_path,
+    }
+
+
+@router.get("/api/stream/plot_expand", dependencies=[Depends(require_api_key)])
+async def stream_plot_expand(
+    file: str = Query(
+        ..., description=f"Plot filename in {project_paths.DATA_SOURCES_DIR}/"
+    ),
+    model: str | None = Query(None),
+    focus: str | None = Query(None),
+):
+    safe_file = os.path.basename(file)
+    plot_path = project_paths.get_source_path(safe_file)
+    if not os.path.exists(plot_path):
+        raise HTTPException(status_code=404, detail="Plot file not found.")
+
+    return stream_service.stream_service_call(
+        plot_writer_service.expand_plot,
+        plot_file=plot_path,
+        model=model,
+        focus_instructions=focus,
+    )
+
+
+@router.get("/api/stream/plot_revise", dependencies=[Depends(require_api_key)])
+async def stream_plot_revise(
+    file: str = Query(
+        ..., description=f"Plot filename in {project_paths.DATA_SOURCES_DIR}/"
+    ),
+    model: str | None = Query(None),
+):
+    safe_file = os.path.basename(file)
+    plot_path = project_paths.get_source_path(safe_file)
+    if not os.path.exists(plot_path):
+        raise HTTPException(status_code=404, detail="Plot file not found.")
+
+    plot_stem = Path(safe_file).stem
+    findings_yaml_path = project_paths.get_plot_findings_yaml_path(
+        project_paths.get_output_dir(plot_stem), plot_stem
+    )
+    if not os.path.exists(findings_yaml_path):
+        raise HTTPException(
+            status_code=400, detail="Integrated plot findings not generated yet."
+        )
+
+    return stream_service.stream_service_call(
+        plot_writer_service.revise_plot_with_findings,
+        plot_file=plot_path,
+        model=model,
+    )
 
 
 def kanji_to_num(kanji_str: str) -> int:
