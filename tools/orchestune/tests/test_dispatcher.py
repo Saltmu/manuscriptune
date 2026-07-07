@@ -10,9 +10,13 @@ from src.dag import FootprintConflict
 from src.dispatch_targets import DispatchHandle, LocalProcessDispatchTarget
 from src.dispatcher import (
     ActiveWorktree,
+    CompletedWorktree,
+    CycleReport,
     DispatcherConfig,
     RunState,
     Task,
+    append_event_log,
+    build_event_log_entry,
     check_footprint_deviation,
     compute_priority_score,
     create_worktree_and_launch,
@@ -184,6 +188,68 @@ class TestRunState:
         loaded = load_run_state(path)
         assert loaded.active_worktrees["10"].branch == "claude/issue-10-x"
         assert loaded.launch_history == [1700000000.0]
+
+    def test_save_and_load_roundtrip_with_completed_worktrees(self, tmp_path):
+        path = tmp_path / "run_state.json"
+        state = RunState(
+            active_worktrees={},
+            launch_history=[],
+            completed_worktrees=[
+                CompletedWorktree(
+                    issue_number=11,
+                    subtask_id="task-b",
+                    branch="claude/issue-11-task-b",
+                    started_at=1700000000.0,
+                    completed_at=1700003600.0,
+                    recompute_count=1,
+                    forced_serial=False,
+                )
+            ],
+        )
+        save_run_state(state, path)
+        loaded = load_run_state(path)
+        assert loaded.completed_worktrees == state.completed_worktrees
+
+    def test_load_missing_completed_worktrees_key_defaults_to_empty(self, tmp_path):
+        path = tmp_path / "run_state.json"
+        path.write_text(json.dumps({"active_worktrees": {}, "launch_history": []}))
+        loaded = load_run_state(path)
+        assert loaded.completed_worktrees == []
+
+
+class TestAppendEventLog:
+    def test_build_event_log_entry_includes_cycle_events(self):
+        report = CycleReport(
+            selected=[_task(1)],
+            quota_slots_available=0,
+            lock_changes={"to_lock": [], "to_unlock": []},
+            deviation_events=[{"issue_number": 1, "action": "recomputed"}],
+            completion_events=[{"issue_number": 2, "action": "completed"}],
+            promotion_events=[{"issue_number": 3, "subtask_id": "task-c"}],
+            applied=True,
+        )
+        entry = build_event_log_entry(report, now=1700000000.0)
+        assert entry["timestamp"] == 1700000000.0
+        assert entry["quota_slots_available"] == 0
+        assert entry["selected"] == [{"issue_number": 1, "subtask_id": "task-1"}]
+        assert entry["deviation_events"] == report.deviation_events
+        assert entry["completion_events"] == report.completion_events
+        assert entry["promotion_events"] == report.promotion_events
+
+    def test_append_event_log_writes_jsonl(self, tmp_path):
+        path = tmp_path / "events.jsonl"
+        append_event_log({"timestamp": 1.0, "foo": "bar"}, path)
+        append_event_log({"timestamp": 2.0, "foo": "baz"}, path)
+
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 2
+        assert json.loads(lines[0]) == {"timestamp": 1.0, "foo": "bar"}
+        assert json.loads(lines[1]) == {"timestamp": 2.0, "foo": "baz"}
+
+    def test_append_event_log_creates_parent_directories(self, tmp_path):
+        path = tmp_path / "nested" / "events.jsonl"
+        append_event_log({"timestamp": 1.0}, path)
+        assert path.exists()
 
 
 class TestQuotaAvailable:
@@ -775,6 +841,7 @@ class TestRunDispatchCycle:
             run_state_path=tmp_path / "run_state.json",
             worktree_root=tmp_path / "worktrees",
             log_dir=tmp_path / "logs",
+            events_log_path=tmp_path / "events.jsonl",
             apply=True,
         )
         queued_issue = _issue(1)
@@ -964,6 +1031,7 @@ class TestRunDispatchCycleFootprintRecompute:
             run_state_path=run_state_path,
             worktree_root=tmp_path / "worktrees",
             log_dir=tmp_path / "logs",
+            events_log_path=tmp_path / "events.jsonl",
             apply=True,
             parent_issue_number=181,
         )
@@ -1234,6 +1302,7 @@ class TestRunDispatchCycleCompletion:
             run_state_path=run_state_path,
             worktree_root=tmp_path / "worktrees",
             log_dir=tmp_path / "logs",
+            events_log_path=tmp_path / "events.jsonl",
             apply=True,
         )
         defaults.update(overrides)
@@ -1296,6 +1365,18 @@ class TestRunDispatchCycleCompletion:
 
         persisted = json.loads(run_state_path.read_text())
         assert persisted["active_worktrees"] == {}
+        assert len(persisted["completed_worktrees"]) == 1
+        completed = persisted["completed_worktrees"][0]
+        assert completed["issue_number"] == 1
+        assert completed["subtask_id"] == "task-a"
+        assert completed["branch"] == "claude/issue-1-task-a"
+        assert completed["started_at"] == 1_699_999_000.0
+        assert completed["completed_at"] >= completed["started_at"]
+
+        events_lines = config.events_log_path.read_text(encoding="utf-8").splitlines()
+        assert len(events_lines) == 1
+        logged_entry = json.loads(events_lines[0])
+        assert logged_entry["completion_events"] == report.completion_events
 
     def test_dirty_worktree_completion_is_skipped(self, tmp_path):
         run_state_path = tmp_path / "run_state.json"
@@ -1362,6 +1443,7 @@ class TestRunDispatchCycleCompletion:
         mock_add_label.assert_not_called()
         mock_remove_label.assert_not_called()
         assert report.completion_events[0]["action"] == "completed"
+        assert not config.events_log_path.exists()
 
         persisted = json.loads(run_state_path.read_text())
         assert "1" in persisted["active_worktrees"]
@@ -1424,6 +1506,7 @@ class TestRunDispatchCycleBlockedPromotion:
             run_state_path=tmp_path / "run_state.json",
             worktree_root=tmp_path / "worktrees",
             log_dir=tmp_path / "logs",
+            events_log_path=tmp_path / "events.jsonl",
             apply=True,
         )
         defaults.update(overrides)
@@ -1609,6 +1692,7 @@ class TestRunDispatchCycleBlockedPromotion:
     def test_yaml_error_transitions_to_blocked(self, tmp_path):
         config = DispatcherConfig(
             run_state_path=tmp_path / "run_state.json",
+            events_log_path=tmp_path / "events.jsonl",
             apply=True,
         )
         body = (
@@ -1648,6 +1732,7 @@ class TestRunDispatchCycleBlockedPromotion:
     def test_worktree_launch_failure_transitions_to_blocked(self, tmp_path):
         config = DispatcherConfig(
             run_state_path=tmp_path / "run_state.json",
+            events_log_path=tmp_path / "events.jsonl",
             apply=True,
         )
         issue = _issue(1)
