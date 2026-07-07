@@ -2122,6 +2122,69 @@ class TestBranchStacking:
         loaded = load_run_state(config.run_state_path)
         assert loaded.active_worktrees["2"].pid == 99999
 
+    def test_stacking_blocked_when_multiple_dependencies_unmerged(self, tmp_path):
+        config = DispatcherConfig(
+            max_concurrent=3,
+            max_launches_per_window=3,
+            window_seconds=3600,
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+        )
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        issue_b = _issue(2, labels=("status:in-progress",), subtask_id="task-2")
+        issue_c = _issue(
+            3,
+            labels=("status:blocked",),
+            subtask_id="task-3",
+            depends_on=("task-1", "task-2"),
+        )
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch(
+                "src.dispatcher.github.list_remote_branches",
+                return_value=[
+                    "origin/claude/issue-1-task-1",
+                    "origin/claude/issue-2-task-2",
+                ],
+            ),
+            patch(
+                "src.dispatcher.github.list_open_prs",
+                return_value=[
+                    PrRecord(
+                        number=10,
+                        head_ref="claude/issue-1-task-1",
+                        changed_files=("src/a.py",),
+                        review_decision="APPROVED",
+                        is_ci_passing=True,
+                    ),
+                    PrRecord(
+                        number=11,
+                        head_ref="claude/issue-2-task-2",
+                        changed_files=("src/b.py",),
+                        review_decision="APPROVED",
+                        is_ci_passing=True,
+                    ),
+                ],
+            ),
+            patch("src.dispatcher.github.add_label"),
+            patch("src.dispatcher.github.remove_label"),
+            patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
+        ):
+            mock_list.side_effect = (
+                lambda label, **_: [issue_c]
+                if label == "status:blocked"
+                else [issue_a, issue_b]
+                if label == "status:in-progress"
+                else []
+            )
+
+            run_dispatch_cycle(config)
+
+        mock_launch.assert_not_called()
+
     def test_auto_rebase_conflict(self, tmp_path):
         config = DispatcherConfig(
             run_state_path=tmp_path / "run_state.json",

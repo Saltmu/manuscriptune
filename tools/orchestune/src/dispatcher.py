@@ -1294,7 +1294,7 @@ def _get_stack_eligible_tasks(
             continue
 
         all_resolved_or_stackable = True
-        has_stackable_dep = False
+        stackable_deps = []
         for dep in task.depends_on:
             if dep in done_subtask_ids:
                 continue
@@ -1311,17 +1311,17 @@ def _get_stack_eligible_tasks(
                     ):
                         all_resolved_or_stackable = False
                         break
-                has_stackable_dep = True
+                stackable_deps.append(dep)
             else:
                 all_resolved_or_stackable = False
                 break
 
-        if all_resolved_or_stackable and has_stackable_dep:
+        # スタッキング可能な未マージ依存先が「ちょうど1つ」の場合のみスタッキング起動を許可する
+        # （複数ある場合は、両方の変更をベースブランチとして同時に取り込めないためマージされるまでブロックする）
+        if all_resolved_or_stackable and len(stackable_deps) == 1:
             stack_eligible_tasks.append(task)
-            for dep in task.depends_on:
-                if dep in ci_passed_pr_subtask_ids:
-                    task_to_base_branch[task.issue_number] = subtask_branch_map[dep]
-                    break
+            dep = stackable_deps[0]
+            task_to_base_branch[task.issue_number] = subtask_branch_map[dep]
 
     return stack_eligible_tasks, task_to_base_branch
 
