@@ -40,8 +40,9 @@ jobs:
         run: |
           if git ls-remote --exit-code --heads origin "$STATE_BRANCH" > /dev/null 2>&1; then
             git fetch origin "$STATE_BRANCH"
-            git show "origin/${STATE_BRANCH}:${RUN_STATE_PATH}" > "$RUN_STATE_PATH" 2>/dev/null || echo "{}" > "$RUN_STATE_PATH"
-            git show "origin/${STATE_BRANCH}:${EVENTS_LOG_PATH}" > "$EVENTS_LOG_PATH" 2>/dev/null || touch "$EVENTS_LOG_PATH"
+            # working-directoryがtools/orchestuneのため、パスはcwd相対（./プレフィックス）で解決する必要がある
+            git show "origin/${STATE_BRANCH}:./${RUN_STATE_PATH}" > "$RUN_STATE_PATH" 2>/dev/null || echo "{}" > "$RUN_STATE_PATH"
+            git show "origin/${STATE_BRANCH}:./${EVENTS_LOG_PATH}" > "$EVENTS_LOG_PATH" 2>/dev/null || touch "$EVENTS_LOG_PATH"
           else
             echo "{}" > "$RUN_STATE_PATH"
             touch "$EVENTS_LOG_PATH"
@@ -101,13 +102,16 @@ jobs:
           STATE_DIR=$(mktemp -d)
           cp "$RUN_STATE_PATH" "$STATE_DIR/$RUN_STATE_PATH"
           cp "$EVENTS_LOG_PATH" "$STATE_DIR/$EVENTS_LOG_PATH"
+          # 未追跡のまま残すとbranch切替時に「would be overwritten」で失敗するため、退避後に削除しておく
+          rm -f "$RUN_STATE_PATH" "$EVENTS_LOG_PATH"
 
           if git ls-remote --exit-code --heads origin "$STATE_BRANCH" > /dev/null 2>&1; then
             git fetch origin "$STATE_BRANCH"
             git checkout -B "$STATE_BRANCH" "origin/$STATE_BRANCH"
           else
             git checkout --orphan "$STATE_BRANCH"
-            git rm -rf . > /dev/null 2>&1 || true
+            # cwdがtools/orchestuneのため、":/"でリポジトリ全体を対象にする
+            git rm -rf ':/' > /dev/null 2>&1 || true
           fi
 
           cp "$STATE_DIR/$RUN_STATE_PATH" "$RUN_STATE_PATH"
