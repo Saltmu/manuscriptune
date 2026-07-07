@@ -276,24 +276,28 @@ def scan_external_locks(
     prs: list[PrRecord],
     active_branches: Iterable[str],
 ) -> ExternalLockScanResult:
+    """#239: ブランチ名がAIセッションの指示通りにならないケースに備え、
+    タスクごとに「そのタスク自身のIssueをclosesするPR」を自己PRとして除外する
+    （どのPRが自己PRかはタスクごとに異なるため、タスク単位で判定する）。"""
     active_set = set(active_branches)
-    external_footprints: list[set[str]] = []
-
-    for pr in prs:
-        if pr.head_ref in active_set:
-            continue
-        external_footprints.append(set(pr.changed_files))
-
-    for branch, changed_files in remote_branches:
-        if branch in active_set:
-            continue
-        external_footprints.append(set(changed_files))
+    branch_footprints = [
+        set(changed_files)
+        for branch, changed_files in remote_branches
+        if branch not in active_set
+    ]
 
     to_lock: list[Task] = []
     to_unlock: list[Task] = []
     for task in queued_tasks:
+        pr_footprints = [
+            set(pr.changed_files)
+            for pr in prs
+            if pr.head_ref not in active_set
+            and task.issue_number not in pr.closes_issue_numbers
+        ]
         overlaps = any(
-            set(task.footprint) & footprint for footprint in external_footprints
+            set(task.footprint) & footprint
+            for footprint in [*branch_footprints, *pr_footprints]
         )
         currently_locked = "status:external-lock" in task.status_labels
         if overlaps and not currently_locked:
@@ -714,6 +718,7 @@ def _is_worktree_complete(active: ActiveWorktree, config: DispatcherConfig) -> b
             external_id=active.external_id,
             external_url=active.external_url,
             branch_name=active.branch,
+            issue_number=active.issue_number,
         )
         assert config.dispatch_target is not None
         return config.dispatch_target.is_complete(handle)

@@ -37,6 +37,7 @@ class DispatchHandle:
     external_id: str | None = None
     external_url: str | None = None
     branch_name: str | None = None
+    issue_number: int | None = None
 
 
 class DispatchTarget(ABC):
@@ -189,9 +190,19 @@ class ClaudeCodeCloudRoutineDispatchTarget(DispatchTarget):
         raise last_error
 
     def is_complete(self, handle: DispatchHandle) -> bool:
-        if handle.branch_name is None:
+        """#239: ブランチ名一致を優先判定としつつ、AIセッションが指示された
+        ブランチ名に従わなかった場合に備え、PRの`closingIssuesReferences`
+        （`Closes #N`等から解決されるIssue参照）によるフォールバック判定も行う。"""
+        if handle.branch_name is None and handle.issue_number is None:
             return False
-        return any(pr.head_ref == handle.branch_name for pr in github.list_open_prs())
+        prs = github.list_open_prs()
+        if handle.branch_name is not None and any(
+            pr.head_ref == handle.branch_name for pr in prs
+        ):
+            return True
+        if handle.issue_number is not None:
+            return any(handle.issue_number in pr.closes_issue_numbers for pr in prs)
+        return False
 
 
 def build_dispatch_target(

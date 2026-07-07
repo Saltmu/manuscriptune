@@ -47,6 +47,7 @@ class PrRecord:
     number: int
     head_ref: str
     changed_files: tuple[str, ...]
+    closes_issue_numbers: tuple[int, ...] = ()
 
 
 def _run(args: list[str], input_text: str | None = None) -> str:
@@ -122,6 +123,9 @@ def list_remote_branches() -> list[str]:
 
 
 def list_open_prs() -> list[PrRecord]:
+    """#239: ブランチ名がAIセッションの指示通りにならない場合でも自己PRと
+    判定できるよう、`closingIssuesReferences`（`Closes #N`等から解決される
+    GitHub側の正規のIssue参照一覧）も併せて取得する。"""
     stdout = _run(
         ["gh", "pr", "list", "--state", "open", "--json", "number,headRefName"]
     )
@@ -129,13 +133,27 @@ def list_open_prs() -> list[PrRecord]:
     prs: list[PrRecord] = []
     for raw in raw_prs:
         number = raw["number"]
-        files_stdout = _run(["gh", "pr", "view", str(number), "--json", "files"])
-        files = json.loads(files_stdout).get("files", [])
+        detail_stdout = _run(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(number),
+                "--json",
+                "files,closingIssuesReferences",
+            ]
+        )
+        detail = json.loads(detail_stdout)
+        files = detail.get("files", [])
+        closing_refs = detail.get("closingIssuesReferences", [])
         prs.append(
             PrRecord(
                 number=number,
                 head_ref=raw["headRefName"],
                 changed_files=tuple(f["path"] for f in files),
+                closes_issue_numbers=tuple(
+                    sorted(ref["number"] for ref in closing_refs)
+                ),
             )
         )
     return prs
