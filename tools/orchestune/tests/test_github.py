@@ -216,8 +216,14 @@ class TestListRemoteBranches:
 
 class TestListOpenPrs:
     def test_fetches_pr_list_and_per_pr_files(self):
-        list_payload = '[{"number": 5, "headRefName": "feat/x"}]'
-        files_payload = '{"files": [{"path": "src/a.py"}, {"path": "src/b.py"}]}'
+        list_payload = (
+            "["
+            '{"number": 5, "headRefName": "feat/x", "reviewDecision": "APPROVED", "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}]},'
+            '{"number": 6, "headRefName": "feat/y", "reviewDecision": "CHANGES_REQUESTED", "statusCheckRollup": [{"status": "IN_PROGRESS", "conclusion": null}]}'
+            "]"
+        )
+        files_payload_5 = '{"files": [{"path": "src/a.py"}, {"path": "src/b.py"}]}'
+        files_payload_6 = '{"files": []}'
 
         with patch("src.github.subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -225,15 +231,29 @@ class TestListOpenPrs:
                     args=[], returncode=0, stdout=list_payload, stderr=""
                 ),
                 subprocess.CompletedProcess(
-                    args=[], returncode=0, stdout=files_payload, stderr=""
+                    args=[], returncode=0, stdout=files_payload_5, stderr=""
+                ),
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=files_payload_6, stderr=""
                 ),
             ]
             prs = list_open_prs()
 
         assert prs == [
             PrRecord(
-                number=5, head_ref="feat/x", changed_files=("src/a.py", "src/b.py")
-            )
+                number=5,
+                head_ref="feat/x",
+                changed_files=("src/a.py", "src/b.py"),
+                review_decision="APPROVED",
+                is_ci_passing=True,
+            ),
+            PrRecord(
+                number=6,
+                head_ref="feat/y",
+                changed_files=(),
+                review_decision="CHANGES_REQUESTED",
+                is_ci_passing=False,
+            ),
         ]
 
     def test_includes_closing_issue_references(self):
