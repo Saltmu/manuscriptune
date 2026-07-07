@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from src.routes.deps import require_api_key
 from src.routes.novels import router as novels_router
 from src.routes.plots import router as plots_router
+from src.routes.review_history import router as review_history_router
 from src.routes.sync import router as sync_router
 from src.services import novel_service, process_manager
 from src.utils import project_config as writer_helper
@@ -32,6 +33,7 @@ class SettingsRequest(BaseModel):
 # Include the split sub-routers
 router.include_router(novels_router)
 router.include_router(plots_router)
+router.include_router(review_history_router)
 router.include_router(sync_router)
 
 
