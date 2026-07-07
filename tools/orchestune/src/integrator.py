@@ -32,28 +32,103 @@ class Integrator:
         if not sorted_done_tasks:
             return {"status": "no_done_tasks", "merged": []}
 
-        if not self._create_temp_branch():
-            return {
-                "status": "failed_to_create_temp_branch",
-                "error": "Failed to create temp branch",
-            }
-
-        merged_tasks, failed_tasks = self._merge_and_test_tasks(sorted_done_tasks)
-
-        if merged_tasks and not failed_tasks:
-            if self.config.apply and self.config.parent_issue_number:
-                github.add_comment(
-                    self.config.parent_issue_number,
-                    f"🎉 すべての完了タスク ({', '.join(merged_tasks)}) の仮マージCIが正常に通過しました。\n"
-                    f"仮マージブランチ {self.config.temp_branch} が作成されました。人手での最終マージが可能です。",
+        temp_worktree_path = None
+        if self.config.apply:
+            temp_worktree_path = (
+                self.config.repository_root / "worktrees" / "integration-temp"
+            )
+            try:
+                subprocess.run(
+                    ["git", "worktree", "prune"],
+                    cwd=str(self.config.repository_root),
+                    capture_output=True,
                 )
-            return {"status": "success", "merged": merged_tasks}
+                if temp_worktree_path.exists():
+                    import shutil
 
-        return {
-            "status": "partial_success" if merged_tasks else "failure",
-            "merged": merged_tasks,
-            "failed": failed_tasks,
-        }
+                    try:
+                        shutil.rmtree(temp_worktree_path)
+                    except Exception:
+                        pass
+                subprocess.run(
+                    [
+                        "git",
+                        "worktree",
+                        "add",
+                        str(temp_worktree_path),
+                        self.config.base_branch,
+                    ],
+                    cwd=str(self.config.repository_root),
+                    check=True,
+                    capture_output=True,
+                )
+                self.config.repository_root = temp_worktree_path
+            except (subprocess.CalledProcessError, OSError) as e:
+                return {
+                    "status": "failed_to_create_temp_worktree",
+                    "error": f"Failed to create temp worktree: {e}",
+                }
+
+        try:
+            if not self._create_temp_branch():
+                return {
+                    "status": "failed_to_create_temp_branch",
+                    "error": "Failed to create temp branch",
+                }
+
+            merged_tasks, failed_tasks = self._merge_and_test_tasks(sorted_done_tasks)
+
+            if merged_tasks and not failed_tasks:
+                if self.config.apply:
+                    try:
+                        subprocess.run(
+                            [
+                                "git",
+                                "push",
+                                "--force",
+                                "origin",
+                                self.config.temp_branch,
+                            ],
+                            cwd=str(self.config.repository_root),
+                            check=True,
+                            capture_output=True,
+                        )
+                    except subprocess.CalledProcessError as pe:
+                        print(
+                            f"Warning: Failed to push temp branch: {pe.stderr.decode()}",
+                            file=sys.stderr,
+                        )
+
+                    if self.config.parent_issue_number:
+                        github.add_comment(
+                            self.config.parent_issue_number,
+                            f"🎉 すべての完了タスク ({', '.join(merged_tasks)}) の仮マージCIが正常に通過しました。\n"
+                            f"仮マージブランチ `{self.config.temp_branch}` がリモートにプッシュされました。人手での最終マージが可能です。",
+                        )
+                return {"status": "success", "merged": merged_tasks}
+
+            return {
+                "status": "partial_success" if merged_tasks else "failure",
+                "merged": merged_tasks,
+                "failed": failed_tasks,
+            }
+        finally:
+            if temp_worktree_path:
+                try:
+                    subprocess.run(
+                        [
+                            "git",
+                            "worktree",
+                            "remove",
+                            "--force",
+                            str(temp_worktree_path),
+                        ],
+                        cwd=str(Path(".")),
+                        capture_output=True,
+                        check=True,
+                    )
+                except Exception:
+                    pass
 
     def _get_sorted_done_tasks(self) -> list[Task]:
         done_issues = github.list_issues_by_label("status:done")
