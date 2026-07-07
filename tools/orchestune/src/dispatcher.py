@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
@@ -891,6 +892,7 @@ def _try_auto_rebase(
                         active.pid = handle.pid
                         active.external_id = handle.external_id
                         active.external_url = handle.external_url
+                        active.started_at = time.time()
                     except (subprocess.CalledProcessError, OSError):
                         try:
                             subprocess.run(
@@ -1364,8 +1366,8 @@ def _launch_selected_tasks(
             github.add_label(task.issue_number, "status:blocked")
             github.add_comment(
                 task.issue_number,
-                f"Git worktree of creation or agent launch failed.\n"
-                f"Error:\n```\n{launch.error_message}\n```",
+                f"Git worktreeの作成またはエージェントの起動に失敗しました。\n"
+                f"エラー内容:\n```\n{launch.error_message}\n```",
             )
             continue
 
@@ -1481,9 +1483,22 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = run_dispatch_cycle(config)
         print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
-    except RuntimeError as e:
-        import sys
 
+        if config.apply:
+            try:
+                from src.integrator import Integrator, IntegratorConfig
+
+                integrator_config = IntegratorConfig(
+                    parent_issue_number=config.parent_issue_number,
+                    apply=config.apply,
+                )
+                integrator = Integrator(integrator_config)
+                integrator_run_report = integrator.run()
+                print("Integrator Report:")
+                print(json.dumps(integrator_run_report, ensure_ascii=False, indent=2))
+            except Exception as ie:
+                print(f"Warning: Integrator failed to run: {ie}", file=sys.stderr)
+    except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0
