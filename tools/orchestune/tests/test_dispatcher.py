@@ -755,7 +755,7 @@ class TestRunDispatchCycle:
             patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
             mock_list.side_effect = (
-                lambda label: [queued_issue] if label == "status:queued" else []
+                lambda label, **_: [queued_issue] if label == "status:queued" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -788,7 +788,7 @@ class TestRunDispatchCycle:
             patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
             mock_list.side_effect = (
-                lambda label: [queued_issue] if label == "status:queued" else []
+                lambda label, **_: [queued_issue] if label == "status:queued" else []
             )
             mock_subproc_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
@@ -832,7 +832,7 @@ class TestRunDispatchCycle:
             patch("src.dispatcher.is_process_alive", return_value=True),
         ):
             mock_list.side_effect = (
-                lambda label: [queued_issue] if label == "status:queued" else []
+                lambda label, **_: [queued_issue] if label == "status:queued" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -886,7 +886,7 @@ class TestRunDispatchCycleBranchNormalization:
             patch("src.dispatcher.check_footprint_deviation", return_value=[]),
         ):
             mock_list.side_effect = (
-                lambda label: [queued_issue] if label == "status:queued" else []
+                lambda label, **_: [queued_issue] if label == "status:queued" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -946,7 +946,7 @@ class TestRunDispatchCycleBranchNormalization:
             ),
         ):
             mock_list.side_effect = (
-                lambda label: [queued_issue] if label == "status:queued" else []
+                lambda label, **_: [queued_issue] if label == "status:queued" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -1022,7 +1022,7 @@ class TestRunDispatchCycleFootprintRecompute:
             ) as mock_notify,
         ):
             mock_list.side_effect = (
-                lambda label: [in_progress_issue]
+                lambda label, **_: [in_progress_issue]
                 if label == "status:in-progress"
                 else []
             )
@@ -1092,7 +1092,7 @@ class TestRunDispatchCycleFootprintRecompute:
             ) as mock_notify,
         ):
             mock_list.side_effect = (
-                lambda label: [in_progress_issue]
+                lambda label, **_: [in_progress_issue]
                 if label == "status:in-progress"
                 else []
             )
@@ -1149,7 +1149,7 @@ class TestRunDispatchCycleFootprintRecompute:
             ) as mock_recompute,
         ):
 
-            def _list(label):
+            def _list(label, **_):
                 if label == "status:queued":
                     return [other_queued_issue]
                 if label == "status:in-progress":
@@ -1210,7 +1210,7 @@ class TestRunDispatchCycleFootprintRecompute:
             ) as mock_recompute,
         ):
             mock_list.side_effect = (
-                lambda label: [in_progress_issue]
+                lambda label, **_: [in_progress_issue]
                 if label == "status:in-progress"
                 else []
             )
@@ -1276,7 +1276,7 @@ class TestRunDispatchCycleCompletion:
             patch("src.dispatcher.remove_worktree") as mock_remove_worktree,
         ):
             mock_list.side_effect = (
-                lambda label: [in_progress_issue]
+                lambda label, **_: [in_progress_issue]
                 if label == "status:in-progress"
                 else []
             )
@@ -1316,7 +1316,7 @@ class TestRunDispatchCycleCompletion:
             patch("src.dispatcher.check_footprint_deviation", return_value=[]),
         ):
             mock_list.side_effect = (
-                lambda label: [in_progress_issue]
+                lambda label, **_: [in_progress_issue]
                 if label == "status:in-progress"
                 else []
             )
@@ -1352,7 +1352,7 @@ class TestRunDispatchCycleCompletion:
             patch("src.dispatcher.remove_worktree") as mock_remove_worktree,
         ):
             mock_list.side_effect = (
-                lambda label: [in_progress_issue]
+                lambda label, **_: [in_progress_issue]
                 if label == "status:in-progress"
                 else []
             )
@@ -1391,7 +1391,7 @@ class TestRunDispatchCycleCompletion:
             patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
 
-            def _list(label):
+            def _list(label, **_):
                 if label == "status:in-progress":
                     return [in_progress_issue]
                 if label == "status:queued":
@@ -1446,8 +1446,43 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.github.remove_label") as mock_remove_label,
         ):
 
-            def _list(label):
+            def _list(label, **_):
                 if label == "status:done":
+                    return [done_issue]
+                if label == "status:blocked":
+                    return [blocked_issue]
+                return []
+
+            mock_list.side_effect = _list
+            report = run_dispatch_cycle(config)
+
+        mock_remove_label.assert_any_call(2, "status:blocked")
+        mock_add_label.assert_any_call(2, "status:queued")
+        assert report.promotion_events == [{"issue_number": 2, "subtask_id": "task-b"}]
+
+    def test_promotes_blocked_task_when_dependency_done_and_closed(self, tmp_path):
+        """#236: 完了Issueが通常のGitHub運用でCloseされていても、
+        status:done検索がstate="all"で呼ばれる限り依存解決できる。"""
+        config = self._config(tmp_path)
+        done_issue = _issue(1, labels=("status:done",), subtask_id="task-a")
+        blocked_issue = _issue(
+            2,
+            labels=("status:blocked",),
+            subtask_id="task-b",
+            depends_on=("task-a",),
+        )
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+        ):
+
+            def _list(label, state="open"):
+                # closedなIssueもstatus:done検索に含まれるのはstate="all"の
+                # 呼び出しのみ（実際のgh issue list --state open/allの挙動を模す）。
+                if label == "status:done" and state == "all":
                     return [done_issue]
                 if label == "status:blocked":
                     return [blocked_issue]
@@ -1476,7 +1511,7 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.github.remove_label") as mock_remove_label,
         ):
             mock_list.side_effect = (
-                lambda label: [blocked_issue] if label == "status:blocked" else []
+                lambda label, **_: [blocked_issue] if label == "status:blocked" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -1526,7 +1561,7 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.remove_worktree"),
         ):
 
-            def _list(label):
+            def _list(label, **_):
                 if label == "status:in-progress":
                     return [in_progress_issue]
                 if label == "status:blocked":
@@ -1557,7 +1592,7 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.github.remove_label") as mock_remove_label,
         ):
 
-            def _list(label):
+            def _list(label, **_):
                 if label == "status:done":
                     return [done_issue]
                 if label == "status:blocked":
@@ -1600,7 +1635,7 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.github.add_comment") as mock_add_comment,
         ):
             mock_list.side_effect = (
-                lambda label: [issue] if label == "status:queued" else []
+                lambda label, **_: [issue] if label == "status:queued" else []
             )
 
             report = run_dispatch_cycle(config)
@@ -1626,7 +1661,7 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.github.add_comment") as mock_add_comment,
         ):
             mock_list.side_effect = (
-                lambda label: [issue] if label == "status:queued" else []
+                lambda label, **_: [issue] if label == "status:queued" else []
             )
             mock_run.side_effect = subprocess.CalledProcessError(
                 returncode=128,

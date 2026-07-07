@@ -805,7 +805,9 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
         locked_issues = github.list_issues_by_label("status:external-lock")
         in_progress_issues = github.list_issues_by_label("status:in-progress")
         blocked_issues = github.list_issues_by_label("status:blocked")
-        done_issues = github.list_issues_by_label("status:done")
+        # #236: 完了Issueは人間が通常のGitHub運用でCloseすることが多いため、
+        # 依存解決判定はclosedなIssueも含めて検索する。
+        done_issues = github.list_issues_by_label("status:done", state="all")
         tasks_by_issue = {
             issue.number: parse_task_from_issue(issue)
             for issue in [

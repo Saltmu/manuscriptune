@@ -114,6 +114,37 @@ class TestListIssuesByLabel:
                 list_issues_by_label("status:queued; evil")
             mock_run.assert_not_called()
 
+    def test_defaults_to_open_state(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="[]", stderr=""
+            )
+            list_issues_by_label("status:done")
+        called_args = mock_run.call_args.args[0]
+        assert called_args[called_args.index("--state") + 1] == "open"
+
+    def test_state_all_includes_closed_issues(self):
+        """#236: closedなIssueもstatus:done判定に含められるよう、
+        stateを明示的に指定できるようにする。"""
+        payload = (
+            '[{"number": 1, "title": "t", "body": "b", '
+            '"labels": [{"name": "status:done"}], "createdAt": "2026-01-01T00:00:00Z"}]'
+        )
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=payload, stderr=""
+            )
+            result = list_issues_by_label("status:done", state="all")
+        called_args = mock_run.call_args.args[0]
+        assert called_args[called_args.index("--state") + 1] == "all"
+        assert result[0].number == 1
+
+    def test_rejects_invalid_state(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            with pytest.raises(ValueError):
+                list_issues_by_label("status:done", state="bogus")
+            mock_run.assert_not_called()
+
 
 class TestAddRemoveLabel:
     def test_add_label_calls_gh_issue_edit(self):

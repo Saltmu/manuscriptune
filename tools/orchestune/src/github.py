@@ -60,8 +60,19 @@ def _run(args: list[str], input_text: str | None = None) -> str:
     return result.stdout
 
 
-def list_issues_by_label(label: str) -> list[IssueRecord]:
+_VALID_ISSUE_STATES = frozenset({"open", "closed", "all"})
+
+
+def list_issues_by_label(label: str, state: str = "open") -> list[IssueRecord]:
+    """#236: `state`を明示指定できるようにする。既定は従来通り`open`のみ。
+
+    `status:done`昇格判定は、人間が完了Issueを通常のGitHub運用でClose
+    した場合でも依存解決できるよう、呼び出し側から`state="all"`を
+    渡してclosedなIssueも含めて検索できる。
+    """
     _validate_label(label)
+    if state not in _VALID_ISSUE_STATES:
+        raise ValueError(f"stateが不正です: {state!r}")
     stdout = _run(
         [
             "gh",
@@ -70,7 +81,7 @@ def list_issues_by_label(label: str) -> list[IssueRecord]:
             "--label",
             label,
             "--state",
-            "open",
+            state,
             "--json",
             "number,title,body,labels,createdAt",
         ]
