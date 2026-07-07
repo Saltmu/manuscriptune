@@ -127,9 +127,25 @@ class ActiveWorktree:
 
 
 @dataclass
+class CompletedWorktree:
+    """#239: KPI B1/B2/D1（並列度・所要時間・稼働時間）算出に必要な完了履歴。
+    ActiveWorktreeは完了時にrun_stateから削除されるため、開始・完了時刻を
+    ここに退避しないと事後集計できない。"""
+
+    issue_number: int
+    subtask_id: str
+    branch: str
+    started_at: float
+    completed_at: float
+    recompute_count: int = 0
+    forced_serial: bool = False
+
+
+@dataclass
 class RunState:
     active_worktrees: dict[str, ActiveWorktree] = field(default_factory=dict)
     launch_history: list[float] = field(default_factory=list)
+    completed_worktrees: list[CompletedWorktree] = field(default_factory=list)
 
 
 def load_run_state(path: str | Path) -> RunState:
@@ -152,9 +168,22 @@ def load_run_state(path: str | Path) -> RunState:
         )
         for key, value in data.get("active_worktrees", {}).items()
     }
+    completed_worktrees = [
+        CompletedWorktree(
+            issue_number=value["issue_number"],
+            subtask_id=value["subtask_id"],
+            branch=value["branch"],
+            started_at=value["started_at"],
+            completed_at=value["completed_at"],
+            recompute_count=value.get("recompute_count", 0),
+            forced_serial=value.get("forced_serial", False),
+        )
+        for value in data.get("completed_worktrees", [])
+    ]
     return RunState(
         active_worktrees=active_worktrees,
         launch_history=list(data.get("launch_history", [])),
+        completed_worktrees=completed_worktrees,
     )
 
 
@@ -167,6 +196,9 @@ def save_run_state(state: RunState, path: str | Path) -> None:
             for key, value in state.active_worktrees.items()
         },
         "launch_history": state.launch_history,
+        "completed_worktrees": [
+            dataclasses.asdict(value) for value in state.completed_worktrees
+        ],
     }
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -519,6 +551,7 @@ class DispatcherConfig:
     run_state_path: Path = Path("run_state.json")
     worktree_root: Path = Path("worktrees")
     log_dir: Path = Path("logs")
+    events_log_path: Path = Path("events.jsonl")
     parent_issue_number: int | None = None
     apply: bool = False
     dispatch_target: DispatchTarget | None = None
@@ -539,6 +572,28 @@ class CycleReport:
     completion_events: list[dict]
     promotion_events: list[dict]
     applied: bool
+
+
+def build_event_log_entry(report: CycleReport, now: float) -> dict:
+    """#239: KPI A1〜A4/C2/C3集計用に、1サイクル分のイベントをJSON Lines化する。"""
+    return {
+        "timestamp": now,
+        "quota_slots_available": report.quota_slots_available,
+        "selected": [
+            {"issue_number": t.issue_number, "subtask_id": t.subtask_id}
+            for t in report.selected
+        ],
+        "deviation_events": report.deviation_events,
+        "completion_events": report.completion_events,
+        "promotion_events": report.promotion_events,
+    }
+
+
+def append_event_log(entry: dict, path: str | Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def _build_subtasks_for_recompute(
@@ -694,6 +749,17 @@ def _process_active_worktrees(
                 if active_task is not None and active_task.subtask_id:
                     completed_subtask_ids.add(active_task.subtask_id)
                 if config.apply:
+                    run_state.completed_worktrees.append(
+                        CompletedWorktree(
+                            issue_number=active.issue_number,
+                            subtask_id=active_task.subtask_id if active_task else "",
+                            branch=active.branch,
+                            started_at=active.started_at,
+                            completed_at=time.time(),
+                            recompute_count=active.recompute_count,
+                            forced_serial=active.forced_serial,
+                        )
+                    )
                     del run_state.active_worktrees[key]
                 continue
 
@@ -943,7 +1009,7 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             selected = actually_selected
             save_run_state(run_state, config.run_state_path)
 
-        return CycleReport(
+        report = CycleReport(
             selected=selected,
             quota_slots_available=quota_slots,
             lock_changes={
@@ -955,6 +1021,11 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             promotion_events=promotion_events,
             applied=config.apply,
         )
+
+        if config.apply:
+            append_event_log(build_event_log_entry(report, now), config.events_log_path)
+
+        return report
 
 
 def _report_to_dict(report: CycleReport) -> dict:
@@ -989,6 +1060,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-state-path", type=Path, default=Path("run_state.json"))
     parser.add_argument("--worktree-root", type=Path, default=Path("worktrees"))
     parser.add_argument("--log-dir", type=Path, default=Path("logs"))
+    parser.add_argument(
+        "--events-log-path",
+        type=Path,
+        default=Path("events.jsonl"),
+        help="#239: KPI集計用の構造化イベントログ（JSON Lines）の出力先",
+    )
     parser.add_argument("--parent-issue", type=int, default=None)
     parser.add_argument(
         "--deviation-buffer-lines",
@@ -1029,6 +1106,7 @@ def main(argv: list[str] | None = None) -> int:
         run_state_path=args.run_state_path,
         worktree_root=args.worktree_root,
         log_dir=args.log_dir,
+        events_log_path=args.events_log_path,
         parent_issue_number=args.parent_issue,
         apply=args.apply,
         dispatch_target=build_dispatch_target(
