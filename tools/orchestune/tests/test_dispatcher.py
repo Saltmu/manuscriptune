@@ -574,6 +574,20 @@ class TestCheckFootprintDeviation:
             )
         assert deviated == ["src/image.png"]
 
+    def test_hotspot_files_are_ignored_from_deviation(self):
+        with patch("src.dispatcher.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="10\t0\tpoetry.lock\n10\t0\tsrc/routes.py\n10\t0\tsrc/unexpected.py\n",
+                stderr="",
+            )
+            deviated = check_footprint_deviation(
+                "worktrees/w1",
+                declared_footprint=(),
+            )
+        assert deviated == ["src/unexpected.py"]
+
 
 class TestNotifyRecompute:
     def test_dry_run_reports_without_calling_github(self):
@@ -1819,9 +1833,7 @@ class TestRunDispatchCycleBlockedPromotion:
             mock_run.side_effect = subprocess.CalledProcessError(
                 returncode=128,
                 cmd="git worktree add",
-                stderr="fatal: something went wrong",
             )
-
             report = run_dispatch_cycle(config)
 
             assert report.selected == []
@@ -1879,3 +1891,565 @@ class TestDispatcherLocking:
             with file_lock(lock_path):
                 executed = True
             assert executed
+
+
+class TestBranchStacking:
+    def test_stacking_blocked_task_when_dependency_pr_ci_passes(self, tmp_path):
+        config = DispatcherConfig(
+            max_concurrent=2,
+            max_launches_per_window=2,
+            window_seconds=3600,
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+        )
+        blocked_issue = _issue(
+            2, labels=("status:blocked",), subtask_id="task-2", depends_on=("task-1",)
+        )
+        parent_issue = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch(
+                "src.dispatcher.github.list_remote_branches",
+                return_value=["origin/claude/issue-1-task-1"],
+            ),
+            patch(
+                "src.dispatcher.github.list_open_prs",
+                return_value=[
+                    PrRecord(
+                        number=10,
+                        head_ref="claude/issue-1-task-1",
+                        changed_files=("src/a.py",),
+                        review_decision="APPROVED",
+                        is_ci_passing=True,
+                    )
+                ],
+            ),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
+        ):
+            mock_list.side_effect = (
+                lambda label, **_: [blocked_issue]
+                if label == "status:blocked"
+                else [parent_issue]
+                if label == "status:in-progress"
+                else []
+            )
+            mock_launch.return_value = MagicMock(
+                launched=True,
+                pid=123,
+                branch="claude/issue-2-task-2",
+                worktree_path="worktrees/claude-issue-2-task-2",
+                error_message=None,
+                external_id=None,
+                external_url=None,
+            )
+
+            report = run_dispatch_cycle(config)
+
+        mock_launch.assert_called_once_with(
+            ANY,
+            "claude/issue-2-task-2",
+            ANY,
+            ANY,
+            apply=True,
+            base_branch="claude/issue-1-task-1",
+        )
+        mock_remove_label.assert_any_call(2, "status:blocked")
+        mock_add_label.assert_any_call(2, "status:in-progress")
+        assert len(report.selected) == 1
+
+    def test_stacking_depth_limit_of_one(self, tmp_path):
+        config = DispatcherConfig(
+            max_concurrent=3,
+            max_launches_per_window=3,
+            window_seconds=3600,
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+        )
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        issue_b = _issue(
+            2, labels=("status:blocked",), subtask_id="task-2", depends_on=("task-1",)
+        )
+        issue_c = _issue(
+            3, labels=("status:blocked",), subtask_id="task-3", depends_on=("task-2",)
+        )
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch(
+                "src.dispatcher.github.list_remote_branches",
+                return_value=["origin/claude/issue-1-task-1"],
+            ),
+            patch(
+                "src.dispatcher.github.list_open_prs",
+                return_value=[
+                    PrRecord(
+                        number=10,
+                        head_ref="claude/issue-1-task-1",
+                        changed_files=("src/a.py",),
+                        review_decision="APPROVED",
+                        is_ci_passing=True,
+                    )
+                ],
+            ),
+            patch("src.dispatcher.github.add_label"),
+            patch("src.dispatcher.github.remove_label"),
+            patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
+        ):
+            mock_list.side_effect = (
+                lambda label, **_: [issue_b, issue_c]
+                if label == "status:blocked"
+                else [issue_a]
+                if label == "status:in-progress"
+                else []
+            )
+            mock_launch.return_value = MagicMock(
+                launched=True,
+                pid=123,
+                branch="claude/issue-2-task-2",
+                worktree_path="worktrees/claude-issue-2-task-2",
+                error_message=None,
+                external_id=None,
+                external_url=None,
+            )
+
+            run_dispatch_cycle(config)
+
+        mock_launch.assert_called_once_with(
+            ANY,
+            "claude/issue-2-task-2",
+            ANY,
+            ANY,
+            apply=True,
+            base_branch="claude/issue-1-task-1",
+        )
+
+    def test_auto_rebase_success(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+        )
+        # BはAに依存。AはPR状態、Bは実行中（active_worktrees）
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        issue_b = _issue(
+            2,
+            labels=("status:in-progress",),
+            subtask_id="task-2",
+            depends_on=("task-1",),
+        )
+
+        run_state = RunState(
+            active_worktrees={
+                "2": ActiveWorktree(
+                    issue_number=2,
+                    branch="claude/issue-2-task-2",
+                    worktree_path=str(tmp_path / "worktrees/claude-issue-2-task-2"),
+                    pid=12345,
+                    started_at=1700000000.0,
+                    declared_footprint=(),
+                )
+            }
+        )
+        save_run_state(run_state, config.run_state_path)
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch(
+                "src.dispatcher.github.list_remote_branches",
+                return_value=["origin/claude/issue-1-task-1"],
+            ),
+            patch(
+                "src.dispatcher.github.list_open_prs",
+                return_value=[
+                    PrRecord(
+                        number=10,
+                        head_ref="claude/issue-1-task-1",
+                        changed_files=(),
+                        review_decision="APPROVED",
+                        is_ci_passing=True,
+                    )
+                ],
+            ),
+            patch("src.dispatcher.is_process_alive", return_value=True),
+            patch("src.dispatcher.check_footprint_deviation", return_value=[]),
+            patch("src.dispatcher.github.add_label"),
+            patch("src.dispatcher.github.remove_label"),
+            # os.kill と Popen のモック（リブートプロセスのため）
+            patch("src.dispatcher.os.kill") as mock_kill,
+            patch("src.dispatcher.subprocess.Popen") as mock_popen,
+            # git コマンド実行のモック
+            patch("src.dispatcher.subprocess.run") as mock_run,
+        ):
+
+            def list_issues_by_label_mock(label, **_):
+                if label == "status:in-progress":
+                    return [issue_a, issue_b]
+                return []
+
+            mock_list.side_effect = list_issues_by_label_mock
+
+            # subprocess.runのモック動作
+            def run_mock(args, **kwargs):
+                if "merge-base" in args:
+                    return subprocess.CompletedProcess(
+                        args=args, returncode=1, stdout="", stderr=""
+                    )
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout="", stderr=""
+                )
+
+            mock_run.side_effect = run_mock
+            mock_popen.return_value.pid = 99999
+
+            run_dispatch_cycle(config)
+
+        # プロセスがkillされ、rebaseされ、再起動されたことを確認
+        mock_kill.assert_called_with(12345, 9)  # SIGKILL (or SIGTERM)
+        # rebase実行の引数チェック
+        rebase_call = mock_run.call_args_list[1]
+        assert "rebase" in rebase_call.args[0]
+        assert "claude/issue-1-task-1" in rebase_call.args[0]
+
+        # 新しいPIDで状態が保存されていることを確認
+        loaded = load_run_state(config.run_state_path)
+        assert loaded.active_worktrees["2"].pid == 99999
+
+    def test_stacking_blocked_when_multiple_dependencies_unmerged(self, tmp_path):
+        config = DispatcherConfig(
+            max_concurrent=3,
+            max_launches_per_window=3,
+            window_seconds=3600,
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+        )
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        issue_b = _issue(2, labels=("status:in-progress",), subtask_id="task-2")
+        issue_c = _issue(
+            3,
+            labels=("status:blocked",),
+            subtask_id="task-3",
+            depends_on=("task-1", "task-2"),
+        )
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch(
+                "src.dispatcher.github.list_remote_branches",
+                return_value=[
+                    "origin/claude/issue-1-task-1",
+                    "origin/claude/issue-2-task-2",
+                ],
+            ),
+            patch(
+                "src.dispatcher.github.list_open_prs",
+                return_value=[
+                    PrRecord(
+                        number=10,
+                        head_ref="claude/issue-1-task-1",
+                        changed_files=("src/a.py",),
+                        review_decision="APPROVED",
+                        is_ci_passing=True,
+                    ),
+                    PrRecord(
+                        number=11,
+                        head_ref="claude/issue-2-task-2",
+                        changed_files=("src/b.py",),
+                        review_decision="APPROVED",
+                        is_ci_passing=True,
+                    ),
+                ],
+            ),
+            patch("src.dispatcher.github.add_label"),
+            patch("src.dispatcher.github.remove_label"),
+            patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
+        ):
+            mock_list.side_effect = (
+                lambda label, **_: [issue_c]
+                if label == "status:blocked"
+                else [issue_a, issue_b]
+                if label == "status:in-progress"
+                else []
+            )
+
+            run_dispatch_cycle(config)
+
+        mock_launch.assert_not_called()
+
+    def test_auto_rebase_conflict(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+        )
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        issue_b = _issue(
+            2,
+            labels=("status:in-progress",),
+            subtask_id="task-2",
+            depends_on=("task-1",),
+        )
+
+        run_state = RunState(
+            active_worktrees={
+                "2": ActiveWorktree(
+                    issue_number=2,
+                    branch="claude/issue-2-task-2",
+                    worktree_path=str(tmp_path / "worktrees/claude-issue-2-task-2"),
+                    pid=12345,
+                    started_at=1700000000.0,
+                    declared_footprint=(),
+                )
+            }
+        )
+        save_run_state(run_state, config.run_state_path)
+
+        with (
+            patch(
+                "src.dispatcher.github.list_issues_by_label",
+                side_effect=lambda label, **_: [issue_a, issue_b]
+                if label == "status:in-progress"
+                else [],
+            ),
+            patch(
+                "src.dispatcher.github.list_remote_branches",
+                return_value=["origin/claude/issue-1-task-1"],
+            ),
+            patch(
+                "src.dispatcher.github.list_open_prs",
+                return_value=[
+                    PrRecord(
+                        number=10,
+                        head_ref="claude/issue-1-task-1",
+                        changed_files=(),
+                        review_decision="APPROVED",
+                        is_ci_passing=True,
+                    )
+                ],
+            ),
+            patch("src.dispatcher.is_process_alive", return_value=True),
+            patch("src.dispatcher.check_footprint_deviation", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch("src.dispatcher.os.kill"),
+            patch("src.dispatcher.subprocess.run") as mock_run,
+        ):
+            # 1. git merge-base -> 戻り値 1
+            # 2. git rebase -> 戻り値 128 (競合発生で失敗)
+            # 3. git rebase --abort -> 戻り値 0
+            mock_run.side_effect = [
+                subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr=""
+                ),
+                subprocess.CalledProcessError(returncode=128, cmd="git rebase"),
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout="", stderr=""
+                ),
+            ]
+
+            run_dispatch_cycle(config)
+
+        # rebase abort が呼ばれたこと
+        abort_call = mock_run.call_args_list[2]
+        assert "--abort" in abort_call.args[0]
+
+        # 安全停止（ラベル遷移）が行われたこと
+        mock_remove_label.assert_any_call(2, "status:in-progress")
+        mock_add_label.assert_any_call(2, "status:manual-merge-required")
+        mock_add_comment.assert_called_once()
+
+        # active_worktrees から除外されたこと（worktree削除はしない）
+        loaded = load_run_state(config.run_state_path)
+        assert "2" not in loaded.active_worktrees
+
+
+class TestGC:
+    def test_gc_reclaim_zombie(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+            task_timeout_seconds=3600,
+        )
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+
+        wt_path = tmp_path / "worktrees/claude-issue-1-task-1"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        run_state = RunState(
+            active_worktrees={
+                "1": ActiveWorktree(
+                    issue_number=1,
+                    branch="claude/issue-1-task-1",
+                    worktree_path=str(wt_path),
+                    pid=12345,
+                    started_at=1700000000.0,
+                    declared_footprint=(),
+                )
+            }
+        )
+        save_run_state(run_state, config.run_state_path)
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.is_process_alive", return_value=False),
+            patch("src.dispatcher.worktree_has_uncommitted_changes", return_value=True),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch("src.dispatcher.remove_worktree") as mock_remove_wt,
+            patch("src.dispatcher.subprocess.run") as mock_run,
+        ):
+            mock_list.side_effect = (
+                lambda label, **_: [issue_a] if label == "status:in-progress" else []
+            )
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=""
+            )
+
+            run_dispatch_cycle(config)
+
+        git_calls = [call.args[0] for call in mock_run.call_args_list]
+        assert any("add" in cmd for cmd in git_calls)
+        assert any("commit" in cmd for cmd in git_calls)
+
+        mock_remove_wt.assert_called_once_with(str(wt_path))
+        mock_remove_label.assert_called_with(1, "status:in-progress")
+        mock_add_label.assert_called_with(1, "status:queued")
+        mock_add_comment.assert_called_once()
+
+        loaded = load_run_state(config.run_state_path)
+        assert "1" not in loaded.active_worktrees
+
+    def test_gc_reclaim_timeout(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+            task_timeout_seconds=600,
+        )
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        wt_path = tmp_path / "worktrees/claude-issue-1-task-1"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        import time
+
+        old_time = time.time() - 1000
+
+        run_state = RunState(
+            active_worktrees={
+                "1": ActiveWorktree(
+                    issue_number=1,
+                    branch="claude/issue-1-task-1",
+                    worktree_path=str(wt_path),
+                    pid=12345,
+                    started_at=old_time,
+                    declared_footprint=(),
+                )
+            }
+        )
+        save_run_state(run_state, config.run_state_path)
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.is_process_alive", return_value=True),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch("src.dispatcher.remove_worktree") as mock_remove_wt,
+            patch("src.dispatcher.subprocess.run") as mock_run,
+        ):
+            mock_list.side_effect = (
+                lambda label, **_: [issue_a] if label == "status:in-progress" else []
+            )
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=""
+            )
+
+            run_dispatch_cycle(config)
+
+        mock_remove_wt.assert_called_once_with(str(wt_path))
+        mock_remove_label.assert_called_with(1, "status:in-progress")
+        mock_add_label.assert_called_with(1, "status:queued")
+        mock_add_comment.assert_called_once()
+
+        loaded = load_run_state(config.run_state_path)
+        assert "1" not in loaded.active_worktrees
+
+    def test_gc_reclaim_backup_failure_skips_deletion(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+            task_timeout_seconds=3600,
+        )
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        wt_path = tmp_path / "worktrees/claude-issue-1-task-1"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        run_state = RunState(
+            active_worktrees={
+                "1": ActiveWorktree(
+                    issue_number=1,
+                    branch="claude/issue-1-task-1",
+                    worktree_path=str(wt_path),
+                    pid=12345,
+                    started_at=1700000000.0,
+                    declared_footprint=(),
+                )
+            }
+        )
+        save_run_state(run_state, config.run_state_path)
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.is_process_alive", return_value=False),
+            patch("src.dispatcher.worktree_has_uncommitted_changes", return_value=True),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch("src.dispatcher.remove_worktree") as mock_remove_wt,
+            patch("src.dispatcher.subprocess.run") as mock_run,
+        ):
+            mock_list.side_effect = (
+                lambda label, **_: [issue_a] if label == "status:in-progress" else []
+            )
+            mock_run.side_effect = subprocess.CalledProcessError(
+                returncode=1,
+                cmd="git commit",
+                stderr="fatal: unable to write new index file",
+            )
+
+            run_dispatch_cycle(config)
+
+        mock_remove_wt.assert_not_called()
+        mock_remove_label.assert_not_called()
+        mock_add_label.assert_not_called()
+        mock_add_comment.assert_called_once()
+        assert (
+            "WIPバックアップコミットの作成に失敗しました"
+            in mock_add_comment.call_args[0][1]
+        )
+
+        loaded = load_run_state(config.run_state_path)
+        assert "1" in loaded.active_worktrees

@@ -48,6 +48,8 @@ class PrRecord:
     head_ref: str
     changed_files: tuple[str, ...]
     closes_issue_numbers: tuple[int, ...] = ()
+    review_decision: str = ""
+    is_ci_passing: bool = True
 
 
 def _run(args: list[str], input_text: str | None = None) -> str:
@@ -127,7 +129,15 @@ def list_open_prs() -> list[PrRecord]:
     判定できるよう、`closingIssuesReferences`（`Closes #N`等から解決される
     GitHub側の正規のIssue参照一覧）も併せて取得する。"""
     stdout = _run(
-        ["gh", "pr", "list", "--state", "open", "--json", "number,headRefName"]
+        [
+            "gh",
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "number,headRefName,reviewDecision,statusCheckRollup",
+        ]
     )
     raw_prs = json.loads(stdout)
     prs: list[PrRecord] = []
@@ -146,6 +156,19 @@ def list_open_prs() -> list[PrRecord]:
         detail = json.loads(detail_stdout)
         files = detail.get("files", [])
         closing_refs = detail.get("closingIssuesReferences", [])
+
+        rollup = raw.get("statusCheckRollup") or []
+        is_ci_passing = True
+        for check in rollup:
+            status = check.get("status")
+            conclusion = check.get("conclusion")
+            if status != "COMPLETED" or conclusion not in (
+                "SUCCESS",
+                "NEUTRAL",
+                "SKIPPED",
+            ):
+                is_ci_passing = False
+                break
         prs.append(
             PrRecord(
                 number=number,
@@ -154,6 +177,8 @@ def list_open_prs() -> list[PrRecord]:
                 closes_issue_numbers=tuple(
                     sorted(ref["number"] for ref in closing_refs)
                 ),
+                review_decision=raw.get("reviewDecision") or "",
+                is_ci_passing=is_ci_passing,
             )
         )
     return prs

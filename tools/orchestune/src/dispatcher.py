@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
@@ -44,6 +45,13 @@ TIME_BONUS_WEIGHT = 0.5
 PROGRESS_BONUS = 1.0
 
 _FOOTPRINT_BLOCK_PATTERN = re.compile(r"```yaml\s*\n(.*?)```", re.DOTALL)
+_HOTSPOT_PATTERNS = (
+    re.compile(
+        r"(^|/)(package\.json|poetry\.lock|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$"
+    ),
+    re.compile(r"(^|/)src/routes\.py$"),
+    re.compile(r"(^|/)src/routes/.*"),
+)
 
 
 @dataclass(frozen=True)
@@ -343,6 +351,21 @@ def check_footprint_deviation(
         added_str, deleted_str, path = parts
         if path in declared:
             continue
+
+        # ホットスポットファイルは逸脱チェックから除外する
+        is_hotspot = False
+        for pattern in _HOTSPOT_PATTERNS:
+            if pattern.search(path):
+                import sys
+
+                print(
+                    f"Warning: Footprint deviation detected on hotspot file '{path}', skipping DAG recompute.",
+                    file=sys.stderr,
+                )
+                is_hotspot = True
+                break
+        if is_hotspot:
+            continue
         if added_str == "-" or deleted_str == "-":
             changed_lines = min_changed_lines + 1
         else:
@@ -432,6 +455,7 @@ def create_worktree_and_launch(
     worktree_root: str | Path,
     dispatch_target: DispatchTarget,
     apply: bool,
+    base_branch: str | None = None,
 ) -> LaunchResult:
     _validate_ref_name(branch_name)
     worktree_root = Path(worktree_root)
@@ -461,8 +485,11 @@ def create_worktree_and_launch(
             worktree_root.mkdir(parents=True, exist_ok=True)
 
             # 3. ブランチがすでに存在する場合は -B で強制リセットする
+            cmd = ["git", "worktree", "add", str(worktree_path), "-B", branch_name]
+            if base_branch:
+                cmd.append(base_branch)
             subprocess.run(
-                ["git", "worktree", "add", str(worktree_path), "-B", branch_name],
+                cmd,
                 capture_output=True,
                 text=True,
                 check=True,
@@ -561,6 +588,7 @@ class DispatcherConfig:
     dispatch_target: DispatchTarget | None = None
     deviation_buffer_lines: int = 5
     max_recompute_retries: int = 2
+    task_timeout_seconds: int = 0
 
     def __post_init__(self) -> None:
         if self.dispatch_target is None:
@@ -729,6 +757,8 @@ def _process_active_worktrees(
     run_state: RunState,
     tasks_by_issue: dict[int, Task],
     issue_number_by_subtask_id: dict[str, int],
+    ci_passed_pr_subtask_ids: set[str],
+    subtask_branch_map: dict[str, str],
     config: DispatcherConfig,
 ) -> tuple[list[dict], list[dict], bool, set[str]]:
     """#192/#193/#200: active worktreeごとの完了検知・footprint逸脱処理。
@@ -768,6 +798,19 @@ def _process_active_worktrees(
                     del run_state.active_worktrees[key]
                 continue
 
+        # 自動リベース判定＆実行 (#201)
+        process_alive = is_process_alive(active.pid)
+        if process_alive and _try_auto_rebase(
+            active,
+            active_task,
+            key,
+            run_state,
+            ci_passed_pr_subtask_ids,
+            subtask_branch_map,
+            config,
+        ):
+            continue
+
         deviated = check_footprint_deviation(
             active.worktree_path,
             active.declared_footprint,
@@ -784,6 +827,195 @@ def _process_active_worktrees(
         deviation_events.append(event)
 
     return completion_events, deviation_events, any_forced_serial, completed_subtask_ids
+
+
+def _try_auto_rebase(
+    active: ActiveWorktree,
+    active_task: Task | None,
+    key: str,
+    run_state: RunState,
+    ci_passed_pr_subtask_ids: set[str],
+    subtask_branch_map: dict[str, str],
+    config: DispatcherConfig,
+) -> bool:
+    """自動リベースを試行し、実行した場合は True を返す。"""
+    if not active_task or not active_task.depends_on:
+        return False
+
+    for dep in active_task.depends_on:
+        if dep in ci_passed_pr_subtask_ids:
+            parent_branch = subtask_branch_map[dep]
+            child_branch = active.branch
+
+            needs_rebase = False
+            try:
+                res = subprocess.run(
+                    [
+                        "git",
+                        "merge-base",
+                        "--is-ancestor",
+                        parent_branch,
+                        child_branch,
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode != 0:
+                    needs_rebase = True
+            except OSError:
+                pass
+
+            if needs_rebase:
+                if config.apply:
+                    if active.pid:
+                        try:
+                            os.kill(active.pid, 9)
+                        except Exception:
+                            pass
+                    try:
+                        subprocess.run(
+                            [
+                                "git",
+                                "-C",
+                                active.worktree_path,
+                                "rebase",
+                                parent_branch,
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                        assert config.dispatch_target is not None
+                        handle = config.dispatch_target.launch(
+                            active_task, active.branch, Path(active.worktree_path)
+                        )
+                        active.pid = handle.pid
+                        active.external_id = handle.external_id
+                        active.external_url = handle.external_url
+                        active.started_at = time.time()
+                    except (subprocess.CalledProcessError, OSError):
+                        try:
+                            subprocess.run(
+                                [
+                                    "git",
+                                    "-C",
+                                    active.worktree_path,
+                                    "rebase",
+                                    "--abort",
+                                ],
+                                capture_output=True,
+                                text=True,
+                            )
+                        except Exception:
+                            pass
+
+                        github.remove_label(active.issue_number, "status:in-progress")
+                        github.add_label(
+                            active.issue_number,
+                            "status:manual-merge-required",
+                        )
+                        github.add_comment(
+                            active.issue_number,
+                            f"自動リベース中にコンフリクトが発生しました。手動でマージを行ってください。\n"
+                            f"対象の依存元ブランチ: {parent_branch}",
+                        )
+                        del run_state.active_worktrees[key]
+                return True
+    return False
+
+
+def _collect_zombies_and_timeouts(
+    run_state: RunState,
+    tasks_by_issue: dict[int, Task],
+    config: DispatcherConfig,
+) -> list[dict]:
+    """ゾンビプロセス（PID消失かつ未コミット変更あり）およびタイムアウトしたタスクをGC回収する。"""
+    if config.task_timeout_seconds <= 0:
+        return []
+    events = []
+    now = time.time()
+    for key, active in list(run_state.active_worktrees.items()):
+        active_task = tasks_by_issue.get(active.issue_number)
+
+        is_zombie = False
+        is_timeout = False
+
+        process_alive = is_process_alive(active.pid)
+        if not process_alive:
+            if os.path.exists(
+                active.worktree_path
+            ) and worktree_has_uncommitted_changes(active.worktree_path):
+                is_zombie = True
+
+        if not is_zombie and active.started_at:
+            timeout_limit = getattr(config, "task_timeout_seconds", 3600)
+            if timeout_limit > 0 and now - active.started_at > timeout_limit:
+                is_timeout = True
+
+        if is_zombie or is_timeout:
+            reason = "process disappeared" if is_zombie else "timeout exceeded"
+
+            if config.apply and os.path.exists(active.worktree_path):
+                backup_success = True
+                if worktree_has_uncommitted_changes(active.worktree_path):
+                    try:
+                        subprocess.run(
+                            ["git", "-C", active.worktree_path, "add", "-A"],
+                            capture_output=True,
+                            check=True,
+                        )
+                        subprocess.run(
+                            [
+                                "git",
+                                "-C",
+                                active.worktree_path,
+                                "commit",
+                                "-m",
+                                f"WIP: backup by Orchestune GC ({reason})",
+                            ],
+                            capture_output=True,
+                            check=True,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        backup_success = False
+                        github.add_comment(
+                            active.issue_number,
+                            f"タスク実行が {reason} のためGCによる回収を試みましたが、WIPバックアップコミットの作成に失敗しました。\n"
+                            f"未コミットの作業データ消失を防ぐため、今回のGC回収およびworktree削除処理を一時スキップしました。\n"
+                            f"エラー詳細:\n```\n{e.stderr.strip() if e.stderr else str(e)}\n```",
+                        )
+
+                if not backup_success:
+                    continue
+
+                if is_timeout and active.pid and process_alive:
+                    try:
+                        os.kill(active.pid, 9)
+                    except Exception:
+                        pass
+
+                remove_worktree(active.worktree_path)
+
+                github.remove_label(active.issue_number, "status:in-progress")
+                github.add_label(active.issue_number, "status:queued")
+                github.add_comment(
+                    active.issue_number,
+                    f"タスク実行が {reason} のため、GCにより作業ブランチにWIPコミットを退避した上で、タスクを再キューイング（status:queued）しました。",
+                )
+
+            if config.apply:
+                del run_state.active_worktrees[key]
+
+            events.append(
+                {
+                    "issue_number": active.issue_number,
+                    "subtask_id": active_task.subtask_id if active_task else "",
+                    "action": "gc_reclaimed",
+                    "reason": reason,
+                }
+            )
+
+    return events
 
 
 def _promote_blocked_tasks(
@@ -886,6 +1118,7 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
                 *locked_issues,
                 *in_progress_issues,
                 *blocked_issues,
+                *done_issues,
             ]
         }
         issue_number_by_subtask_id = {
@@ -894,56 +1127,73 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             if task.subtask_id
         }
 
+        prs = github.list_open_prs()
+
+        done_subtask_ids = {
+            task.subtask_id
+            for task in tasks_by_issue.values()
+            if "status:done" in task.status_labels and task.subtask_id
+        }
+
+        pr_by_branch = {pr.head_ref: pr for pr in prs}
+        ci_passed_pr_subtask_ids = set()
+        subtask_branch_map = {}
+
+        for task in tasks_by_issue.values():
+            if not task.subtask_id:
+                continue
+            branch_name = f"claude/issue-{task.issue_number}-{task.subtask_id}"
+            subtask_branch_map[task.subtask_id] = branch_name
+
+            pr = pr_by_branch.get(branch_name)
+            if pr and pr.is_ci_passing and pr.review_decision != "CHANGES_REQUESTED":
+                ci_passed_pr_subtask_ids.add(task.subtask_id)
+
         (
             completion_events,
             deviation_events,
             any_forced_serial,
             completed_subtask_ids,
         ) = _process_active_worktrees(
-            run_state, tasks_by_issue, issue_number_by_subtask_id, config
+            run_state,
+            tasks_by_issue,
+            issue_number_by_subtask_id,
+            ci_passed_pr_subtask_ids,
+            subtask_branch_map,
+            config,
         )
+
+        gc_events = _collect_zombies_and_timeouts(
+            run_state,
+            tasks_by_issue,
+            config,
+        )
+        completion_events.extend(gc_events)
 
         promotion_events = _promote_blocked_tasks(
             blocked_issues, done_issues, completed_subtask_ids, config
         )
 
-        remote_branch_names = github.list_remote_branches()
-        prs = github.list_open_prs()
-        active_branches = [aw.branch for aw in run_state.active_worktrees.values()]
-        pr_head_refs = {pr.head_ref for pr in prs}
-        bare_branches = [
-            b
-            for b in remote_branch_names
-            if _strip_remote_prefix(b) not in pr_head_refs
-            and _strip_remote_prefix(b) not in active_branches
-        ]
-        remote_branch_footprints = [
-            (_strip_remote_prefix(branch), tuple(github.branch_changed_files(branch)))
-            for branch in bare_branches
-        ]
-
-        all_tasks = list(tasks_by_issue.values())
-        lock_result = scan_external_locks(
-            all_tasks, remote_branch_footprints, prs, active_branches
-        )
-
-        if config.apply:
-            for task in lock_result.to_lock:
-                github.add_label(task.issue_number, "status:external-lock")
-            for task in lock_result.to_unlock:
-                github.remove_label(task.issue_number, "status:external-lock")
-                github.add_label(task.issue_number, "status:queued")
+        lock_result = _sync_external_locks(tasks_by_issue, prs, run_state, config)
 
         newly_locked = {t.issue_number for t in lock_result.to_lock}
-        candidate_tasks = [
+        queued_candidates = [
             tasks_by_issue[issue.number]
             for issue in queued_issues
             if issue.number not in newly_locked
         ]
 
+        stack_eligible_tasks, task_to_base_branch = _get_stack_eligible_tasks(
+            blocked_issues,
+            tasks_by_issue,
+            done_subtask_ids,
+            ci_passed_pr_subtask_ids,
+            subtask_branch_map,
+        )
+
+        candidate_tasks = queued_candidates + stack_eligible_tasks
+
         if any_forced_serial:
-            # #200: リトライ上限を超えたサブタスクを直列実行させるため、
-            # 完了するまで新規タスクのdispatchを凍結する。
             quota_slots = 0
             selected: list[Task] = []
         else:
@@ -964,55 +1214,14 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             )
 
         if config.apply:
-            # YAMLパースエラーになっているタスクをブロックする
-            for task in candidate_tasks:
-                if task.yaml_error:
-                    github.remove_label(task.issue_number, "status:queued")
-                    github.add_label(task.issue_number, "status:blocked")
-                    github.add_comment(
-                        task.issue_number,
-                        "YAMLのパースに失敗したため、タスクをブロックしました。フォーマットを確認してください。",
-                    )
-
-            actually_selected = []
-            for task in selected:
-                branch_name = (
-                    f"claude/issue-{task.issue_number}-{task.subtask_id or 'task'}"
-                )
-                assert config.dispatch_target is not None
-                launch = create_worktree_and_launch(
-                    task,
-                    branch_name,
-                    config.worktree_root,
-                    config.dispatch_target,
-                    apply=True,
-                )
-                if not launch.launched:
-                    github.remove_label(task.issue_number, "status:queued")
-                    github.add_label(task.issue_number, "status:blocked")
-                    github.add_comment(
-                        task.issue_number,
-                        f"Git worktreeの作成またはエージェントの起動に失敗しました。\n"
-                        f"エラー内容:\n```\n{launch.error_message}\n```",
-                    )
-                    continue
-
-                github.remove_label(task.issue_number, "status:queued")
-                github.add_label(task.issue_number, "status:in-progress")
-                run_state.active_worktrees[str(task.issue_number)] = ActiveWorktree(
-                    issue_number=task.issue_number,
-                    branch=branch_name,
-                    worktree_path=launch.worktree_path,
-                    pid=launch.pid,
-                    started_at=now,
-                    declared_footprint=task.footprint,
-                    external_id=launch.external_id,
-                    external_url=launch.external_url,
-                )
-                run_state.launch_history.append(now)
-                actually_selected.append(task)
-            selected = actually_selected
-            save_run_state(run_state, config.run_state_path)
+            selected = _launch_selected_tasks(
+                selected,
+                task_to_base_branch,
+                candidate_tasks,
+                run_state,
+                now,
+                config,
+            )
 
         report = CycleReport(
             selected=selected,
@@ -1031,6 +1240,157 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             append_event_log(build_event_log_entry(report, now), config.events_log_path)
 
         return report
+
+
+def _sync_external_locks(
+    tasks_by_issue: dict[int, Task],
+    prs: list[PrRecord],
+    run_state: RunState,
+    config: DispatcherConfig,
+) -> ExternalLockScanResult:
+    remote_branch_names = github.list_remote_branches()
+    active_branches = [aw.branch for aw in run_state.active_worktrees.values()]
+    pr_head_refs = {pr.head_ref for pr in prs}
+    bare_branches = [
+        b
+        for b in remote_branch_names
+        if _strip_remote_prefix(b) not in pr_head_refs
+        and _strip_remote_prefix(b) not in active_branches
+    ]
+    remote_branch_footprints = [
+        (
+            _strip_remote_prefix(branch),
+            tuple(github.branch_changed_files(branch)),
+        )
+        for branch in bare_branches
+    ]
+
+    all_tasks = list(tasks_by_issue.values())
+    lock_result = scan_external_locks(
+        all_tasks, remote_branch_footprints, prs, active_branches
+    )
+
+    if config.apply:
+        for task in lock_result.to_lock:
+            github.add_label(task.issue_number, "status:external-lock")
+        for task in lock_result.to_unlock:
+            github.remove_label(task.issue_number, "status:external-lock")
+            github.add_label(task.issue_number, "status:queued")
+
+    return lock_result
+
+
+def _get_stack_eligible_tasks(
+    blocked_issues: list[IssueRecord],
+    tasks_by_issue: dict[int, Task],
+    done_subtask_ids: set[str],
+    ci_passed_pr_subtask_ids: set[str],
+    subtask_branch_map: dict[str, str],
+) -> tuple[list[Task], dict[int, str]]:
+    stack_eligible_tasks = []
+    task_to_base_branch = {}
+
+    for issue in blocked_issues:
+        task = parse_task_from_issue(issue)
+        if not task.subtask_id or not task.depends_on:
+            continue
+
+        all_resolved_or_stackable = True
+        stackable_deps = []
+        for dep in task.depends_on:
+            if dep in done_subtask_ids:
+                continue
+            elif dep in ci_passed_pr_subtask_ids:
+                dep_task = None
+                for t in tasks_by_issue.values():
+                    if t.subtask_id == dep:
+                        dep_task = t
+                        break
+                if dep_task:
+                    if not all(
+                        grand_dep in done_subtask_ids
+                        for grand_dep in dep_task.depends_on
+                    ):
+                        all_resolved_or_stackable = False
+                        break
+                stackable_deps.append(dep)
+            else:
+                all_resolved_or_stackable = False
+                break
+
+        # スタッキング可能な未マージ依存先が「ちょうど1つ」の場合のみスタッキング起動を許可する
+        # （複数ある場合は、両方の変更をベースブランチとして同時に取り込めないためマージされるまでブロックする）
+        if all_resolved_or_stackable and len(stackable_deps) == 1:
+            stack_eligible_tasks.append(task)
+            dep = stackable_deps[0]
+            task_to_base_branch[task.issue_number] = subtask_branch_map[dep]
+
+    return stack_eligible_tasks, task_to_base_branch
+
+
+def _launch_selected_tasks(
+    selected: list[Task],
+    task_to_base_branch: dict[int, str],
+    candidate_tasks: list[Task],
+    run_state: RunState,
+    now: float,
+    config: DispatcherConfig,
+) -> list[Task]:
+    for task in candidate_tasks:
+        if task.yaml_error:
+            github.remove_label(task.issue_number, "status:queued")
+            github.add_label(task.issue_number, "status:blocked")
+            github.add_comment(
+                task.issue_number,
+                "YAMLのパースに失敗したため、タスクをブロックしました。フォーマットを確認してください。",
+            )
+
+    actually_selected = []
+    for task in selected:
+        branch_name = f"claude/issue-{task.issue_number}-{task.subtask_id or 'task'}"
+        base_branch = task_to_base_branch.get(task.issue_number)
+        assert config.dispatch_target is not None
+        launch = create_worktree_and_launch(
+            task,
+            branch_name,
+            config.worktree_root,
+            config.dispatch_target,
+            apply=True,
+            base_branch=base_branch,
+        )
+        if not launch.launched:
+            if "status:queued" in task.status_labels:
+                github.remove_label(task.issue_number, "status:queued")
+            if "status:blocked" in task.status_labels:
+                github.remove_label(task.issue_number, "status:blocked")
+            github.add_label(task.issue_number, "status:blocked")
+            github.add_comment(
+                task.issue_number,
+                f"Git worktreeの作成またはエージェントの起動に失敗しました。\n"
+                f"エラー内容:\n```\n{launch.error_message}\n```",
+            )
+            continue
+
+        if "status:queued" in task.status_labels:
+            github.remove_label(task.issue_number, "status:queued")
+        if "status:blocked" in task.status_labels:
+            github.remove_label(task.issue_number, "status:blocked")
+        github.add_label(task.issue_number, "status:in-progress")
+        run_state.active_worktrees[str(task.issue_number)] = ActiveWorktree(
+            issue_number=task.issue_number,
+            branch=branch_name,
+            worktree_path=launch.worktree_path,
+            pid=launch.pid,
+            started_at=now,
+            declared_footprint=task.footprint,
+            external_id=launch.external_id,
+            external_url=launch.external_url,
+        )
+        run_state.launch_history.append(now)
+        actually_selected.append(task)
+
+    save_run_state(run_state, config.run_state_path)
+    return actually_selected
 
 
 def _report_to_dict(report: CycleReport) -> dict:
@@ -1123,9 +1483,22 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = run_dispatch_cycle(config)
         print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
-    except RuntimeError as e:
-        import sys
 
+        if config.apply:
+            try:
+                from src.integrator import Integrator, IntegratorConfig
+
+                integrator_config = IntegratorConfig(
+                    parent_issue_number=config.parent_issue_number,
+                    apply=config.apply,
+                )
+                integrator = Integrator(integrator_config)
+                integrator_run_report = integrator.run()
+                print("Integrator Report:")
+                print(json.dumps(integrator_run_report, ensure_ascii=False, indent=2))
+            except Exception as ie:
+                print(f"Warning: Integrator failed to run: {ie}", file=sys.stderr)
+    except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     return 0
