@@ -1,24 +1,4 @@
 {
-  "active_worktrees": {
-    "218": {
-      "issue_number": 218,
-      "branch": "claude/issue-218-review-history-backend-api",
-      "worktree_path": "worktrees/claude-issue-218-review-history-backend-api",
-      "pid": null,
-      "started_at": 1783394626.3850598,
-      "declared_footprint": [
-        "src/routes/review_history.py",
-        "src/routes/models/review_history.py",
-        "src/routes/api.py",
-        "tests/test_review_history_routes.py"
-      ],
-      "recompute_count": 0,
-      "forced_serial": false,
-      "external_id": "session_01TepWJXRM8PjqZw3wUU93S4",
-      "external_url": "https://claude.ai/code/session_01TepWJXRM8PjqZw3wUU93S4"
-    }
-  },
-  "launch_history": [
-    1783394626.3850598
-  ]
+  "active_worktrees": {},
+  "launch_history": []
 }
