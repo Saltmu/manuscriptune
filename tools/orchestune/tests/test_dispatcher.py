@@ -2329,3 +2329,64 @@ class TestGC:
 
         loaded = load_run_state(config.run_state_path)
         assert "1" not in loaded.active_worktrees
+
+    def test_gc_reclaim_backup_failure_skips_deletion(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+            task_timeout_seconds=3600,
+        )
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        wt_path = tmp_path / "worktrees/claude-issue-1-task-1"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        run_state = RunState(
+            active_worktrees={
+                "1": ActiveWorktree(
+                    issue_number=1,
+                    branch="claude/issue-1-task-1",
+                    worktree_path=str(wt_path),
+                    pid=12345,
+                    started_at=1700000000.0,
+                    declared_footprint=(),
+                )
+            }
+        )
+        save_run_state(run_state, config.run_state_path)
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.is_process_alive", return_value=False),
+            patch("src.dispatcher.worktree_has_uncommitted_changes", return_value=True),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch("src.dispatcher.remove_worktree") as mock_remove_wt,
+            patch("src.dispatcher.subprocess.run") as mock_run,
+        ):
+            mock_list.side_effect = (
+                lambda label, **_: [issue_a] if label == "status:in-progress" else []
+            )
+            mock_run.side_effect = subprocess.CalledProcessError(
+                returncode=1,
+                cmd="git commit",
+                stderr="fatal: unable to write new index file",
+            )
+
+            run_dispatch_cycle(config)
+
+        mock_remove_wt.assert_not_called()
+        mock_remove_label.assert_not_called()
+        mock_add_label.assert_not_called()
+        mock_add_comment.assert_called_once()
+        assert (
+            "WIPバックアップコミットの作成に失敗しました"
+            in mock_add_comment.call_args[0][1]
+        )
+
+        loaded = load_run_state(config.run_state_path)
+        assert "1" in loaded.active_worktrees

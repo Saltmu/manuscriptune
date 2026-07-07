@@ -865,13 +865,12 @@ def _try_auto_rebase(
                 pass
 
             if needs_rebase:
-                if active.pid:
-                    try:
-                        os.kill(active.pid, 9)
-                    except Exception:
-                        pass
-
                 if config.apply:
+                    if active.pid:
+                        try:
+                            os.kill(active.pid, 9)
+                        except Exception:
+                            pass
                     try:
                         subprocess.run(
                             [
@@ -955,26 +954,37 @@ def _collect_zombies_and_timeouts(
             reason = "process disappeared" if is_zombie else "timeout exceeded"
 
             if config.apply and os.path.exists(active.worktree_path):
-                try:
-                    subprocess.run(
-                        ["git", "-C", active.worktree_path, "add", "-A"],
-                        capture_output=True,
-                        check=True,
-                    )
-                    subprocess.run(
-                        [
-                            "git",
-                            "-C",
-                            active.worktree_path,
-                            "commit",
-                            "-m",
-                            f"WIP: backup by Orchestune GC ({reason})",
-                        ],
-                        capture_output=True,
-                        check=True,
-                    )
-                except subprocess.CalledProcessError:
-                    pass
+                backup_success = True
+                if worktree_has_uncommitted_changes(active.worktree_path):
+                    try:
+                        subprocess.run(
+                            ["git", "-C", active.worktree_path, "add", "-A"],
+                            capture_output=True,
+                            check=True,
+                        )
+                        subprocess.run(
+                            [
+                                "git",
+                                "-C",
+                                active.worktree_path,
+                                "commit",
+                                "-m",
+                                f"WIP: backup by Orchestune GC ({reason})",
+                            ],
+                            capture_output=True,
+                            check=True,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        backup_success = False
+                        github.add_comment(
+                            active.issue_number,
+                            f"タスク実行が {reason} のためGCによる回収を試みましたが、WIPバックアップコミットの作成に失敗しました。\n"
+                            f"未コミットの作業データ消失を防ぐため、今回のGC回収およびworktree削除処理を一時スキップしました。\n"
+                            f"エラー詳細:\n```\n{e.stderr.strip() if e.stderr else str(e)}\n```",
+                        )
+
+                if not backup_success:
+                    continue
 
                 if is_timeout and active.pid and process_alive:
                     try:
