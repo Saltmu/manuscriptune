@@ -617,6 +617,79 @@ def test_routes_api_stream_plot_review_success(tmp_path):
             assert mock_stream.called
 
 
+def test_routes_api_get_plot_draft_not_found(tmp_path):
+    with patch("src.utils.project_paths.get_output_dir", return_value=str(tmp_path)):
+        response = client.get("/api/plot/draft?file=non_existent_plot.txt")
+        assert response.status_code == 404
+
+
+def test_routes_api_get_plot_draft_success(tmp_path):
+    draft_path = tmp_path / "test_draft_plot_plot_draft.txt"
+    draft_path.write_text("肉付けされたプロット", encoding="utf-8")
+
+    with patch("src.utils.project_paths.get_output_dir", return_value=str(tmp_path)):
+        response = client.get("/api/plot/draft?file=test_draft_plot.txt")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["content"] == "肉付けされたプロット"
+        assert data["source_plot"] == "test_draft_plot.txt"
+
+
+def test_routes_api_stream_plot_expand_not_found():
+    response = client.get("/api/stream/plot_expand?file=non_existent.txt")
+    assert response.status_code == 404
+
+
+def test_routes_api_stream_plot_expand_success(tmp_path):
+    with patch("src.utils.project_paths.get_sources_dir", return_value=str(tmp_path)):
+        mock_plot = tmp_path / "test_stream_expand.txt"
+        mock_plot.write_text("プロットテスト本文", encoding="utf-8")
+
+        with patch("src.services.stream_service.stream_service_call") as mock_stream:
+            mock_stream.return_value = StreamingResponse(iter([b"data: success\n\n"]))
+            response = client.get(
+                "/api/stream/plot_expand?file=test_stream_expand.txt&model=test-model"
+            )
+            assert response.status_code == 200
+            assert mock_stream.called
+
+
+def test_routes_api_stream_plot_revise_not_found():
+    response = client.get("/api/stream/plot_revise?file=non_existent.txt")
+    assert response.status_code == 404
+
+
+def test_routes_api_stream_plot_revise_findings_missing(tmp_path):
+    with (
+        patch("src.utils.project_paths.get_sources_dir", return_value=str(tmp_path)),
+        patch("src.utils.project_paths.get_output_dir", return_value=str(tmp_path)),
+    ):
+        mock_plot = tmp_path / "test_stream_revise.txt"
+        mock_plot.write_text("プロットテスト本文", encoding="utf-8")
+
+        response = client.get("/api/stream/plot_revise?file=test_stream_revise.txt")
+        assert response.status_code == 400
+
+
+def test_routes_api_stream_plot_revise_success(tmp_path):
+    with (
+        patch("src.utils.project_paths.get_sources_dir", return_value=str(tmp_path)),
+        patch("src.utils.project_paths.get_output_dir", return_value=str(tmp_path)),
+    ):
+        mock_plot = tmp_path / "test_stream_revise_ok.txt"
+        mock_plot.write_text("プロットテスト本文", encoding="utf-8")
+        findings_yaml = tmp_path / "test_stream_revise_ok_plot_findings.yaml"
+        findings_yaml.write_text("findings: []", encoding="utf-8")
+
+        with patch("src.services.stream_service.stream_service_call") as mock_stream:
+            mock_stream.return_value = StreamingResponse(iter([b"data: success\n\n"]))
+            response = client.get(
+                "/api/stream/plot_revise?file=test_stream_revise_ok.txt"
+            )
+            assert response.status_code == 200
+            assert mock_stream.called
+
+
 def test_save_and_get_findings_with_metadata():
     os.makedirs("novels", exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, dir="novels") as tmp:

@@ -34,3 +34,10 @@ class ChapterStatusItem(BaseModel):
 
 class PlotEpisodesStatusResponse(BaseModel):
     chapters: list[ChapterStatusItem]
+
+
+class PlotDraftResponse(BaseModel):
+    draft_name: str
+    content: str
+    source_plot: str
+    saved_path: str

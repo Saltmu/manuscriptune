@@ -29,6 +29,7 @@ FINDINGS_YAML_TEMPLATE = "{basename}_findings.yaml"
 REPORT_MD_TEMPLATE = "{basename}_report.md"
 PLOT_FINDINGS_YAML_TEMPLATE = "{basename}_plot_findings.yaml"
 PLOT_REPORT_MD_TEMPLATE = "{basename}_plot_report.md"
+PLOT_DRAFT_TXT_TEMPLATE = "{basename}_plot_draft.txt"
 
 
 def get_output_dir(basename: str, results_dir: str | None = None) -> str:
@@ -141,6 +142,11 @@ def get_plot_findings_yaml_path(output_dir: str, basename: str) -> str:
 def get_plot_report_md_path(output_dir: str, basename: str) -> str:
     """Returns the path for the final plot Markdown report."""
     return os.path.join(output_dir, PLOT_REPORT_MD_TEMPLATE.format(basename=basename))
+
+
+def get_plot_draft_path(output_dir: str, basename: str) -> str:
+    """Returns the path for the generated plot draft (肉付け・findings反映改稿の結果)."""
+    return os.path.join(output_dir, PLOT_DRAFT_TXT_TEMPLATE.format(basename=basename))
 
 
 def get_stopwords_path() -> str:
