@@ -187,6 +187,8 @@ class DispatcherConfig:
     deviation_buffer_lines: int = 5
     max_recompute_retries: int = 2
     task_timeout_seconds: int = 0
+    # #282: status:not-needed判定の独立検証レビュー（保留分）の永続化先。
+    not_needed_review_state_path: Path = Path("not_needed_review_state.json")
 
     def __post_init__(self) -> None:
         if self.dispatch_target is None:
@@ -257,7 +259,13 @@ def _process_active_worktrees(  # noqa: C901
                 active, active_task, config
             )
             completion_events.append(completion_event)
-            if completion_event["action"] == "not_needed":
+            # #282: 即時クローズ・検証レビューへの委譲のどちらの経路でも、
+            # 対応不要の根拠自体は「mainに既に実装されている」ことなので、
+            # Issueクローズの可否とは独立に依存関係は解決済みとして扱ってよい。
+            if completion_event["action"] in (
+                "not_needed",
+                "not_needed_review_dispatched",
+            ):
                 if active_task.subtask_id:
                     completed_subtask_ids.add(active_task.subtask_id)
                 if config.apply:
@@ -859,6 +867,12 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("integration_review_state.json"),
         help="#186: 保留中の意味的レビュー（合否ポーリング・自動マージ待ち）の永続化先",
     )
+    parser.add_argument(
+        "--not-needed-review-state-path",
+        type=Path,
+        default=Path("not_needed_review_state.json"),
+        help="#282: 保留中のstatus:not-needed検証レビュー（合否ポーリング・自動クローズ待ち）の永続化先",
+    )
     args = parser.parse_args(argv)
 
     config = DispatcherConfig(
@@ -876,6 +890,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         deviation_buffer_lines=args.deviation_buffer_lines,
         max_recompute_retries=args.max_recompute_retries,
+        not_needed_review_state_path=args.not_needed_review_state_path,
     )
     try:
         report = run_dispatch_cycle(config)
@@ -900,6 +915,28 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception as re:
                     print(
                         f"Warning: failed to process pending semantic reviews: {re}",
+                        file=sys.stderr,
+                    )
+
+                # #282: status:not-needed判定の独立検証レビュー（保留分）のポーリング。
+                # 同じORCHESTUNE_SEMANTIC_REVIEWフラグでまとめて無効化できる。
+                try:
+                    from src.integration_coordinator import (
+                        process_pending_not_needed_reviews,
+                    )
+
+                    not_needed_review_report = process_pending_not_needed_reviews(
+                        args.not_needed_review_state_path
+                    )
+                    print("Pending Not-Needed Review Report:")
+                    print(
+                        json.dumps(
+                            not_needed_review_report, ensure_ascii=False, indent=2
+                        )
+                    )
+                except Exception as re:
+                    print(
+                        f"Warning: failed to process pending not-needed reviews: {re}",
                         file=sys.stderr,
                     )
 

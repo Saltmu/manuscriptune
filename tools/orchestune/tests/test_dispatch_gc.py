@@ -9,6 +9,7 @@ from src.dispatch_gc import (
 )
 from src.dispatch_scoring import Task
 from src.dispatch_state import ActiveWorktree
+from src.dispatch_targets import ClaudeCodeCloudRoutineDispatchTarget, DispatchHandle
 from src.dispatcher import DispatcherConfig
 
 
@@ -191,3 +192,73 @@ class TestFinalizeNotNeededWorktree:
         ):
             event = _finalize_not_needed_worktree(active, None, config)
         assert event["subtask_id"] == ""
+
+
+class TestFinalizeNotNeededWorktreeCloudRoutineReview:
+    """#282: クラウドルーチン利用可能時は即時クローズせず独立検証レビューへ委譲する。"""
+
+    def _cloud_config(self, **overrides):
+        defaults = dict(
+            apply=True,
+            dispatch_target=ClaudeCodeCloudRoutineDispatchTarget("rid", "rtok"),
+        )
+        defaults.update(overrides)
+        return DispatcherConfig(**defaults)
+
+    def test_dispatches_review_instead_of_closing(self, tmp_path):
+        active = _active()
+        task = _task()
+        config = self._cloud_config(
+            not_needed_review_state_path=tmp_path / "state.json"
+        )
+        handle = DispatchHandle(
+            external_id="sess-1", external_url="https://claude.ai/code/s/sess-1"
+        )
+        with (
+            patch(
+                "src.dispatch_gc.worktree_has_uncommitted_changes", return_value=False
+            ),
+            patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
+            patch("src.dispatch_gc.github.remove_label") as mock_remove_label,
+            patch("src.dispatch_gc.github.close_issue") as mock_close_issue,
+            patch(
+                "src.integration_coordinator.ClaudeCodeCloudRoutineDispatchTarget.fire_text",
+                return_value=handle,
+            ) as mock_fire_text,
+        ):
+            event = _finalize_not_needed_worktree(active, task, config)
+
+        mock_remove_worktree.assert_called_once_with("worktrees/w1")
+        mock_remove_label.assert_called_once_with(280, "status:in-progress")
+        mock_close_issue.assert_not_called()
+        mock_fire_text.assert_called_once()
+        assert "#280" in mock_fire_text.call_args.args[0]
+        assert event["action"] == "not_needed_review_dispatched"
+        assert event["subtask_id"] == "task-a"
+
+        from src.not_needed_review_state import load_not_needed_review_state
+
+        state = load_not_needed_review_state(config.not_needed_review_state_path)
+        assert len(state.pending) == 1
+        assert state.pending[0].issue_number == 280
+        assert state.pending[0].subtask_id == "task-a"
+        assert state.pending[0].session_external_id == "sess-1"
+
+    def test_dirty_worktree_does_not_dispatch_review(self, tmp_path):
+        active = _active()
+        task = _task()
+        config = self._cloud_config(
+            not_needed_review_state_path=tmp_path / "state.json"
+        )
+        with (
+            patch(
+                "src.dispatch_gc.worktree_has_uncommitted_changes", return_value=True
+            ),
+            patch(
+                "src.integration_coordinator.ClaudeCodeCloudRoutineDispatchTarget.fire_text"
+            ) as mock_fire_text,
+        ):
+            event = _finalize_not_needed_worktree(active, task, config)
+
+        mock_fire_text.assert_not_called()
+        assert event["action"] == "completion_skipped_dirty_worktree"
