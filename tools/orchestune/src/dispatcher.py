@@ -242,10 +242,36 @@ def _process_active_worktrees(
     completed_subtask_ids: set[str] = set()
 
     for key, active in list(run_state.active_worktrees.items()):
+        active_task = tasks_by_issue.get(active.issue_number)
+
+        if (
+            active_task is not None
+            and "status:in-progress" not in active_task.status_labels
+        ):
+            # run_stateへの登録(save_run_state)は起動成功直後に、GitHubラベルの
+            # status:in-progress付与はその後に行う順序になっているため、この間で
+            # クラッシュした場合（あるいは完了/エスカレーション処理でラベルだけ
+            # 先に更新されてクラッシュした場合）、GitHub側のラベルは
+            # status:in-progressでなくなっているのにrun_state側にだけ古い
+            # エントリが残ることがある。GitHubラベルを正として、この古い帳簿
+            # エントリを破棄する（ゾンビGCの拡張）。
+            completion_events.append(
+                {
+                    "issue_number": active.issue_number,
+                    "subtask_id": active_task.subtask_id,
+                    "action": "stale_active_entry_discarded",
+                    "reason": (
+                        "issue label is no longer status:in-progress "
+                        f"(labels={sorted(active_task.status_labels)})"
+                    ),
+                }
+            )
+            if config.apply:
+                del run_state.active_worktrees[key]
+            continue
+
         if active.forced_serial:
             any_forced_serial = True
-
-        active_task = tasks_by_issue.get(active.issue_number)
 
         if _is_worktree_complete(active, config):
             completion_event = _finalize_completed_worktree(active, active_task, config)
@@ -660,11 +686,12 @@ def _launch_selected_tasks(
             )
             continue
 
-        if "status:queued" in task.status_labels:
-            github.remove_label(task.issue_number, "status:queued")
-        if "status:blocked" in task.status_labels:
-            github.remove_label(task.issue_number, "status:blocked")
-        github.add_label(task.issue_number, "status:in-progress")
+        # run_stateへの登録・永続化を先に行い、GitHubラベルの更新は後で行う。
+        # 起動(create_worktree_and_launch)は既に成功しているため、この順序なら
+        # この後でクラッシュしても「run_stateには記録済みだがGitHubラベルは
+        # まだstatus:queuedのまま」という、次回サイクルの冒頭でラベルを見て
+        # 機械的に検出・破棄できる非対称にしかならない（逆順だと「GitHub側は
+        # 確定・run_state側は空」という検出不能な非対称になってしまう）。
         run_state.active_worktrees[str(task.issue_number)] = ActiveWorktree(
             issue_number=task.issue_number,
             branch=branch_name,
@@ -676,6 +703,13 @@ def _launch_selected_tasks(
             external_url=launch.external_url,
         )
         run_state.launch_history.append(now)
+        save_run_state(run_state, config.run_state_path)
+
+        if "status:queued" in task.status_labels:
+            github.remove_label(task.issue_number, "status:queued")
+        if "status:blocked" in task.status_labels:
+            github.remove_label(task.issue_number, "status:blocked")
+        github.add_label(task.issue_number, "status:in-progress")
         actually_selected.append(task)
 
     save_run_state(run_state, config.run_state_path)
