@@ -155,6 +155,57 @@ class TestIntegrator:
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.remove_label")
+    @patch("src.integrator.github.add_label")
+    @patch("src.integrator.github.add_comment")
+    def test_merge_conflict_aborts_before_next_task(
+        self, mock_comment, mock_add, mock_remove, mock_run, mock_list
+    ):
+        # task-1 のマージがコンフリクトで失敗しても、task-2 は巻き添えを受けず
+        # クリーンな状態から正常にマージ・統合されるべき。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        issue_b = _issue(2, labels=("status:done",), subtask_id="task-2")
+
+        mock_list.side_effect = lambda label: [issue_a, issue_b]
+
+        def run_side_effect(args, **kwargs):
+            if "merge" in args and any("claude/issue-1-task-1" in a for a in args):
+                raise subprocess.CalledProcessError(
+                    returncode=1,
+                    cmd=args,
+                    stderr=b"CONFLICT (content): Merge conflict",
+                )
+            return subprocess.CompletedProcess(args=args, returncode=0)
+
+        mock_run.side_effect = run_side_effect
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+
+        res = integrator.run()
+
+        assert res["status"] == "partial_success"
+        assert res["merged"] == ["task-2"]
+        assert res["failed"] == ["task-1"]
+
+        abort_calls = [
+            call
+            for call in mock_run.call_args_list
+            if "merge" in call.args[0] and "--abort" in call.args[0]
+        ]
+        assert len(abort_calls) == 1
+
+        merge_call_indices = [
+            i
+            for i, call in enumerate(mock_run.call_args_list)
+            if "merge" in call.args[0] and "--no-ff" in call.args[0]
+        ]
+        abort_call_index = mock_run.call_args_list.index(abort_calls[0])
+        # abort は task-1 のマージ失敗の直後、task-2 のマージ試行より前に呼ばれる
+        assert merge_call_indices[0] < abort_call_index < merge_call_indices[1]
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
     def test_ci_flaky_handling(self, mock_run, mock_list):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         mock_list.side_effect = lambda label: [issue_a]
