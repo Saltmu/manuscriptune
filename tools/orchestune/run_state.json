@@ -14,6 +14,21 @@
       "forced_serial": false,
       "external_id": "session_01Mv4RSVQxcqfJBP2BfuuBYo",
       "external_url": "https://claude.ai/code/session_01Mv4RSVQxcqfJBP2BfuuBYo"
+    },
+    "248": {
+      "issue_number": 248,
+      "branch": "claude/issue-248-plot-ai-tasks",
+      "worktree_path": "worktrees/claude-issue-248-plot-ai-tasks",
+      "pid": null,
+      "started_at": 1783536313.675088,
+      "declared_footprint": [
+        "src/utils/ai_tasks/plotting.py",
+        "tests/test_ai_tasks_plotting.py"
+      ],
+      "recompute_count": 0,
+      "forced_serial": false,
+      "external_id": "session_01Bi4eJenVzh66dFtMJdR39S",
+      "external_url": "https://claude.ai/code/session_01Bi4eJenVzh66dFtMJdR39S"
     }
   },
   "launch_history": [
@@ -26,7 +41,8 @@
     1783503433.146723,
     1783511870.0891979,
     1783521675.5482457,
-    1783528331.2970781
+    1783528331.2970781,
+    1783536313.675088
   ],
   "completed_worktrees": [
     {
