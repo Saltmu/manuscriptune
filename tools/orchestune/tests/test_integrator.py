@@ -196,6 +196,89 @@ class TestIntegrator:
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
+    def test_unshallows_repository_before_merging_when_shallow(
+        self, mock_run, mock_list
+    ):
+        # actions/checkout@v6 のデフォルト（浅いclone）のままタスクブランチを
+        # fetchすると、そのコミットも親を持たない浅い状態になり、mainとの共通の
+        # 祖先が見つからず『refusing to merge unrelated histories』でmergeが
+        # 必ず失敗するため、浅いリポジトリの場合は事前に履歴を深くする必要がある。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        def run_side_effect(args, **kwargs):
+            if args[:2] == ["git", "rev-parse"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout=b"true\n", stderr=b""
+                )
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout=b"", stderr=b""
+            )
+
+        mock_run.side_effect = run_side_effect
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "success"
+
+        unshallow_calls = [
+            call for call in mock_run.call_args_list if "--unshallow" in call.args[0]
+        ]
+        assert len(unshallow_calls) == 1
+        assert unshallow_calls[0].args[0] == [
+            "git",
+            "fetch",
+            "--unshallow",
+            "origin",
+            "main",
+        ]
+
+        unshallow_index = mock_run.call_args_list.index(unshallow_calls[0])
+        branch_fetch_index = next(
+            i
+            for i, call in enumerate(mock_run.call_args_list)
+            if call.args[0]
+            == [
+                "git",
+                "fetch",
+                "origin",
+                "claude/issue-1-task-1:refs/remotes/origin/claude/issue-1-task-1",
+            ]
+        )
+        assert unshallow_index < branch_fetch_index
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_skips_unshallow_when_repository_is_not_shallow(self, mock_run, mock_list):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        def run_side_effect(args, **kwargs):
+            if args[:2] == ["git", "rev-parse"]:
+                return subprocess.CompletedProcess(
+                    args=args, returncode=0, stdout=b"false\n", stderr=b""
+                )
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout=b"", stderr=b""
+            )
+
+        mock_run.side_effect = run_side_effect
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "success"
+
+        unshallow_calls = [
+            call for call in mock_run.call_args_list if "--unshallow" in call.args[0]
+        ]
+        assert len(unshallow_calls) == 0
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
     @patch("src.integrator.github.remove_label")
     @patch("src.integrator.github.add_label")
     @patch("src.integrator.github.add_comment")
