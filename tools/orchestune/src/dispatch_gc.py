@@ -97,6 +97,45 @@ def _finalize_completed_worktree(
     return event
 
 
+def _finalize_not_needed_worktree(
+    active: ActiveWorktree,
+    active_task: Task | None,
+    config: DispatcherConfig,
+) -> dict:
+    """#280: `status:not-needed`ラベル検知による完了後処理。
+
+    セッションが「既に要件を満たしており対応不要」と判断した場合、コミット・PRを
+    作らないためclosingIssuesReferences等の完了シグナルが一切発生せず、
+    `_finalize_completed_worktree`の通常経路では永遠に完了検知されない。
+    このラベルを検知した時点で即座に完了とみなし、Issueのクローズ・依存解決・
+    quota解放までをPython側が決定論的に行う（LLMセッションはラベル付与のみ）。
+    """
+    event: dict = {
+        "issue_number": active.issue_number,
+        "worktree_path": active.worktree_path,
+    }
+
+    if worktree_has_uncommitted_changes(active.worktree_path):
+        event["action"] = "completion_skipped_dirty_worktree"
+        return event
+
+    if config.apply:
+        remove_worktree(active.worktree_path)
+        github.remove_label(active.issue_number, "status:in-progress")
+        github.close_issue(
+            active.issue_number,
+            "not planned",
+            comment=(
+                "対応不要（status:not-needed）と判定されたため、"
+                "Orchestuneが自動的にクローズしました。"
+            ),
+        )
+
+    event["action"] = "not_needed"
+    event["subtask_id"] = active_task.subtask_id if active_task else ""
+    return event
+
+
 def _collect_zombies_and_timeouts(
     run_state: RunState,
     tasks_by_issue: dict[int, Task],
