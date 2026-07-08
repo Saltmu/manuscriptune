@@ -47,7 +47,7 @@ class TestIntegrator:
             2, labels=("status:done",), subtask_id="task-2", depends_on=("task-1",)
         )
 
-        def list_side_effect(label):
+        def list_side_effect(label, *args, **kwargs):
             if label == "status:done":
                 return [issue_b, issue_a]
             return [issue_a, issue_b]
@@ -90,7 +90,7 @@ class TestIntegrator:
     ):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
 
-        mock_list.side_effect = lambda label: [issue_a]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
         def run_side_effect(args, **kwargs):
             if "checkout" in args:
@@ -125,7 +125,7 @@ class TestIntegrator:
         self, mock_comment, mock_add, mock_remove, mock_run, mock_list
     ):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
-        mock_list.side_effect = lambda label: [issue_a]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
         def run_side_effect(args, **kwargs):
             if "local-ci.sh" in args[0] or "local-ci.sh" in args:
@@ -155,6 +155,86 @@ class TestIntegrator:
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
+    def test_fetches_branch_with_explicit_refspec_before_merge(
+        self, mock_run, mock_list
+    ):
+        # actions/checkout@v6 のデフォルト（単一ブランチの浅いclone）では
+        # `git fetch origin <branch>`（refspec省略）だけでは
+        # `origin/<branch>` のremote-trackingブランチが作成されないため、
+        # 明示的な refspec 付きでfetchしてからマージする必要がある。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "success"
+
+        fetch_calls = [
+            call for call in mock_run.call_args_list if "fetch" in call.args[0]
+        ]
+        assert len(fetch_calls) == 1
+        assert fetch_calls[0].args[0] == [
+            "git",
+            "fetch",
+            "origin",
+            "claude/issue-1-task-1:refs/remotes/origin/claude/issue-1-task-1",
+        ]
+
+        fetch_index = mock_run.call_args_list.index(fetch_calls[0])
+        merge_index = next(
+            i
+            for i, call in enumerate(mock_run.call_args_list)
+            if "merge" in call.args[0] and "--no-ff" in call.args[0]
+        )
+        assert fetch_index < merge_index
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.remove_label")
+    @patch("src.integrator.github.add_label")
+    @patch("src.integrator.github.add_comment")
+    def test_fetch_failure_is_handled_like_merge_failure(
+        self, mock_comment, mock_add, mock_remove, mock_run, mock_list
+    ):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        def run_side_effect(args, **kwargs):
+            if "fetch" in args:
+                raise subprocess.CalledProcessError(
+                    returncode=1,
+                    cmd=args,
+                    stderr=b"fatal: couldn't find remote ref claude/issue-1-task-1",
+                )
+            return subprocess.CompletedProcess(args=args, returncode=0)
+
+        mock_run.side_effect = run_side_effect
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "failure"
+        assert "task-1" in res["failed"]
+
+        merge_calls = [
+            call
+            for call in mock_run.call_args_list
+            if "merge" in call.args[0] and "--no-ff" in call.args[0]
+        ]
+        assert len(merge_calls) == 0
+
+        mock_remove.assert_called_with(1, "status:done")
+        mock_add.assert_called_with(1, "status:queued")
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
     @patch("src.integrator.github.remove_label")
     @patch("src.integrator.github.add_label")
     @patch("src.integrator.github.add_comment")
@@ -166,7 +246,7 @@ class TestIntegrator:
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         issue_b = _issue(2, labels=("status:done",), subtask_id="task-2")
 
-        mock_list.side_effect = lambda label: [issue_a, issue_b]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a, issue_b]
 
         def run_side_effect(args, **kwargs):
             if "merge" in args and any("claude/issue-1-task-1" in a for a in args):
@@ -208,7 +288,7 @@ class TestIntegrator:
     @patch("src.integrator.subprocess.run")
     def test_ci_flaky_handling(self, mock_run, mock_list):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
-        mock_list.side_effect = lambda label: [issue_a]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
         ci_calls = 0
 
@@ -230,3 +310,32 @@ class TestIntegrator:
         assert res["status"] == "success"
         assert res["merged"] == ["task-1"]
         assert ci_calls == 2
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_integration_with_closed_done_task(self, mock_run, mock_list):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        issue_b = _issue(
+            2, labels=("status:done",), subtask_id="task-2", depends_on=("task-1",)
+        )
+
+        def list_side_effect(label, state="open"):
+            if label == "status:done":
+                if state == "all":
+                    return [issue_a, issue_b]
+                else:
+                    return [issue_b]
+            return []
+
+        mock_list.side_effect = list_side_effect
+
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "success"
+        assert res["merged"] == ["task-1", "task-2"]

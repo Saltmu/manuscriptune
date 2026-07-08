@@ -131,7 +131,7 @@ class Integrator:
                     pass
 
     def _get_sorted_done_tasks(self) -> list[Task]:
-        done_issues = github.list_issues_by_label("status:done")
+        done_issues = github.list_issues_by_label("status:done", state="all")
         if not done_issues:
             return []
 
@@ -143,7 +143,8 @@ class Integrator:
             "status:external-lock",
             "status:done",
         ]:
-            all_issues.extend(github.list_issues_by_label(label))
+            state = "all" if label == "status:done" else "open"
+            all_issues.extend(github.list_issues_by_label(label, state=state))
 
         seen_numbers = set()
         unique_issues = []
@@ -222,6 +223,29 @@ class Integrator:
             )
 
             if self.config.apply:
+                # actions/checkout のデフォルト（単一ブランチの浅いclone）では
+                # `origin/{branch_name}` のremote-trackingブランチが存在しないため、
+                # refspecを明示してfetchしないと後続のmergeが常に
+                # 「not something we can merge」で失敗する（内容衝突ではない）。
+                try:
+                    subprocess.run(
+                        [
+                            "git",
+                            "fetch",
+                            "origin",
+                            f"{branch_name}:refs/remotes/origin/{branch_name}",
+                        ],
+                        cwd=str(self.config.repository_root),
+                        check=True,
+                        capture_output=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    self._handle_failure(
+                        task, f"Failed to fetch branch: {e.stderr.decode()}"
+                    )
+                    failed_tasks.append(task.subtask_id)
+                    continue
+
                 try:
                     subprocess.run(
                         [

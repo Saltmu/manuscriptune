@@ -248,8 +248,8 @@ class TestRunDispatchCycle:
             patch("src.dispatcher.subprocess.run") as mock_subproc_run,
             patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [queued_issue] if label == "status:queued" else []
+            mock_list.side_effect = lambda label, **_: (
+                [queued_issue] if label == "status:queued" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -282,8 +282,8 @@ class TestRunDispatchCycle:
             patch("src.dispatcher.subprocess.run") as mock_subproc_run,
             patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [queued_issue] if label == "status:queued" else []
+            mock_list.side_effect = lambda label, **_: (
+                [queued_issue] if label == "status:queued" else []
             )
             mock_subproc_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
@@ -326,8 +326,8 @@ class TestRunDispatchCycle:
             patch("src.dispatcher.github.list_open_prs", return_value=[]),
             patch("src.dispatcher.is_process_alive", return_value=True),
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [queued_issue] if label == "status:queued" else []
+            mock_list.side_effect = lambda label, **_: (
+                [queued_issue] if label == "status:queued" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -380,8 +380,8 @@ class TestRunDispatchCycleBranchNormalization:
             patch("src.dispatcher.is_process_alive", return_value=True),
             patch("src.dispatcher.check_footprint_deviation", return_value=[]),
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [queued_issue] if label == "status:queued" else []
+            mock_list.side_effect = lambda label, **_: (
+                [queued_issue] if label == "status:queued" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -440,8 +440,8 @@ class TestRunDispatchCycleBranchNormalization:
                 return_value=["src/shared.py"],
             ),
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [queued_issue] if label == "status:queued" else []
+            mock_list.side_effect = lambda label, **_: (
+                [queued_issue] if label == "status:queued" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -517,10 +517,8 @@ class TestRunDispatchCycleFootprintRecompute:
                 "src.dispatch_rebase.notify_recompute", return_value=["body"]
             ) as mock_notify,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [in_progress_issue]
-                if label == "status:in-progress"
-                else []
+            mock_list.side_effect = lambda label, **_: (
+                [in_progress_issue] if label == "status:in-progress" else []
             )
             mock_recompute.return_value = (MagicMock(), [conflict])
 
@@ -587,10 +585,8 @@ class TestRunDispatchCycleFootprintRecompute:
                 "src.dispatch_rebase.notify_recompute", return_value=["dry body"]
             ) as mock_notify,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [in_progress_issue]
-                if label == "status:in-progress"
-                else []
+            mock_list.side_effect = lambda label, **_: (
+                [in_progress_issue] if label == "status:in-progress" else []
             )
             mock_recompute.return_value = (MagicMock(), [conflict])
 
@@ -705,10 +701,8 @@ class TestRunDispatchCycleFootprintRecompute:
                 "src.dispatch_rebase.recompute_dag_for_footprint_change"
             ) as mock_recompute,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [in_progress_issue]
-                if label == "status:in-progress"
-                else []
+            mock_list.side_effect = lambda label, **_: (
+                [in_progress_issue] if label == "status:in-progress" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -801,10 +795,8 @@ class TestRunDispatchCycleCompletion:
             ),
             patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [in_progress_issue]
-                if label == "status:in-progress"
-                else []
+            mock_list.side_effect = lambda label, **_: (
+                [in_progress_issue] if label == "status:in-progress" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -855,10 +847,8 @@ class TestRunDispatchCycleCompletion:
             patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
             patch("src.dispatcher.check_footprint_deviation", return_value=[]),
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [in_progress_issue]
-                if label == "status:in-progress"
-                else []
+            mock_list.side_effect = lambda label, **_: (
+                [in_progress_issue] if label == "status:in-progress" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -891,10 +881,8 @@ class TestRunDispatchCycleCompletion:
             ),
             patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [in_progress_issue]
-                if label == "status:in-progress"
-                else []
+            mock_list.side_effect = lambda label, **_: (
+                [in_progress_issue] if label == "status:in-progress" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -1052,8 +1040,8 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.github.add_label") as mock_add_label,
             patch("src.dispatcher.github.remove_label") as mock_remove_label,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [blocked_issue] if label == "status:blocked" else []
+            mock_list.side_effect = lambda label, **_: (
+                [blocked_issue] if label == "status:blocked" else []
             )
             report = run_dispatch_cycle(config)
 
@@ -1177,8 +1165,8 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.github.remove_label") as mock_remove_label,
             patch("src.dispatcher.github.add_comment") as mock_add_comment,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [issue] if label == "status:queued" else []
+            mock_list.side_effect = lambda label, **_: (
+                [issue] if label == "status:queued" else []
             )
 
             report = run_dispatch_cycle(config)
@@ -1204,8 +1192,8 @@ class TestRunDispatchCycleBlockedPromotion:
             patch("src.dispatcher.github.remove_label") as mock_remove_label,
             patch("src.dispatcher.github.add_comment") as mock_add_comment,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [issue] if label == "status:queued" else []
+            mock_list.side_effect = lambda label, **_: (
+                [issue] if label == "status:queued" else []
             )
             mock_run.side_effect = subprocess.CalledProcessError(
                 returncode=128,
@@ -1308,8 +1296,8 @@ class TestBranchStacking:
             patch("src.dispatcher.github.remove_label") as mock_remove_label,
             patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [blocked_issue]
+            mock_list.side_effect = lambda label, **_: (
+                [blocked_issue]
                 if label == "status:blocked"
                 else [parent_issue]
                 if label == "status:in-progress"
@@ -1379,8 +1367,8 @@ class TestBranchStacking:
             patch("src.dispatcher.github.remove_label"),
             patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [issue_b, issue_c]
+            mock_list.side_effect = lambda label, **_: (
+                [issue_b, issue_c]
                 if label == "status:blocked"
                 else [issue_a]
                 if label == "status:in-progress"
@@ -1550,8 +1538,8 @@ class TestBranchStacking:
             patch("src.dispatcher.github.remove_label"),
             patch("src.dispatcher.create_worktree_and_launch") as mock_launch,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [issue_c]
+            mock_list.side_effect = lambda label, **_: (
+                [issue_c]
                 if label == "status:blocked"
                 else [issue_a, issue_b]
                 if label == "status:in-progress"
@@ -1594,9 +1582,9 @@ class TestBranchStacking:
         with (
             patch(
                 "src.dispatcher.github.list_issues_by_label",
-                side_effect=lambda label, **_: [issue_a, issue_b]
-                if label == "status:in-progress"
-                else [],
+                side_effect=lambda label, **_: (
+                    [issue_a, issue_b] if label == "status:in-progress" else []
+                ),
             ),
             patch(
                 "src.dispatcher.github.list_remote_branches",
@@ -1650,6 +1638,82 @@ class TestBranchStacking:
         loaded = load_run_state(config.run_state_path)
         assert "2" not in loaded.active_worktrees
 
+    def test_changes_requested_escalation(self, tmp_path):
+        config = DispatcherConfig(
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+        )
+        # BはAに依存。AはPR状態(CHANGES_REQUESTED)、Bは実行中（active_worktrees）
+        issue_a = _issue(1, labels=("status:in-progress",), subtask_id="task-1")
+        issue_b = _issue(
+            2,
+            labels=("status:in-progress",),
+            subtask_id="task-2",
+            depends_on=("task-1",),
+        )
+
+        run_state = RunState(
+            active_worktrees={
+                "2": ActiveWorktree(
+                    issue_number=2,
+                    branch="claude/issue-2-task-2",
+                    worktree_path=str(tmp_path / "worktrees/claude-issue-2-task-2"),
+                    pid=12345,
+                    started_at=1700000000.0,
+                    declared_footprint=(),
+                )
+            }
+        )
+        save_run_state(run_state, config.run_state_path)
+
+        with (
+            patch(
+                "src.dispatcher.github.list_issues_by_label",
+                side_effect=lambda label, **_: (
+                    [issue_a, issue_b] if label == "status:in-progress" else []
+                ),
+            ),
+            patch(
+                "src.dispatcher.github.list_remote_branches",
+                return_value=["origin/claude/issue-1-task-1"],
+            ),
+            patch(
+                "src.dispatcher.github.list_open_prs",
+                return_value=[
+                    PrRecord(
+                        number=10,
+                        head_ref="claude/issue-1-task-1",
+                        changed_files=(),
+                        review_decision="CHANGES_REQUESTED",  # ここがポイント
+                        is_ci_passing=True,
+                    )
+                ],
+            ),
+            patch("src.dispatcher.is_process_alive", return_value=True),
+            patch("src.dispatcher.check_footprint_deviation", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.add_comment") as mock_add_comment,
+            patch("src.dispatcher.os.kill") as mock_kill,
+            patch("src.dispatcher.subprocess.run"),
+        ):
+            run_dispatch_cycle(config)
+
+        # プロセスがkillされたこと
+        mock_kill.assert_called_with(12345, 9)
+
+        # エスカレーションラベル付与
+        mock_remove_label.assert_any_call(2, "status:in-progress")
+        mock_add_label.assert_any_call(2, "status:blocked-human-review")
+        mock_add_comment.assert_called_once()
+        assert "一時停止" in mock_add_comment.call_args[0][1]
+
+        # active_worktrees から除外されたこと
+        loaded = load_run_state(config.run_state_path)
+        assert "2" not in loaded.active_worktrees
+
 
 class TestGC:
     def test_gc_reclaim_zombie(self, tmp_path):
@@ -1694,8 +1758,8 @@ class TestGC:
             patch("src.dispatch_gc.remove_worktree") as mock_remove_wt,
             patch("src.dispatcher.subprocess.run") as mock_run,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [issue_a] if label == "status:in-progress" else []
+            mock_list.side_effect = lambda label, **_: (
+                [issue_a] if label == "status:in-progress" else []
             )
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout=""
@@ -1757,8 +1821,8 @@ class TestGC:
             patch("src.dispatch_gc.remove_worktree") as mock_remove_wt,
             patch("src.dispatcher.subprocess.run") as mock_run,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [issue_a] if label == "status:in-progress" else []
+            mock_list.side_effect = lambda label, **_: (
+                [issue_a] if label == "status:in-progress" else []
             )
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout=""
@@ -1814,8 +1878,8 @@ class TestGC:
             patch("src.dispatch_gc.remove_worktree") as mock_remove_wt,
             patch("src.dispatcher.subprocess.run") as mock_run,
         ):
-            mock_list.side_effect = (
-                lambda label, **_: [issue_a] if label == "status:in-progress" else []
+            mock_list.side_effect = lambda label, **_: (
+                [issue_a] if label == "status:in-progress" else []
             )
             mock_run.side_effect = subprocess.CalledProcessError(
                 returncode=1,
@@ -1836,3 +1900,123 @@ class TestGC:
 
         loaded = load_run_state(config.run_state_path)
         assert "1" in loaded.active_worktrees
+
+
+class TestLaunchOrderingCrashSafety:
+    """run_stateへの登録とGitHubラベル更新の順序を入れ替え、クラッシュ時に
+    「GitHub側は確定・run_state側は空」という検出不能な非対称が起きないようにする。"""
+
+    def test_run_state_is_persisted_before_label_transition_and_survives_crash(
+        self, tmp_path
+    ):
+        config = DispatcherConfig(
+            max_concurrent=2,
+            max_launches_per_window=2,
+            window_seconds=3600,
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            events_log_path=tmp_path / "events.jsonl",
+            apply=True,
+        )
+        queued_issue = _issue(1)
+
+        def remove_label_side_effect(issue_number, label):
+            if label == "status:queued":
+                raise RuntimeError("simulated crash during label transition")
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch(
+                "src.dispatcher.github.remove_label",
+                side_effect=remove_label_side_effect,
+            ),
+            patch("src.dispatcher.subprocess.run") as mock_subproc_run,
+            patch("src.dispatch_targets.subprocess.Popen") as mock_popen,
+        ):
+            mock_list.side_effect = lambda label, **_: (
+                [queued_issue] if label == "status:queued" else []
+            )
+            mock_subproc_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+            mock_popen.return_value.pid = 555
+
+            with pytest.raises(RuntimeError, match="simulated crash"):
+                run_dispatch_cycle(config)
+
+        # ラベル遷移（status:in-progress付与）はクラッシュにより行われていない。
+        mock_add_label.assert_not_called()
+
+        # しかし、run_state.json にはactive_worktreeエントリが既に永続化されている
+        # （ラベル更新より前にsave_run_stateが呼ばれる順序になっているため）。
+        assert (tmp_path / "run_state.json").exists()
+        persisted = json.loads((tmp_path / "run_state.json").read_text())
+        assert "1" in persisted["active_worktrees"]
+
+
+class TestStaleActiveEntryReconciliation:
+    """run_stateにエントリが残っているが、GitHub側のラベルが実際には
+    status:in-progressになっていない（起動直後のクラッシュ等による）場合、
+    run_state側を破棄してGitHubラベルを正とする（ゾンビGCの拡張）。"""
+
+    def test_stale_entry_without_in_progress_label_is_discarded(self, tmp_path):
+        run_state_path = tmp_path / "run_state.json"
+        save_run_state(
+            RunState(
+                active_worktrees={
+                    "1": ActiveWorktree(
+                        issue_number=1,
+                        branch="claude/issue-1-task-a",
+                        worktree_path=str(tmp_path / "w1"),
+                        pid=111,
+                        started_at=1_699_999_000.0,
+                        declared_footprint=("src/foo.py",),
+                    )
+                },
+                launch_history=[],
+            ),
+            run_state_path,
+        )
+        config = DispatcherConfig(
+            max_concurrent=0,
+            max_launches_per_window=0,
+            window_seconds=3600,
+            run_state_path=run_state_path,
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            events_log_path=tmp_path / "events.jsonl",
+            apply=True,
+        )
+        # 起動処理自体はcreate_worktree_and_launch成功後の何らかの時点で
+        # クラッシュしており、GitHub側のラベルは "status:queued" のまま
+        # （status:in-progressへの遷移は未完了）という状況を再現する。
+        queued_issue = _issue(1, labels=("status:queued",), subtask_id="task-1")
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+        ):
+            mock_list.side_effect = lambda label, **_: (
+                [queued_issue] if label == "status:queued" else []
+            )
+            report = run_dispatch_cycle(config)
+
+        # GC/完了検知としてはラベルに一切触らない（GitHub側は既にqueuedのまま
+        # で正しいため、ここでラベル操作をしてはいけない）。
+        mock_add_label.assert_not_called()
+        mock_remove_label.assert_not_called()
+
+        assert any(
+            event.get("action") == "stale_active_entry_discarded"
+            for event in report.completion_events
+        )
+
+        loaded = load_run_state(run_state_path)
+        assert "1" not in loaded.active_worktrees

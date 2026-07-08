@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import dataclasses
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -223,11 +224,12 @@ def append_event_log(entry: dict, path: str | Path) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def _process_active_worktrees(
+def _process_active_worktrees(  # noqa: C901
     run_state: RunState,
     tasks_by_issue: dict[int, Task],
     issue_number_by_subtask_id: dict[str, int],
     ci_passed_pr_subtask_ids: set[str],
+    changes_requested_subtask_ids: set[str],
     subtask_branch_map: dict[str, str],
     config: DispatcherConfig,
 ) -> tuple[list[dict], list[dict], bool, set[str]]:
@@ -242,10 +244,36 @@ def _process_active_worktrees(
     completed_subtask_ids: set[str] = set()
 
     for key, active in list(run_state.active_worktrees.items()):
+        active_task = tasks_by_issue.get(active.issue_number)
+
+        if (
+            active_task is not None
+            and "status:in-progress" not in active_task.status_labels
+        ):
+            # run_stateへの登録(save_run_state)は起動成功直後に、GitHubラベルの
+            # status:in-progress付与はその後に行う順序になっているため、この間で
+            # クラッシュした場合（あるいは完了/エスカレーション処理でラベルだけ
+            # 先に更新されてクラッシュした場合）、GitHub側のラベルは
+            # status:in-progressでなくなっているのにrun_state側にだけ古い
+            # エントリが残ることがある。GitHubラベルを正として、この古い帳簿
+            # エントリを破棄する（ゾンビGCの拡張）。
+            completion_events.append(
+                {
+                    "issue_number": active.issue_number,
+                    "subtask_id": active_task.subtask_id,
+                    "action": "stale_active_entry_discarded",
+                    "reason": (
+                        "issue label is no longer status:in-progress "
+                        f"(labels={sorted(active_task.status_labels)})"
+                    ),
+                }
+            )
+            if config.apply:
+                del run_state.active_worktrees[key]
+            continue
+
         if active.forced_serial:
             any_forced_serial = True
-
-        active_task = tasks_by_issue.get(active.issue_number)
 
         if _is_worktree_complete(active, config):
             completion_event = _finalize_completed_worktree(active, active_task, config)
@@ -266,6 +294,33 @@ def _process_active_worktrees(
                         )
                     )
                     del run_state.active_worktrees[key]
+                continue
+
+        # 自動リベースや逸脱判定の前に、CHANGES_REQUESTED になった親を持つかチェックする (#185)
+        if active_task and active_task.depends_on:
+            if any(
+                dep in changes_requested_subtask_ids for dep in active_task.depends_on
+            ):
+                if config.apply:
+                    if active.pid:
+                        try:
+                            os.kill(active.pid, 9)
+                        except OSError:
+                            pass
+                    github.remove_label(active.issue_number, "status:in-progress")
+                    github.add_label(active.issue_number, "status:blocked-human-review")
+                    github.add_comment(
+                        active.issue_number,
+                        "依存元PRが変更要求（Request Changes）を受けたため、スタックされたタスクを一時停止しました。",
+                    )
+                    del run_state.active_worktrees[key]
+                completion_events.append(
+                    {
+                        "issue_number": active.issue_number,
+                        "subtask_id": active_task.subtask_id,
+                        "action": "escalated_due_to_changes_requested",
+                    }
+                )
                 continue
 
         # 自動リベース判定＆実行 (#201)
@@ -426,6 +481,7 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
 
         pr_by_branch = {pr.head_ref: pr for pr in prs}
         ci_passed_pr_subtask_ids = set()
+        changes_requested_subtask_ids = set()
         subtask_branch_map = {}
 
         for task in tasks_by_issue.values():
@@ -435,8 +491,11 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             subtask_branch_map[task.subtask_id] = branch_name
 
             pr = pr_by_branch.get(branch_name)
-            if pr and pr.is_ci_passing and pr.review_decision != "CHANGES_REQUESTED":
-                ci_passed_pr_subtask_ids.add(task.subtask_id)
+            if pr:
+                if pr.review_decision == "CHANGES_REQUESTED":
+                    changes_requested_subtask_ids.add(task.subtask_id)
+                elif pr.is_ci_passing:
+                    ci_passed_pr_subtask_ids.add(task.subtask_id)
 
         (
             completion_events,
@@ -448,6 +507,7 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             tasks_by_issue,
             issue_number_by_subtask_id,
             ci_passed_pr_subtask_ids,
+            changes_requested_subtask_ids,
             subtask_branch_map,
             config,
         )
@@ -660,11 +720,12 @@ def _launch_selected_tasks(
             )
             continue
 
-        if "status:queued" in task.status_labels:
-            github.remove_label(task.issue_number, "status:queued")
-        if "status:blocked" in task.status_labels:
-            github.remove_label(task.issue_number, "status:blocked")
-        github.add_label(task.issue_number, "status:in-progress")
+        # run_stateへの登録・永続化を先に行い、GitHubラベルの更新は後で行う。
+        # 起動(create_worktree_and_launch)は既に成功しているため、この順序なら
+        # この後でクラッシュしても「run_stateには記録済みだがGitHubラベルは
+        # まだstatus:queuedのまま」という、次回サイクルの冒頭でラベルを見て
+        # 機械的に検出・破棄できる非対称にしかならない（逆順だと「GitHub側は
+        # 確定・run_state側は空」という検出不能な非対称になってしまう）。
         run_state.active_worktrees[str(task.issue_number)] = ActiveWorktree(
             issue_number=task.issue_number,
             branch=branch_name,
@@ -676,6 +737,13 @@ def _launch_selected_tasks(
             external_url=launch.external_url,
         )
         run_state.launch_history.append(now)
+        save_run_state(run_state, config.run_state_path)
+
+        if "status:queued" in task.status_labels:
+            github.remove_label(task.issue_number, "status:queued")
+        if "status:blocked" in task.status_labels:
+            github.remove_label(task.issue_number, "status:blocked")
+        github.add_label(task.issue_number, "status:in-progress")
         actually_selected.append(task)
 
     save_run_state(run_state, config.run_state_path)
