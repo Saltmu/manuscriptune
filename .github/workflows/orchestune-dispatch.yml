@@ -36,6 +36,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Configure git identity
+        # dispatch-cycle経由でIntegratorがgit merge --no-ffでコミットを作成するため、
+        # それより前にidentityを設定しておく必要がある（未設定だと
+        # "Committer identity unknown" でmergeが失敗し、Merge conflictと誤診断される）。
+        run: |
+          git config user.name "orchestune-bot"
+          git config user.email "orchestune-bot@users.noreply.github.com"
+
       - name: Restore state files from state branch
         run: |
           if git ls-remote --exit-code --heads origin "$STATE_BRANCH" > /dev/null 2>&1; then
@@ -96,9 +104,6 @@ jobs:
       - name: Persist state files to state branch
         if: always()
         run: |
-          git config user.name "orchestune-bot"
-          git config user.email "orchestune-bot@users.noreply.github.com"
-
           STATE_DIR=$(mktemp -d)
           cp "$RUN_STATE_PATH" "$STATE_DIR/$RUN_STATE_PATH"
           cp "$EVENTS_LOG_PATH" "$STATE_DIR/$EVENTS_LOG_PATH"
