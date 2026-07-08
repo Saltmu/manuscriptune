@@ -8,11 +8,16 @@ from src.dispatch_targets import (
 )
 from src.integration_coordinator import (
     FAILED_LABEL,
+    NOT_NEEDED_REJECTED_LABEL,
+    NOT_NEEDED_VERIFIED_LABEL,
     PASSED_LABEL,
     IntegrationCoordinator,
     build_integration_coordinator,
+    build_not_needed_review_prompt,
     build_review_routine_prompt,
+    process_pending_not_needed_reviews,
     process_pending_reviews,
+    record_pending_not_needed_review,
     record_pending_review,
 )
 from src.integration_review_state import (
@@ -21,6 +26,12 @@ from src.integration_review_state import (
     PendingSubtaskMerge,
     load_integration_review_state,
     save_integration_review_state,
+)
+from src.not_needed_review_state import (
+    NotNeededReviewState,
+    PendingNotNeededReview,
+    load_not_needed_review_state,
+    save_not_needed_review_state,
 )
 
 
@@ -318,3 +329,168 @@ class TestBuildIntegrationCoordinator:
         coord = build_integration_coordinator()
         assert isinstance(coord, IntegrationCoordinator)
         assert isinstance(coord._routine_firer, ClaudeCodeCloudRoutineDispatchTarget)
+
+
+class TestBuildNotNeededReviewPrompt:
+    """#282: status:not-needed判定を独立検証させるプロンプト。"""
+
+    def test_contains_issue_number_and_subtask(self):
+        prompt = build_not_needed_review_prompt(250, "plot-api-routes")
+        assert "#250" in prompt
+        assert "plot-api-routes" in prompt
+
+    def test_instructs_verified_label_without_closing(self):
+        prompt = build_not_needed_review_prompt(250, "plot-api-routes")
+        assert NOT_NEEDED_VERIFIED_LABEL in prompt
+        # Issueクローズ自体はPython側の責務であり、レビューセッションは
+        # 明示的に禁止されている（既存の意味的レビューがgh pr mergeを禁じるのと同型）。
+        assert "gh issue close" in prompt
+        assert "絶対に実行しないでください" in prompt
+
+    def test_instructs_rejection_requeues_and_comments(self):
+        prompt = build_not_needed_review_prompt(250, "plot-api-routes")
+        assert NOT_NEEDED_REJECTED_LABEL in prompt
+        assert "status:queued" in prompt
+        assert "status:not-needed" in prompt
+
+    def test_does_not_carry_prior_findings(self):
+        prompt = build_not_needed_review_prompt(250, "plot-api-routes")
+        assert "前回のレビュー内容は与えられていません" in prompt
+
+
+class TestIntegrationCoordinatorDispatchNotNeededReview:
+    def test_fires_routine_with_prompt_and_returns_handle(self):
+        handle = DispatchHandle(
+            external_id="sess-1", external_url="https://claude.ai/code/s/sess-1"
+        )
+        firer = _FakeFirer(handle)
+        coord = IntegrationCoordinator(firer)
+
+        result = coord.dispatch_not_needed_review(250, "plot-api-routes")
+
+        assert result is handle
+        assert len(firer.fired) == 1
+        assert "#250" in firer.fired[0]
+        assert "plot-api-routes" in firer.fired[0]
+
+
+class TestRecordPendingNotNeededReview:
+    def test_appends_pending_entry_with_session_handle(self, tmp_path):
+        path = tmp_path / "state.json"
+        handle = DispatchHandle(
+            external_id="sess-1", external_url="https://claude.ai/code/s/sess-1"
+        )
+        record_pending_not_needed_review(
+            path,
+            issue_number=250,
+            subtask_id="plot-api-routes",
+            session_handle=handle,
+        )
+
+        state = load_not_needed_review_state(path)
+        assert len(state.pending) == 1
+        entry = state.pending[0]
+        assert entry.issue_number == 250
+        assert entry.subtask_id == "plot-api-routes"
+        assert entry.session_external_id == "sess-1"
+
+    def test_appends_without_clobbering_existing_pending_entries(self, tmp_path):
+        path = tmp_path / "state.json"
+        record_pending_not_needed_review(
+            path, issue_number=1, subtask_id="a", session_handle=DispatchHandle()
+        )
+        record_pending_not_needed_review(
+            path, issue_number=2, subtask_id="b", session_handle=DispatchHandle()
+        )
+        state = load_not_needed_review_state(path)
+        assert len(state.pending) == 2
+
+
+class TestProcessPendingNotNeededReviews:
+    def _state_with(self, *entries: PendingNotNeededReview, path):
+        save_not_needed_review_state(NotNeededReviewState(pending=list(entries)), path)
+
+    @patch("src.integration_coordinator.github.get_issue_labels")
+    def test_no_pending_reviews_is_a_noop(self, mock_labels, tmp_path):
+        path = tmp_path / "state.json"
+        result = process_pending_not_needed_reviews(path)
+        assert result == {"closed": [], "reopened": [], "still_pending": 0}
+        mock_labels.assert_not_called()
+
+    @patch("src.integration_coordinator.github.close_issue")
+    @patch("src.integration_coordinator.github.remove_label")
+    @patch("src.integration_coordinator.github.get_issue_labels")
+    def test_verified_label_closes_issue_and_mentions_human(
+        self, mock_labels, mock_remove, mock_close, tmp_path
+    ):
+        path = tmp_path / "state.json"
+        self._state_with(
+            PendingNotNeededReview(
+                issue_number=250, subtask_id="plot-api-routes", dispatched_at=1.0
+            ),
+            path=path,
+        )
+        mock_labels.return_value = (NOT_NEEDED_VERIFIED_LABEL,)
+
+        result = process_pending_not_needed_reviews(path)
+
+        mock_remove.assert_called_once_with(250, NOT_NEEDED_VERIFIED_LABEL)
+        mock_close.assert_called_once()
+        close_args = mock_close.call_args.args
+        close_kwargs = mock_close.call_args.kwargs
+        assert close_args[0] == 250
+        assert close_args[1] == "not planned"
+        assert "@Saltmu" in close_kwargs["comment"]
+        assert result["closed"] == [250]
+        assert result["still_pending"] == 0
+        assert load_not_needed_review_state(path).pending == []
+
+    @patch("src.integration_coordinator.github.close_issue")
+    @patch("src.integration_coordinator.github.remove_label")
+    @patch("src.integration_coordinator.github.get_issue_labels")
+    def test_rejected_label_clears_without_closing(
+        self, mock_labels, mock_remove, mock_close, tmp_path
+    ):
+        path = tmp_path / "state.json"
+        self._state_with(
+            PendingNotNeededReview(
+                issue_number=250, subtask_id="plot-api-routes", dispatched_at=1.0
+            ),
+            path=path,
+        )
+        mock_labels.return_value = (NOT_NEEDED_REJECTED_LABEL,)
+
+        result = process_pending_not_needed_reviews(path)
+
+        mock_close.assert_not_called()
+        mock_remove.assert_called_once_with(250, NOT_NEEDED_REJECTED_LABEL)
+        assert result["reopened"] == [250]
+        assert load_not_needed_review_state(path).pending == []
+
+    @patch("src.integration_coordinator.github.get_issue_labels")
+    def test_neither_label_present_keeps_entry_pending(self, mock_labels, tmp_path):
+        path = tmp_path / "state.json"
+        entry = PendingNotNeededReview(
+            issue_number=250, subtask_id="plot-api-routes", dispatched_at=1.0
+        )
+        self._state_with(entry, path=path)
+        mock_labels.return_value = ("status:not-needed",)
+
+        result = process_pending_not_needed_reviews(path)
+
+        assert result["still_pending"] == 1
+        assert load_not_needed_review_state(path).pending == [entry]
+
+    @patch("src.integration_coordinator.github.get_issue_labels")
+    def test_label_polling_failure_keeps_entry_pending(self, mock_labels, tmp_path):
+        path = tmp_path / "state.json"
+        entry = PendingNotNeededReview(
+            issue_number=250, subtask_id="plot-api-routes", dispatched_at=1.0
+        )
+        self._state_with(entry, path=path)
+        mock_labels.side_effect = RuntimeError("gh api error")
+
+        result = process_pending_not_needed_reviews(path)
+
+        assert result["still_pending"] == 1
+        assert load_not_needed_review_state(path).pending == [entry]

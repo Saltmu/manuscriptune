@@ -42,9 +42,23 @@ from src.integration_review_state import (
     load_integration_review_state,
     save_integration_review_state,
 )
+from src.not_needed_review_state import (
+    NotNeededReviewState,
+    PendingNotNeededReview,
+    load_not_needed_review_state,
+    save_not_needed_review_state,
+)
 
 PASSED_LABEL = "semantic-review:passed"
 FAILED_LABEL = "semantic-review:failed"
+
+# #282: status:not-needed判定の独立検証結果ラベル。
+NOT_NEEDED_VERIFIED_LABEL = "not-needed-review:passed"
+NOT_NEEDED_REJECTED_LABEL = "not-needed-review:failed"
+
+# #282: 対応不要判定によるクローズ時、事後の可視性確保のためメンションする、
+# 本リポジトリの唯一のメンテナー。
+NOT_NEEDED_ATTENTION_MENTION = "@Saltmu"
 
 
 class RoutineFirer(Protocol):
@@ -94,6 +108,40 @@ def build_review_routine_prompt(
     )
 
 
+def build_not_needed_review_prompt(issue_number: int, subtask_id: str) -> str:
+    """#282: `status:not-needed`（対応不要）判定を独立に検証させるための
+    ルーチン指示テキストを構築する。
+
+    再レビュー時のバイアス回避のため、判定を行った側の主張以外の事前情報は
+    与えず、新規セッションが自らIssue・コメント・`main`を確認して判断する。
+    """
+    return (
+        "あなたは、別のセッションが「対応不要（既に要件を満たしている）」と"
+        f"判定したGitHub Issue #{issue_number}（サブタスク: {subtask_id}）を"
+        "独立に検証するレビュアーです。\n\n"
+        "手順:\n"
+        f"1. `gh issue view {issue_number} --comments` でIssue本文と、"
+        "「対応不要」と判定した根拠のコメントを確認する。\n"
+        "2. その根拠が正しいか、`main`ブランチの実際のコード・テストを確認して"
+        "独立に検証する（該当コミット・ファイルが本当に存在し、要件を満たしているか）。\n"
+        "3. 判定に応じて次のいずれかをGitHub上で実施する:\n"
+        f"   - 根拠が妥当（本当に対応不要） → Issue #{issue_number} に "
+        f"`{NOT_NEEDED_VERIFIED_LABEL}` ラベルのみを付与する"
+        f'（`gh issue edit {issue_number} --add-label "{NOT_NEEDED_VERIFIED_LABEL}"`）。'
+        "Issueのクローズは行わない（クローズは別のシステムが責任を持って行う）。\n"
+        f"   - 根拠が不当（実際にはまだ対応が必要） → Issue #{issue_number} の"
+        "ラベルを`status:not-needed`から`status:queued`へ付け替え、なぜ対応不要と"
+        f"言えないのかを具体的にコメントする。あわせて`{NOT_NEEDED_REJECTED_LABEL}`"
+        "ラベルを付与する。\n"
+        "**重要な制約**: あなたはラベル付与・コメント・（不当時の）ラベル付け替えのみを"
+        "行ってください。Issueのクローズ（`gh issue close`等）は絶対に実行しないで"
+        "ください。実際のクローズは、あなたが付与したラベルを検知した別のシステムが"
+        "責任を持って行います。\n"
+        "前回のレビュー内容は与えられていません。今回自分で確認した内容だけを"
+        "根拠に判断してください。"
+    )
+
+
 class IntegrationCoordinator:
     """dispatcherと同一のルーチンを起動して意味的レビューを委譲する。
 
@@ -118,6 +166,13 @@ class IntegrationCoordinator:
             parent_issue_number=parent_issue_number,
             merged_subtask_ids=merged_subtask_ids,
         )
+        return self._routine_firer.fire_text(prompt)
+
+    def dispatch_not_needed_review(
+        self, issue_number: int, subtask_id: str
+    ) -> DispatchHandle:
+        """#282: `status:not-needed`判定を独立に検証するレビューをfireする。"""
+        prompt = build_not_needed_review_prompt(issue_number, subtask_id)
         return self._routine_firer.fire_text(prompt)
 
 
@@ -236,3 +291,85 @@ def record_pending_review(
         )
     )
     save_integration_review_state(state, state_path)
+
+
+def record_pending_not_needed_review(
+    state_path: str | Path,
+    issue_number: int,
+    subtask_id: str,
+    session_handle: DispatchHandle,
+) -> None:
+    """#282: `dispatch_not_needed_review`直後に呼び、後続サイクルでの
+    ポーリング対象として記録する。"""
+    state = load_not_needed_review_state(state_path)
+    state.pending.append(
+        PendingNotNeededReview(
+            issue_number=issue_number,
+            subtask_id=subtask_id,
+            dispatched_at=time.time(),
+            session_external_id=session_handle.external_id,
+            session_external_url=session_handle.external_url,
+        )
+    )
+    save_not_needed_review_state(state, state_path)
+
+
+def process_pending_not_needed_reviews(state_path: str | Path) -> dict:
+    """#282: 保留中の`status:not-needed`検証レビューをポーリングし、検証に通った
+    ものはIssueを決定論的にクローズする。レビューセッション自身はクローズを
+    実行しないため、この関数が「クローズしても問題ないものを実際にクローズする」
+    実行主体を担う。
+
+    - `not-needed-review:passed` を検知 → Issueをクローズし、人間へメンションした
+      コメントを残す（事後の可視性確保）。ラベルを外して記録を消費する。
+    - `not-needed-review:failed` を検知 → `status:queued`への差し戻しは既に
+      レビューセッション自身が行っているため、Python側はラベルを外して記録を
+      消費するのみ。
+    - どちらのラベルもまだ無ければ、記録はそのまま保持し次サイクルで再確認する。
+    """
+    state = load_not_needed_review_state(state_path)
+    if not state.pending:
+        return {"closed": [], "reopened": [], "still_pending": 0}
+
+    still_pending: list[PendingNotNeededReview] = []
+    closed_summary: list[int] = []
+    reopened_summary: list[int] = []
+
+    for entry in state.pending:
+        try:
+            labels = github.get_issue_labels(entry.issue_number)
+        except Exception as exc:  # noqa: BLE001 - GitHub障害でクラッシュさせない
+            print(
+                f"Warning: failed to poll labels for issue "
+                f"{entry.issue_number}: {exc}",
+                file=sys.stderr,
+            )
+            still_pending.append(entry)
+            continue
+
+        if NOT_NEEDED_VERIFIED_LABEL in labels:
+            github.remove_label(entry.issue_number, NOT_NEEDED_VERIFIED_LABEL)
+            github.close_issue(
+                entry.issue_number,
+                "not planned",
+                comment=(
+                    f"{NOT_NEEDED_ATTENTION_MENTION} "
+                    "独立したレビューセッションでも対応不要と確認できたため、"
+                    "自動的にクローズしました。誤りであれば再オープンしてください。"
+                ),
+            )
+            closed_summary.append(entry.issue_number)
+        elif NOT_NEEDED_REJECTED_LABEL in labels:
+            github.remove_label(entry.issue_number, NOT_NEEDED_REJECTED_LABEL)
+            reopened_summary.append(entry.issue_number)
+        else:
+            still_pending.append(entry)
+
+    save_not_needed_review_state(
+        NotNeededReviewState(pending=still_pending), state_path
+    )
+    return {
+        "closed": closed_summary,
+        "reopened": reopened_summary,
+        "still_pending": len(still_pending),
+    }
