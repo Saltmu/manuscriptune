@@ -47,7 +47,7 @@ class TestIntegrator:
             2, labels=("status:done",), subtask_id="task-2", depends_on=("task-1",)
         )
 
-        def list_side_effect(label):
+        def list_side_effect(label, *args, **kwargs):
             if label == "status:done":
                 return [issue_b, issue_a]
             return [issue_a, issue_b]
@@ -90,7 +90,7 @@ class TestIntegrator:
     ):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
 
-        mock_list.side_effect = lambda label: [issue_a]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
         def run_side_effect(args, **kwargs):
             if "checkout" in args:
@@ -125,7 +125,7 @@ class TestIntegrator:
         self, mock_comment, mock_add, mock_remove, mock_run, mock_list
     ):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
-        mock_list.side_effect = lambda label: [issue_a]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
         def run_side_effect(args, **kwargs):
             if "local-ci.sh" in args[0] or "local-ci.sh" in args:
@@ -163,7 +163,7 @@ class TestIntegrator:
         # `origin/<branch>` のremote-trackingブランチが作成されないため、
         # 明示的な refspec 付きでfetchしてからマージする必要がある。
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
-        mock_list.side_effect = lambda label: [issue_a]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=b"", stderr=b""
@@ -203,7 +203,7 @@ class TestIntegrator:
         self, mock_comment, mock_add, mock_remove, mock_run, mock_list
     ):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
-        mock_list.side_effect = lambda label: [issue_a]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
         def run_side_effect(args, **kwargs):
             if "fetch" in args:
@@ -246,7 +246,7 @@ class TestIntegrator:
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         issue_b = _issue(2, labels=("status:done",), subtask_id="task-2")
 
-        mock_list.side_effect = lambda label: [issue_a, issue_b]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a, issue_b]
 
         def run_side_effect(args, **kwargs):
             if "merge" in args and any("claude/issue-1-task-1" in a for a in args):
@@ -288,7 +288,7 @@ class TestIntegrator:
     @patch("src.integrator.subprocess.run")
     def test_ci_flaky_handling(self, mock_run, mock_list):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
-        mock_list.side_effect = lambda label: [issue_a]
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
         ci_calls = 0
 
@@ -310,3 +310,32 @@ class TestIntegrator:
         assert res["status"] == "success"
         assert res["merged"] == ["task-1"]
         assert ci_calls == 2
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_integration_with_closed_done_task(self, mock_run, mock_list):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        issue_b = _issue(
+            2, labels=("status:done",), subtask_id="task-2", depends_on=("task-1",)
+        )
+
+        def list_side_effect(label, state="open"):
+            if label == "status:done":
+                if state == "all":
+                    return [issue_a, issue_b]
+                else:
+                    return [issue_b]
+            return []
+
+        mock_list.side_effect = list_side_effect
+
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "success"
+        assert res["merged"] == ["task-1", "task-2"]
