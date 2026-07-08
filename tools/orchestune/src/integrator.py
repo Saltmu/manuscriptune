@@ -237,6 +237,7 @@ class Integrator:
                         capture_output=True,
                     )
                 except subprocess.CalledProcessError as e:
+                    self._abort_merge()
                     self._handle_failure(task, f"Merge conflict: {e.stderr.decode()}")
                     failed_tasks.append(task.subtask_id)
                     continue
@@ -256,6 +257,19 @@ class Integrator:
             merged_tasks.append(task.subtask_id)
 
         return merged_tasks, failed_tasks
+
+    def _abort_merge(self) -> None:
+        # マージ失敗時にMERGE_HEADを残したままにすると、後続タスクのマージが
+        # 「進行中の未完了マージがある」ために巻き添えで失敗してしまうため、
+        # 一時ブランチの直前の状態へ確実に戻す。
+        try:
+            subprocess.run(
+                ["git", "merge", "--abort"],
+                cwd=str(self.config.repository_root),
+                capture_output=True,
+            )
+        except (subprocess.CalledProcessError, OSError):
+            pass
 
     def _run_ci_with_flaky_check(self) -> bool:
         ci_cmd = self.config.ci_command or ["./scripts/local-ci.sh"]
