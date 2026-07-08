@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import urllib.error
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
 from src.integration_coordinator import (
+    AnthropicApiReviewer,
     IntegrationCoordinator,
     SemanticFinding,
     SubprocessReviewer,
@@ -219,9 +222,88 @@ class TestSubprocessReviewer:
         assert mock_sleep.call_count == 2
 
 
+def _http_response(payload: dict):
+    return BytesIO(json.dumps(payload).encode("utf-8"))
+
+
+class TestAnthropicApiReviewer:
+    @patch("src.integration_coordinator.urllib.request.urlopen")
+    def test_extracts_text_from_content_blocks(self, mock_urlopen):
+        mock_urlopen.return_value.__enter__.return_value = _http_response(
+            {
+                "content": [
+                    {"type": "thinking", "text": ""},
+                    {"type": "text", "text": '{"passed": '},
+                    {"type": "text", "text": "true}"},
+                ]
+            }
+        )
+        reviewer = AnthropicApiReviewer(api_key="sk-test")
+        assert reviewer("prompt") == '{"passed": true}'
+
+    @patch("src.integration_coordinator.urllib.request.urlopen")
+    def test_sends_opus_model_and_no_sampling_params(self, mock_urlopen):
+        mock_urlopen.return_value.__enter__.return_value = _http_response(
+            {"content": [{"type": "text", "text": "{}"}]}
+        )
+        reviewer = AnthropicApiReviewer(api_key="sk-test")
+        reviewer("prompt")
+        request = mock_urlopen.call_args.args[0]
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["model"] == "claude-opus-4-8"
+        assert body["output_config"] == {"effort": "high"}
+        # Opus 4.8 は temperature 等を受け付けない（送ると400）ため含めない
+        assert "temperature" not in body
+        assert "top_p" not in body
+        assert "thinking" not in body
+        # 認証・バージョンヘッダが付与される
+        assert request.headers["X-api-key"] == "sk-test"
+        assert request.headers["Anthropic-version"] == "2023-06-01"
+
+    @patch("src.integration_coordinator.time.sleep")
+    @patch("src.integration_coordinator.urllib.request.urlopen")
+    def test_retries_on_429_then_succeeds(self, mock_urlopen, mock_sleep):
+        err = urllib.error.HTTPError(
+            url="x", code=429, msg="rate limited", hdrs=None, fp=None
+        )
+        ok = type(
+            "Ctx",
+            (),
+            {
+                "__enter__": lambda s: _http_response(
+                    {"content": [{"type": "text", "text": "{}"}]}
+                ),
+                "__exit__": lambda *a: False,
+            },
+        )()
+        mock_urlopen.side_effect = [err, ok]
+        reviewer = AnthropicApiReviewer(api_key="sk-test", max_retries=3)
+        assert reviewer("prompt") == "{}"
+        assert mock_urlopen.call_count == 2
+
+    @patch("src.integration_coordinator.time.sleep")
+    @patch("src.integration_coordinator.urllib.request.urlopen")
+    def test_4xx_not_retried(self, mock_urlopen, mock_sleep):
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url="x", code=401, msg="unauthorized", hdrs=None, fp=None
+        )
+        reviewer = AnthropicApiReviewer(api_key="bad", max_retries=3)
+        try:
+            reviewer("prompt")
+            raise AssertionError("should have raised")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+        assert mock_urlopen.call_count == 1  # 4xxは即時送出、リトライしない
+
+
 class TestBuildIntegrationCoordinator:
-    def test_builds_with_subprocess_reviewer(self):
+    def test_uses_api_reviewer_when_api_key_present(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         coord = build_integration_coordinator()
         assert isinstance(coord, IntegrationCoordinator)
-        reviewer = coord._reviewer_factory()
-        assert isinstance(reviewer, SubprocessReviewer)
+        assert isinstance(coord._reviewer_factory(), AnthropicApiReviewer)
+
+    def test_falls_back_to_subprocess_reviewer_without_api_key(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        coord = build_integration_coordinator()
+        assert isinstance(coord._reviewer_factory(), SubprocessReviewer)

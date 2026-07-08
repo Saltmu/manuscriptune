@@ -394,10 +394,10 @@ class TestIntegrator:
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
-    def test_semantic_review_disabled_preserves_existing_behavior(
+    def test_semantic_review_explicitly_disabled_skips_review(
         self, mock_run, mock_list
     ):
-        # 既定(enable_semantic_review=False)ではレビューは実行されず既存挙動不変。
+        # enable_semantic_review=False を明示するとレビューは実行されない。
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
         mock_run.return_value = subprocess.CompletedProcess(
@@ -412,14 +412,36 @@ class TestIntegrator:
                 return SemanticReview(passed=False)
 
         config = IntegratorConfig(
-            apply=True, coordinator=TrackingCoordinator()
-        )  # enable_semantic_review は既定のFalse
+            apply=True,
+            enable_semantic_review=False,
+            coordinator=TrackingCoordinator(),
+        )
         integrator = Integrator(config)
         with patch("src.integrator.github.add_comment"):
             res = integrator.run()
 
         assert res["status"] == "success"
         assert called == []
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_semantic_review_default_on_but_skips_without_coordinator(
+        self, mock_run, mock_list
+    ):
+        # 既定ONだが coordinator 未注入なら安全にスキップ（既存の直接構築呼び出しを壊さない）。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        config = IntegratorConfig(apply=True)  # coordinator=None, enable=既定True
+        assert config.enable_semantic_review is True
+        integrator = Integrator(config)
+        with patch("src.integrator.github.add_comment"):
+            res = integrator.run()
+
+        assert res["status"] == "success"
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")

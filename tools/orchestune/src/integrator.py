@@ -20,8 +20,10 @@ class IntegratorConfig:
     max_flaky_retries: int = 2
     parent_issue_number: int | None = None
     apply: bool = False
-    # #186: CI通過後のLLM統合コーディネーターによる意味的レビュー（既定OFF=既存挙動不変）。
-    enable_semantic_review: bool = False
+    # #186: CI通過後のLLM統合コーディネーターによる意味的レビュー。
+    # 当初構想どおり既定ON。ただし`coordinator`が注入されている場合のみ実行され、
+    # 未注入なら安全にスキップされる（`run()`のガードを参照）。
+    enable_semantic_review: bool = True
     coordinator: IntegrationCoordinator | None = None
 
 
