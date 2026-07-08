@@ -14,6 +14,21 @@
       "forced_serial": false,
       "external_id": "session_01Mv4RSVQxcqfJBP2BfuuBYo",
       "external_url": "https://claude.ai/code/session_01Mv4RSVQxcqfJBP2BfuuBYo"
+    },
+    "249": {
+      "issue_number": 249,
+      "branch": "claude/issue-249-plot-writer-service",
+      "worktree_path": "worktrees/claude-issue-249-plot-writer-service",
+      "pid": null,
+      "started_at": 1783553544.848061,
+      "declared_footprint": [
+        "src/services/plot_writer_service.py",
+        "tests/test_plot_writer_service.py"
+      ],
+      "recompute_count": 0,
+      "forced_serial": false,
+      "external_id": "session_01S8bXSZDftMPAuWduZcwDDb",
+      "external_url": "https://claude.ai/code/session_01S8bXSZDftMPAuWduZcwDDb"
     }
   },
   "launch_history": [
@@ -29,7 +44,8 @@
     1783528331.2970781,
     1783536313.675088,
     1783543071.1309013,
-    1783549040.4459794
+    1783549040.4459794,
+    1783553544.848061
   ],
   "completed_worktrees": [
     {
