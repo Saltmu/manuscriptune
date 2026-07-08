@@ -452,3 +452,180 @@ def test_closed_loop_flow():
         for p in patches:
             p.stop()
         repo.cleanup()
+
+
+def test_closed_loop_dag_recomputation_serialization():
+    import os
+
+    repo = DummyGitRepo()
+    dummy_github = DummyGitHub(repo.local_path)
+
+    # 1. Register 2 issues (task-1, task-2)
+    # They don't overlap initial footprints, so they can run concurrently
+    issue_body_1 = "```yaml\nsubtask_id: task-1\nfootprint:\n  - src/main.py\n```\n"
+    issue_1 = IssueRecord(
+        number=1,
+        title="Fix main.py",
+        body=issue_body_1,
+        labels=("status:queued",),
+        created_at="2026-07-07T00:00:00Z",
+    )
+    dummy_github.add_issue(issue_1)
+
+    issue_body_2 = "```yaml\nsubtask_id: task-2\nfootprint:\n  - src/other.py\n```\n"
+    issue_2 = IssueRecord(
+        number=2,
+        title="Fix other.py",
+        body=issue_body_2,
+        labels=("status:queued",),
+        created_at="2026-07-07T00:00:00Z",
+    )
+    dummy_github.add_issue(issue_2)
+
+    # Dummy scenario that writes to a deviated file for task-2
+    # For task-1, it just does normal work
+    def make_concurrent_scenario():
+        def scenario(task: Task, branch_name: str, worktree_path: Path):
+            subprocess.run(
+                ["git", "config", "user.name", "agent-bot"],
+                cwd=str(worktree_path),
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "agent-bot@example.com"],
+                cwd=str(worktree_path),
+                check=True,
+            )
+            if task.subtask_id == "task-1":
+                # Normal edit on declared footprint
+                p = worktree_path / "src/main.py"
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("def main():\n    pass\n", encoding="utf-8")
+            elif task.subtask_id == "task-2":
+                # Normal edit
+                p = worktree_path / "src/other.py"
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("def other():\n    pass\n", encoding="utf-8")
+                # Deviation: edit src/main.py which is NOT in footprint!
+                p_dev = worktree_path / "src/main.py"
+                p_dev.write_text("# Deviated edit!\n", encoding="utf-8")
+
+            subprocess.run(["git", "add", "."], cwd=str(worktree_path), check=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"Edit for {task.subtask_id}"],
+                cwd=str(worktree_path),
+                check=True,
+            )
+            subprocess.run(
+                ["git", "push", "-u", "origin", branch_name],
+                cwd=str(worktree_path),
+                check=True,
+            )
+            dummy_github.prs[branch_name] = PrRecord(
+                number=100 + task.issue_number,
+                head_ref=branch_name,
+                changed_files=(
+                    ("src/main.py", "src/other.py")
+                    if task.subtask_id == "task-2"
+                    else ("src/main.py",)
+                ),
+                closes_issue_numbers=(task.issue_number,),
+                review_decision="",
+                is_ci_passing=True,
+            )
+
+        return scenario
+
+    scenario_func = make_concurrent_scenario()
+    agent_target = DummyAgentDispatchTarget(scenario_func)
+
+    # Setup dispatcher state
+    run_state_path = repo.local_path / "run_state.json"
+    save_run_state(RunState(), run_state_path)
+
+    config = DispatcherConfig(
+        max_concurrent=2,  # Allow up to 2 concurrent launches
+        max_launches_per_window=5,
+        window_seconds=3600,
+        run_state_path=run_state_path,
+        worktree_root=repo.local_path / "worktrees",
+        log_dir=repo.local_path / "logs",
+        events_log_path=repo.local_path / "events.jsonl",
+        apply=True,
+        dispatch_target=agent_target,
+        deviation_buffer_lines=1,
+        max_recompute_retries=0,  # Trigger force-serial immediately on first deviation
+        parent_issue_number=100,  # For notification comments
+    )
+
+    # Apply patches to simulate GitHub API
+    patches = [
+        patch(
+            "src.github.list_issues_by_label",
+            dummy_github.list_issues_by_label,
+        ),
+        patch("src.github.add_label", dummy_github.add_label),
+        patch("src.github.remove_label", dummy_github.remove_label),
+        patch("src.github.add_comment", dummy_github.add_comment),
+        patch("src.github.list_open_prs", dummy_github.list_open_prs),
+        patch(
+            "src.github.list_remote_branches",
+            dummy_github.list_remote_branches,
+        ),
+        patch(
+            "src.github.branch_changed_files",
+            dummy_github.branch_changed_files,
+        ),
+    ]
+
+    for p in patches:
+        p.start()
+
+    original_cwd = os.getcwd()
+    os.chdir(str(repo.local_path))
+
+    try:
+        # ---- Cycle 1: Launch both tasks in parallel ----
+        report = run_dispatch_cycle(config)
+        assert len(report.selected) == 2
+        assert {t.subtask_id for t in report.selected} == {"task-1", "task-2"}
+        assert "status:in-progress" in dummy_github.issues[1].labels
+        assert "status:in-progress" in dummy_github.issues[2].labels
+
+        # Both agent executions are ongoing.
+        # Now trigger Cycle 2. task-2 has edited src/main.py causing deviation.
+        report2 = run_dispatch_cycle(config)
+
+        # Confirm deviation event and force-serial transition
+        assert len(report2.deviation_events) == 1
+        assert report2.deviation_events[0]["action"] == "forced_serial"
+        # Confirm that task-2 has status:force-serial label
+        assert "status:force-serial" in dummy_github.issues[2].labels
+
+        # Since force-serial is active (any_forced_serial is True),
+        # the dispatcher should set quota_slots to 0 and select nothing.
+        # We will add another queued task-3 and check if it gets blocked.
+        issue_body_3 = (
+            "```yaml\nsubtask_id: task-3\nfootprint:\n  - src/third.py\n```\n"
+        )
+        issue_3 = IssueRecord(
+            number=3,
+            title="Fix third.py",
+            body=issue_body_3,
+            labels=("status:queued",),
+            created_at="2026-07-07T00:00:00Z",
+        )
+        dummy_github.add_issue(issue_3)
+
+        # Run Cycle 3. Even though there is a queued task-3, no task should be selected
+        # because the active worktree is forced serial.
+        report3 = run_dispatch_cycle(config)
+        assert len(report3.selected) == 0
+        assert report3.quota_slots_available == 0
+        assert "status:in-progress" not in dummy_github.issues[3].labels
+
+    finally:
+        os.chdir(original_cwd)
+        for p in patches:
+            p.stop()
+        repo.cleanup()
