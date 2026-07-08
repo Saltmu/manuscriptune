@@ -222,6 +222,29 @@ class Integrator:
             )
 
             if self.config.apply:
+                # actions/checkout のデフォルト（単一ブランチの浅いclone）では
+                # `origin/{branch_name}` のremote-trackingブランチが存在しないため、
+                # refspecを明示してfetchしないと後続のmergeが常に
+                # 「not something we can merge」で失敗する（内容衝突ではない）。
+                try:
+                    subprocess.run(
+                        [
+                            "git",
+                            "fetch",
+                            "origin",
+                            f"{branch_name}:refs/remotes/origin/{branch_name}",
+                        ],
+                        cwd=str(self.config.repository_root),
+                        check=True,
+                        capture_output=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    self._handle_failure(
+                        task, f"Failed to fetch branch: {e.stderr.decode()}"
+                    )
+                    failed_tasks.append(task.subtask_id)
+                    continue
+
                 try:
                     subprocess.run(
                         [
