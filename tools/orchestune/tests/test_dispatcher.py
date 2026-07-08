@@ -942,6 +942,150 @@ class TestRunDispatchCycleCompletion:
         assert "2" in persisted["active_worktrees"]
 
 
+class TestRunDispatchCycleNotNeeded:
+    """#280: status:not-neededラベル検知による完全自動クローズ・依存解決。"""
+
+    def _config(self, tmp_path, run_state_path, **overrides):
+        defaults = dict(
+            max_concurrent=1,
+            max_launches_per_window=2,
+            window_seconds=3600,
+            run_state_path=run_state_path,
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            events_log_path=tmp_path / "events.jsonl",
+            apply=True,
+        )
+        defaults.update(overrides)
+        return DispatcherConfig(**defaults)
+
+    def _seed_active(self, tmp_path, run_state_path, **overrides):
+        defaults = dict(
+            issue_number=1,
+            branch="claude/issue-1-task-a",
+            worktree_path=str(tmp_path / "w1"),
+            pid=111,
+            started_at=1_699_999_000.0,
+            declared_footprint=("src/foo.py",),
+        )
+        defaults.update(overrides)
+        save_run_state(
+            RunState(
+                active_worktrees={"1": ActiveWorktree(**defaults)}, launch_history=[]
+            ),
+            run_state_path,
+        )
+
+    def test_not_needed_label_closes_issue_regardless_of_pr_or_process_state(
+        self, tmp_path
+    ):
+        """セッションがコミット・PRを一切作らない対応不要ケースでも、
+        PID/PR存在に依存せずラベル検知だけで完了・クローズできることを検証する
+        （#250で観測された、永遠にstatus:in-progressのままスタックする問題の回帰テスト）。"""
+        run_state_path = tmp_path / "run_state.json"
+        self._seed_active(tmp_path, run_state_path)
+        config = self._config(tmp_path, run_state_path)
+        not_needed_issue = _issue(1, labels=("status:not-needed",), subtask_id="task-a")
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.close_issue") as mock_close_issue,
+            # プロセスは生きたまま・PRも存在しない、という「対応不要」の典型状態
+            patch("src.dispatcher.is_process_alive", return_value=True),
+            patch(
+                "src.dispatch_gc.worktree_has_uncommitted_changes", return_value=False
+            ),
+            patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
+        ):
+            mock_list.side_effect = lambda label, **_: (
+                [not_needed_issue] if label == "status:not-needed" else []
+            )
+            report = run_dispatch_cycle(config)
+
+        mock_remove_worktree.assert_called_once_with(str(tmp_path / "w1"))
+        mock_remove_label.assert_any_call(1, "status:in-progress")
+        mock_close_issue.assert_called_once()
+        assert mock_close_issue.call_args.args[0] == 1
+        assert mock_close_issue.call_args.args[1] == "not planned"
+        assert report.completion_events == [
+            {
+                "issue_number": 1,
+                "worktree_path": str(tmp_path / "w1"),
+                "action": "not_needed",
+                "subtask_id": "task-a",
+            }
+        ]
+
+        persisted = json.loads(run_state_path.read_text())
+        assert persisted["active_worktrees"] == {}
+
+    def test_dry_run_not_needed_does_not_call_github_or_mutate(self, tmp_path):
+        run_state_path = tmp_path / "run_state.json"
+        self._seed_active(tmp_path, run_state_path)
+        config = self._config(tmp_path, run_state_path, apply=False)
+        not_needed_issue = _issue(1, labels=("status:not-needed",), subtask_id="task-a")
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+            patch("src.dispatcher.github.close_issue") as mock_close_issue,
+            patch("src.dispatcher.is_process_alive", return_value=True),
+            patch(
+                "src.dispatch_gc.worktree_has_uncommitted_changes", return_value=False
+            ),
+            patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
+        ):
+            mock_list.side_effect = lambda label, **_: (
+                [not_needed_issue] if label == "status:not-needed" else []
+            )
+            report = run_dispatch_cycle(config)
+
+        mock_remove_worktree.assert_not_called()
+        mock_remove_label.assert_not_called()
+        mock_close_issue.assert_not_called()
+        assert report.completion_events[0]["action"] == "not_needed"
+
+        persisted = json.loads(run_state_path.read_text())
+        assert "1" in persisted["active_worktrees"]
+
+    def test_blocked_task_promotes_when_dependency_is_not_needed(self, tmp_path):
+        """対応不要と判定された依存先も、status:done同様に依存解決済みとして
+        扱われ、後続のstatus:blockedタスクがstatus:queuedへ昇格すること。"""
+        run_state_path = tmp_path / "run_state.json"
+        config = self._config(tmp_path, run_state_path, max_concurrent=2)
+        not_needed_issue = _issue(1, labels=("status:not-needed",), subtask_id="task-a")
+        blocked_issue = _issue(
+            2,
+            labels=("status:blocked",),
+            subtask_id="task-b",
+            depends_on=("task-a",),
+        )
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+        ):
+
+            def _list(label, **_):
+                if label == "status:not-needed":
+                    return [not_needed_issue]
+                if label == "status:blocked":
+                    return [blocked_issue]
+                return []
+
+            mock_list.side_effect = _list
+            report = run_dispatch_cycle(config)
+
+        mock_remove_label.assert_any_call(2, "status:blocked")
+        mock_add_label.assert_any_call(2, "status:queued")
+        assert report.promotion_events == [{"issue_number": 2, "subtask_id": "task-b"}]
+
+
 class TestRunDispatchCycleBlockedPromotion:
     """#193: 依存解決によるstatus:blocked → status:queued昇格。"""
 

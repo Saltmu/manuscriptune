@@ -12,6 +12,7 @@ from src.github import (
     add_comment,
     add_label,
     branch_changed_files,
+    close_issue,
     get_issue_labels,
     list_issues_by_label,
     list_open_prs,
@@ -352,6 +353,56 @@ class TestGetIssueLabels:
         with patch("src.github.subprocess.run") as mock_run:
             with pytest.raises(ValueError):
                 get_issue_labels("181; rm -rf /")
+            mock_run.assert_not_called()
+
+
+class TestCloseIssue:
+    def test_closes_with_reason(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+            close_issue(280, "not planned")
+        called_args = mock_run.call_args.args[0]
+        assert called_args == [
+            "gh",
+            "issue",
+            "close",
+            "280",
+            "--reason",
+            "not planned",
+        ]
+
+    def test_closes_with_comment(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+            close_issue(
+                280, "not planned", comment="既に実装済みのため対応不要でした。"
+            )
+        called_args = mock_run.call_args.args[0]
+        assert called_args == [
+            "gh",
+            "issue",
+            "close",
+            "280",
+            "--reason",
+            "not planned",
+            "--comment",
+            "既に実装済みのため対応不要でした。",
+        ]
+
+    def test_rejects_invalid_reason(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            with pytest.raises(ValueError):
+                close_issue(280, "evil; rm -rf /")
+            mock_run.assert_not_called()
+
+    def test_rejects_invalid_issue_number(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            with pytest.raises(ValueError):
+                close_issue("280; rm -rf /", "not planned")
             mock_run.assert_not_called()
 
 

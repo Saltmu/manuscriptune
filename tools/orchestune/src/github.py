@@ -114,6 +114,22 @@ def remove_label(issue_number: int | str, label: str) -> None:
     _run(["gh", "issue", "edit", str(number), "--remove-label", label])
 
 
+_VALID_CLOSE_REASONS = frozenset({"completed", "not planned"})
+
+
+def close_issue(
+    issue_number: int | str, reason: str, comment: str | None = None
+) -> None:
+    """#280: `status:not-needed`スキップ機構用に、Issueを決定論的にクローズする。"""
+    number = _validate_issue_number(issue_number)
+    if reason not in _VALID_CLOSE_REASONS:
+        raise ValueError(f"reasonが不正です: {reason!r}")
+    args = ["gh", "issue", "close", str(number), "--reason", reason]
+    if comment is not None:
+        args.extend(["--comment", comment])
+    _run(args)
+
+
 def add_comment(issue_number: int | str, body: str) -> None:
     number = _validate_issue_number(issue_number)
     _run(["gh", "issue", "comment", str(number), "--body-file", "-"], input_text=body)

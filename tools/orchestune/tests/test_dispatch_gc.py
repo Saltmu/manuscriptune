@@ -2,10 +2,43 @@ import subprocess
 from unittest.mock import patch
 
 from src.dispatch_gc import (
+    _finalize_not_needed_worktree,
     is_process_alive,
     remove_worktree,
     worktree_has_uncommitted_changes,
 )
+from src.dispatch_scoring import Task
+from src.dispatch_state import ActiveWorktree
+from src.dispatcher import DispatcherConfig
+
+
+def _active(**overrides):
+    defaults = dict(
+        issue_number=280,
+        branch="claude/issue-280-task-a",
+        worktree_path="worktrees/w1",
+        pid=111,
+        started_at=1_699_999_000.0,
+        declared_footprint=("src/foo.py",),
+    )
+    defaults.update(overrides)
+    return ActiveWorktree(**defaults)
+
+
+def _task(**overrides):
+    defaults = dict(
+        issue_number=280,
+        subtask_id="task-a",
+        footprint=("src/foo.py",),
+        symbols=(),
+        risk=False,
+        priority="medium",
+        progress_partial=False,
+        status_labels=("status:not-needed",),
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    defaults.update(overrides)
+    return Task(**defaults)
 
 
 class TestIsProcessAlive:
@@ -74,3 +107,87 @@ class TestRemoveWorktree:
             side_effect=subprocess.CalledProcessError(1, []),
         ):
             remove_worktree("worktrees/already-gone")  # 例外を送出しないこと
+
+
+class TestFinalizeNotNeededWorktree:
+    """#280: status:not-neededラベル検知による完全自動クローズ。"""
+
+    def test_apply_removes_worktree_and_closes_issue(self):
+        active = _active()
+        task = _task()
+        config = DispatcherConfig(apply=True)
+        with (
+            patch(
+                "src.dispatch_gc.worktree_has_uncommitted_changes", return_value=False
+            ),
+            patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
+            patch("src.dispatch_gc.github.remove_label") as mock_remove_label,
+            patch("src.dispatch_gc.github.close_issue") as mock_close_issue,
+        ):
+            event = _finalize_not_needed_worktree(active, task, config)
+
+        mock_remove_worktree.assert_called_once_with("worktrees/w1")
+        mock_remove_label.assert_called_once_with(280, "status:in-progress")
+        mock_close_issue.assert_called_once()
+        close_args = mock_close_issue.call_args.args
+        assert close_args[0] == 280
+        assert close_args[1] == "not planned"
+        assert event == {
+            "issue_number": 280,
+            "worktree_path": "worktrees/w1",
+            "action": "not_needed",
+            "subtask_id": "task-a",
+        }
+
+    def test_dirty_worktree_is_not_closed(self):
+        """未コミットの作業が残っている場合は、安全側に倒しクローズを見送る。"""
+        active = _active()
+        task = _task()
+        config = DispatcherConfig(apply=True)
+        with (
+            patch(
+                "src.dispatch_gc.worktree_has_uncommitted_changes", return_value=True
+            ),
+            patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
+            patch("src.dispatch_gc.github.remove_label") as mock_remove_label,
+            patch("src.dispatch_gc.github.close_issue") as mock_close_issue,
+        ):
+            event = _finalize_not_needed_worktree(active, task, config)
+
+        mock_remove_worktree.assert_not_called()
+        mock_remove_label.assert_not_called()
+        mock_close_issue.assert_not_called()
+        assert event["action"] == "completion_skipped_dirty_worktree"
+
+    def test_dry_run_does_not_call_github_or_mutate(self):
+        active = _active()
+        task = _task()
+        config = DispatcherConfig(apply=False)
+        with (
+            patch(
+                "src.dispatch_gc.worktree_has_uncommitted_changes", return_value=False
+            ),
+            patch("src.dispatch_gc.remove_worktree") as mock_remove_worktree,
+            patch("src.dispatch_gc.github.remove_label") as mock_remove_label,
+            patch("src.dispatch_gc.github.close_issue") as mock_close_issue,
+        ):
+            event = _finalize_not_needed_worktree(active, task, config)
+
+        mock_remove_worktree.assert_not_called()
+        mock_remove_label.assert_not_called()
+        mock_close_issue.assert_not_called()
+        assert event["action"] == "not_needed"
+
+    def test_none_task_defaults_subtask_id_to_empty_string(self):
+        active = _active()
+        config = DispatcherConfig(apply=True)
+        with (
+            patch(
+                "src.dispatch_gc.worktree_has_uncommitted_changes", return_value=False
+            ),
+            patch("src.dispatch_gc.remove_worktree"),
+            patch("src.dispatch_gc.github.remove_label"),
+            patch("src.dispatch_gc.github.close_issue"),
+        ):
+            event = _finalize_not_needed_worktree(active, None, config)
+        assert event["subtask_id"] == ""
