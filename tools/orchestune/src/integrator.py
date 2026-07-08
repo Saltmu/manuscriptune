@@ -217,6 +217,9 @@ class Integrator:
         merged_tasks = []
         failed_tasks = []
 
+        if self.config.apply:
+            self._ensure_full_history()
+
         for task in sorted_done_tasks:
             branch_name = (
                 f"claude/issue-{task.issue_number}-{task.subtask_id or 'task'}"
@@ -281,6 +284,36 @@ class Integrator:
             merged_tasks.append(task.subtask_id)
 
         return merged_tasks, failed_tasks
+
+    def _ensure_full_history(self) -> None:
+        # actions/checkout@v6 のデフォルト（浅い・単一ブランチのclone）のままだと、
+        # タスクブランチをrefspec指定でfetchしても取得されるのはそのブランチの
+        # 先端コミット1つのみ（親情報を持たない）になり、mainと共通の祖先が
+        # 見つからず `refusing to merge unrelated histories` でmergeが必ず
+        # 失敗する。浅いリポジトリの場合のみ、ベースブランチの履歴を深くしておく。
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-shallow-repository"],
+                cwd=str(self.config.repository_root),
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            return
+
+        if (result.stdout or b"").decode().strip() != "true":
+            return
+
+        base_branch_name = self.config.base_branch.removeprefix("origin/")
+        try:
+            subprocess.run(
+                ["git", "fetch", "--unshallow", "origin", base_branch_name],
+                cwd=str(self.config.repository_root),
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
 
     def _abort_merge(self) -> None:
         # マージ失敗時にMERGE_HEADを残したままにすると、後続タスクのマージが
