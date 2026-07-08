@@ -299,6 +299,7 @@ class Integrator:
         failed_tasks = []
 
         if self.config.apply:
+            self._ensure_git_identity()
             self._ensure_full_history()
 
         for task in sorted_done_tasks:
@@ -365,6 +366,26 @@ class Integrator:
             merged_tasks.append(task.subtask_id)
 
         return merged_tasks, failed_tasks
+
+    def _ensure_git_identity(self) -> None:
+        # CI環境（actions/checkout等）ではgit committer identityが未設定のことがあり、
+        # `git merge --no-ff`でマージコミットを作成する際に
+        # "Committer identity unknown" で必ず失敗するため、事前に設定しておく。
+        subprocess.run(
+            ["git", "config", "user.name", "orchestune-integrator"],
+            cwd=str(self.config.repository_root),
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "user.email",
+                "orchestune-integrator@users.noreply.github.com",
+            ],
+            cwd=str(self.config.repository_root),
+            capture_output=True,
+        )
 
     def _ensure_full_history(self) -> None:
         # actions/checkout@v6 のデフォルト（浅い・単一ブランチのclone）のままだと、
