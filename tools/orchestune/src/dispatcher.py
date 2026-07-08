@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import dataclasses
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -223,11 +224,12 @@ def append_event_log(entry: dict, path: str | Path) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def _process_active_worktrees(
+def _process_active_worktrees(  # noqa: C901
     run_state: RunState,
     tasks_by_issue: dict[int, Task],
     issue_number_by_subtask_id: dict[str, int],
     ci_passed_pr_subtask_ids: set[str],
+    changes_requested_subtask_ids: set[str],
     subtask_branch_map: dict[str, str],
     config: DispatcherConfig,
 ) -> tuple[list[dict], list[dict], bool, set[str]]:
@@ -292,6 +294,33 @@ def _process_active_worktrees(
                         )
                     )
                     del run_state.active_worktrees[key]
+                continue
+
+        # 自動リベースや逸脱判定の前に、CHANGES_REQUESTED になった親を持つかチェックする (#185)
+        if active_task and active_task.depends_on:
+            if any(
+                dep in changes_requested_subtask_ids for dep in active_task.depends_on
+            ):
+                if config.apply:
+                    if active.pid:
+                        try:
+                            os.kill(active.pid, 9)
+                        except OSError:
+                            pass
+                    github.remove_label(active.issue_number, "status:in-progress")
+                    github.add_label(active.issue_number, "status:blocked-human-review")
+                    github.add_comment(
+                        active.issue_number,
+                        "依存元PRが変更要求（Request Changes）を受けたため、スタックされたタスクを一時停止しました。",
+                    )
+                    del run_state.active_worktrees[key]
+                completion_events.append(
+                    {
+                        "issue_number": active.issue_number,
+                        "subtask_id": active_task.subtask_id,
+                        "action": "escalated_due_to_changes_requested",
+                    }
+                )
                 continue
 
         # 自動リベース判定＆実行 (#201)
@@ -452,6 +481,7 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
 
         pr_by_branch = {pr.head_ref: pr for pr in prs}
         ci_passed_pr_subtask_ids = set()
+        changes_requested_subtask_ids = set()
         subtask_branch_map = {}
 
         for task in tasks_by_issue.values():
@@ -461,8 +491,11 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             subtask_branch_map[task.subtask_id] = branch_name
 
             pr = pr_by_branch.get(branch_name)
-            if pr and pr.is_ci_passing and pr.review_decision != "CHANGES_REQUESTED":
-                ci_passed_pr_subtask_ids.add(task.subtask_id)
+            if pr:
+                if pr.review_decision == "CHANGES_REQUESTED":
+                    changes_requested_subtask_ids.add(task.subtask_id)
+                elif pr.is_ci_passing:
+                    ci_passed_pr_subtask_ids.add(task.subtask_id)
 
         (
             completion_events,
@@ -474,6 +507,7 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             tasks_by_issue,
             issue_number_by_subtask_id,
             ci_passed_pr_subtask_ids,
+            changes_requested_subtask_ids,
             subtask_branch_map,
             config,
         )

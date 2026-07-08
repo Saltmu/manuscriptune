@@ -216,6 +216,21 @@ def _try_auto_rebase(
                             text=True,
                             check=True,
                         )
+
+                        ci_res = subprocess.run(
+                            ["./scripts/local-ci.sh"],
+                            cwd=active.worktree_path,
+                            capture_output=True,
+                            text=True,
+                        )
+                        if ci_res.returncode != 0:
+                            raise subprocess.CalledProcessError(
+                                ci_res.returncode,
+                                ci_res.args,
+                                output=ci_res.stdout,
+                                stderr=ci_res.stderr,
+                            )
+
                         assert config.dispatch_target is not None
                         handle = config.dispatch_target.launch(
                             active_task, active.branch, Path(active.worktree_path)
@@ -224,7 +239,7 @@ def _try_auto_rebase(
                         active.external_id = handle.external_id
                         active.external_url = handle.external_url
                         active.started_at = time.time()
-                    except (subprocess.CalledProcessError, OSError):
+                    except (subprocess.CalledProcessError, OSError) as e:
                         try:
                             subprocess.run(
                                 [
@@ -245,10 +260,15 @@ def _try_auto_rebase(
                             active.issue_number,
                             "status:manual-merge-required",
                         )
+
+                        msg = "自動リベース中にコンフリクトが発生しました。手動でマージを行ってください。\n"
+                        cmd_args = getattr(e, "cmd", [])
+                        if cmd_args and "local-ci.sh" in cmd_args[0]:
+                            msg = "自動リベース後のローカルCI実行に失敗しました。手動で修正を行ってください。\n"
+
                         github.add_comment(
                             active.issue_number,
-                            f"自動リベース中にコンフリクトが発生しました。手動でマージを行ってください。\n"
-                            f"対象の依存元ブランチ: {parent_branch}",
+                            f"{msg}対象の依存元ブランチ: {parent_branch}",
                         )
                         del run_state.active_worktrees[key]
                 return True
