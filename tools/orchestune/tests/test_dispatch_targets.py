@@ -106,6 +106,27 @@ class TestClaudeCodeCloudRoutineDispatchTarget:
         assert "claude/issue-1-task-a" in body["text"]
         assert "#1" in body["text"]
 
+    def test_fire_text_fires_arbitrary_prompt_and_returns_handle(self):
+        # #186: 統合コーディネーターが同一ルーチンへ任意指示を投げる汎用fire。
+        target = ClaudeCodeCloudRoutineDispatchTarget("trig_1", "sk-ant-oat01-xxx")
+        with patch(
+            "src.dispatch_targets.urllib.request.urlopen",
+            return_value=self._response(),
+        ) as mock_urlopen:
+            handle = target.fire_text("結合diffをレビューして")
+
+        assert handle.external_id == "session_1"
+        assert handle.external_url == "https://claude.ai/code/session_1"
+        assert handle.branch_name is None
+
+        request = mock_urlopen.call_args.args[0]
+        assert (
+            request.full_url
+            == "https://api.anthropic.com/v1/claude_code/routines/trig_1/fire"
+        )
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["text"] == "結合diffをレビューして"
+
     def test_retries_on_transient_error_then_succeeds(self, tmp_path):
         target = ClaudeCodeCloudRoutineDispatchTarget(
             "trig_1", "token", max_retries=3, initial_delay=0.01

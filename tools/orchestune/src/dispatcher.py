@@ -53,6 +53,7 @@ from src.dispatch_state import (
     save_run_state,
 )
 from src.dispatch_targets import (
+    ClaudeCodeCloudRoutineDispatchTarget,
     DispatchHandle,
     DispatchTarget,
     LocalProcessDispatchTarget,
@@ -850,14 +851,21 @@ def main(argv: list[str] | None = None) -> int:
                     apply=config.apply,
                 )
                 # #186: CI通過後にLLM統合コーディネーターの意味的レビューを行う。
-                # 当初構想どおり既定ON。`ORCHESTUNE_SEMANTIC_REVIEW=0`で明示的に無効化できる。
-                if os.environ.get("ORCHESTUNE_SEMANTIC_REVIEW", "1") != "0":
-                    from src.integration_coordinator import (
-                        build_integration_coordinator,
-                    )
+                # 当初構想どおり既定ON。`ORCHESTUNE_SEMANTIC_REVIEW=0`で無効化できる。
+                # レビューはdispatcherと同一のクラウドルーチンを再利用して起動するため、
+                # 実ディスパッチ先がクラウドルーチンのときのみ有効化される。
+                semantic_review_enabled = (
+                    os.environ.get("ORCHESTUNE_SEMANTIC_REVIEW", "1") != "0"
+                )
+                if semantic_review_enabled and isinstance(
+                    config.dispatch_target, ClaudeCodeCloudRoutineDispatchTarget
+                ):
+                    from src.integration_coordinator import IntegrationCoordinator
 
                     integrator_config.enable_semantic_review = True
-                    integrator_config.coordinator = build_integration_coordinator()
+                    integrator_config.coordinator = IntegrationCoordinator(
+                        config.dispatch_target
+                    )
                 else:
                     integrator_config.enable_semantic_review = False
                 integrator = Integrator(integrator_config)

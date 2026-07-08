@@ -75,8 +75,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORCHESTUNE_ROUTINE_ID: ${{ secrets.ORCHESTUNE_ROUTINE_ID }}
           ORCHESTUNE_ROUTINE_TOKEN: ${{ secrets.ORCHESTUNE_ROUTINE_TOKEN }}
-          # #186: 統合コーディネーターの意味的レビュー(既定ON)がAPI直叩きで動くための鍵。
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           poetry run dispatch-cycle --apply --dispatch-target cloud-routine \
             --run-state-path "$RUN_STATE_PATH" --events-log-path "$EVENTS_LOG_PATH"
@@ -87,8 +85,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORCHESTUNE_ROUTINE_ID: ${{ secrets.ORCHESTUNE_ROUTINE_ID }}
           ORCHESTUNE_ROUTINE_TOKEN: ${{ secrets.ORCHESTUNE_ROUTINE_TOKEN }}
-          # #186: 統合コーディネーターの意味的レビュー(既定ON)がAPI直叩きで動くための鍵。
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           APPLY_FLAG=""
           if [ "${{ inputs.apply }}" = "true" ]; then

@@ -143,10 +143,9 @@ class ClaudeCodeCloudRoutineDispatchTarget(DispatchTarget):
             f"想定footprint: {footprint}\n"
         )
 
-    def launch(
-        self, task: Task, branch_name: str, worktree_path: Path
-    ) -> DispatchHandle:
-        body = json.dumps({"text": self._build_text(task, branch_name)}).encode("utf-8")
+    def _fire(self, text: str) -> dict[str, Any]:
+        """任意のテキスト指示でルーチンをfireし、生のレスポンスペイロードを返す。"""
+        body = json.dumps({"text": text}).encode("utf-8")
         request = urllib.request.Request(
             f"{self.API_BASE}/{self._routine_id}/fire",
             data=body,
@@ -158,11 +157,25 @@ class ClaudeCodeCloudRoutineDispatchTarget(DispatchTarget):
                 "Content-Type": "application/json",
             },
         )
-        payload = self._fire_with_retry(request)
+        return self._fire_with_retry(request)
+
+    def launch(
+        self, task: Task, branch_name: str, worktree_path: Path
+    ) -> DispatchHandle:
+        payload = self._fire(self._build_text(task, branch_name))
         return DispatchHandle(
             external_id=payload.get("claude_code_session_id"),
             external_url=payload.get("claude_code_session_url"),
             branch_name=branch_name,
+        )
+
+    def fire_text(self, text: str) -> DispatchHandle:
+        """#186: タスク以外の任意指示（統合コーディネーターの意味的レビュー等）を
+        dispatcherと同一のルーチンへ投げるための汎用fire。"""
+        payload = self._fire(text)
+        return DispatchHandle(
+            external_id=payload.get("claude_code_session_id"),
+            external_url=payload.get("claude_code_session_url"),
         )
 
     def _fire_with_retry(self, request: urllib.request.Request) -> dict[str, Any]:

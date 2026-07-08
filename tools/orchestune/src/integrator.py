@@ -8,7 +8,7 @@ from pathlib import Path
 from src import github
 from src.dag import SubTask, build_dag
 from src.dispatcher import Task, parse_task_from_issue
-from src.integration_coordinator import IntegrationCoordinator, SemanticFinding
+from src.integration_coordinator import IntegrationCoordinator
 
 
 @dataclass
@@ -85,36 +85,6 @@ class Integrator:
             merged_tasks, failed_tasks = self._merge_and_test_tasks(sorted_done_tasks)
 
             if merged_tasks and not failed_tasks:
-                review_note = ""
-                if (
-                    self.config.enable_semantic_review
-                    and self.config.coordinator is not None
-                ):
-                    review = self.config.coordinator.review(
-                        repository_root=self.config.repository_root,
-                        base_branch=self.config.base_branch,
-                        target_ref=(
-                            self.config.temp_branch if self.config.apply else "HEAD"
-                        ),
-                        merged_subtask_ids=merged_tasks,
-                    )
-                    if not review.passed:
-                        sent_back = self._send_back_semantic_findings(
-                            review.findings, sorted_done_tasks
-                        )
-                        return {
-                            "status": "semantic_review_failed",
-                            "merged": merged_tasks,
-                            "findings": [
-                                {"subtask_id": f.subtask_id, "reason": f.reason}
-                                for f in review.findings
-                            ],
-                            "sent_back": sent_back,
-                        }
-                    review_note = (
-                        "\n統合コーディネーターの意味的レビューも通過しました。"
-                    )
-
                 if self.config.apply:
                     try:
                         subprocess.run(
@@ -135,12 +105,39 @@ class Integrator:
                             file=sys.stderr,
                         )
 
+                    # #186: 意味的レビューが有効なら、dispatcherと同一のルーチンを起動して
+                    # レビューを委譲する。マージ可能通知/差し戻しは起動されたセッションが
+                    # GitHub上で行うため、ここではマージ可能通知を出さない（レビューがゲート）。
+                    if (
+                        self.config.enable_semantic_review
+                        and self.config.coordinator is not None
+                    ):
+                        handle = self.config.coordinator.dispatch_review(
+                            temp_branch=self.config.temp_branch,
+                            base_branch=self.config.base_branch,
+                            parent_issue_number=self.config.parent_issue_number,
+                            merged_subtask_ids=merged_tasks,
+                        )
+                        if self.config.parent_issue_number:
+                            github.add_comment(
+                                self.config.parent_issue_number,
+                                f"🔍 完了タスク ({', '.join(merged_tasks)}) の仮マージCIが通過したため、"
+                                "統合コーディネーターによる意味的レビューを開始しました。\n"
+                                "結果に応じて、マージ可能通知または原因サブタスクの差し戻しが行われます"
+                                "（最終マージは従来通り人手）。\n"
+                                f"レビューセッション: {handle.external_url or '(URL不明)'}",
+                            )
+                        return {
+                            "status": "semantic_review_dispatched",
+                            "merged": merged_tasks,
+                            "review_session_url": handle.external_url,
+                        }
+
                     if self.config.parent_issue_number:
                         github.add_comment(
                             self.config.parent_issue_number,
                             f"🎉 すべての完了タスク ({', '.join(merged_tasks)}) の仮マージCIが正常に通過しました。\n"
-                            f"仮マージブランチ `{self.config.temp_branch}` がリモートにプッシュされました。人手での最終マージが可能です。"
-                            f"{review_note}",
+                            f"仮マージブランチ `{self.config.temp_branch}` がリモートにプッシュされました。人手での最終マージが可能です。",
                         )
                 return {"status": "success", "merged": merged_tasks}
 
@@ -358,32 +355,3 @@ class Integrator:
                 f"理由: {reason}\n"
                 f"自動修復エージェントの再起動を待ちます。",
             )
-
-    def _send_back_semantic_findings(
-        self, findings: tuple[SemanticFinding, ...], sorted_done_tasks: list[Task]
-    ) -> list[str]:
-        """#186: 意味的レビューの指摘を、原因サブタスクのIssueへ差し戻す。
-
-        修正後の再レビューは、前回の指摘を記憶しない新規レビュアーインスタンスで
-        行われる（`IntegrationCoordinator.review()`が毎回`reviewer_factory()`を呼ぶ）。
-        """
-        if not self.config.apply:
-            return []
-        task_by_subtask = {
-            task.subtask_id: task for task in sorted_done_tasks if task.subtask_id
-        }
-        sent_back: list[str] = []
-        for finding in findings:
-            task = task_by_subtask.get(finding.subtask_id)
-            if task is None:
-                continue
-            github.remove_label(task.issue_number, "status:done")
-            github.add_label(task.issue_number, "status:queued")
-            github.add_comment(
-                task.issue_number,
-                f"統合コーディネーターの意味的レビューで問題が検出されたため差し戻しました。\n"
-                f"指摘: {finding.reason}\n"
-                f"修正後は、前回の指摘を引き継がない新規レビュアーインスタンスで再レビューされます。",
-            )
-            sent_back.append(finding.subtask_id)
-        return sent_back

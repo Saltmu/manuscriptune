@@ -1,353 +1,113 @@
 """#186: 仮マージCI通過後の最終防衛線となるLLM統合コーディネーター。
 
-仮マージCIが全通過した「成功」状態のときのみ、結合diffをLLMに渡し、
-DAGでは検知できない意味的バグ（同一のグローバル設定に対する競合する利用など）を
-検出する。パスすれば人間へマージ可能通知、問題があれば該当サブタスクを差し戻す。
-**最終的なPRマージは従来通り人間が行う（このゲートは自動マージしない）。**
+仮マージCIが全通過した「成功」状態のときのみ、dispatcherと**同一のClaude Code
+汎用ルーチン**（`ORCHESTUNE_ROUTINE_ID`/`ORCHESTUNE_ROUTINE_TOKEN`）を起動して
+意味的レビューを行う。起動されたClaude Codeセッションが仮マージブランチの結合diffを
+検証し、DAGでは検知できない意味的バグ（同一のグローバル設定に対する競合する利用など）を
+探す。問題がなければ人間へマージ可能通知を、問題があれば原因サブタスクの差し戻しを、
+セッション自身がGitHub上で行う（dispatcherがルーチンでPRを開くのと同じ非同期・
+GitHub媒介パターン）。**最終的なPRマージは従来通り人間が行う（自動マージしない）。**
 
-`dispatch_targets.py` と同様に、LLM呼び出しを注入可能な戦略（`Reviewer`）として
-切り出すことでテスト容易性を確保する。差し戻し後の再レビューでは、前回の指摘を
-記憶しない新規レビュアーインスタンスを使う（`review()`ごとに`reviewer_factory()`を
-呼ぶ）ことで、判断のバイアスを避ける（metaswarmプロジェクトの知見を参考）。
+差し戻し後の再レビューは、fireのたびに前回の指摘を記憶しない新規のClaude Code
+セッションが起動されるため、判断のバイアスが自然に避けられる
+（metaswarmプロジェクトの知見と整合）。
 """
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
-import time
-import urllib.error
-import urllib.request
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from collections.abc import Sequence
+from typing import Protocol
 
-# プロンプト文字列を受け取り、モデルの回答テキストを返す戦略。
-Reviewer = Callable[[str], str]
+from src.dispatch_targets import (
+    ROUTINE_ID_ENV_VAR,
+    ROUTINE_TOKEN_ENV_VAR,
+    ClaudeCodeCloudRoutineDispatchTarget,
+    DispatchHandle,
+)
 
 
-@dataclass(frozen=True)
-class SemanticFinding:
-    """意味的レビューで検出された1件の指摘（差し戻し対象サブタスクと理由）。"""
+class RoutineFirer(Protocol):
+    """任意テキスト指示でルーチンをfireできるオブジェクト（テスト差し替え用）。"""
 
-    subtask_id: str
-    reason: str
+    def fire_text(self, text: str) -> DispatchHandle: ...
 
 
-@dataclass(frozen=True)
-class SemanticReview:
-    """統合コーディネーターによる意味的レビューの結果。"""
+def build_review_routine_prompt(
+    temp_branch: str,
+    base_branch: str,
+    parent_issue_number: int | None,
+    merged_subtask_ids: Sequence[str],
+) -> str:
+    """意味的レビューを実行させるためのルーチン指示テキストを構築する。
 
-    passed: bool
-    findings: tuple[SemanticFinding, ...] = ()
-    raw: str = ""
-
-
-def build_review_prompt(diff: str, merged_subtask_ids: Sequence[str]) -> str:
-    """結合diffに対する意味的レビュー用プロンプトを構築する。
-
-    再レビュー時のバイアス回避のため、過去の指摘内容は一切含めない。
+    再レビュー時のバイアス回避のため、過去の指摘内容は一切含めない
+    （新規セッションが毎回まっさらな状態でレビューする）。
     """
     subtask_list = ", ".join(merged_subtask_ids) if merged_subtask_ids else "(不明)"
+    parent_ref = f"#{parent_issue_number}" if parent_issue_number else "(親Issue不明)"
     return (
         "あなたは複数の並列実装タスクを統合した仮マージブランチの最終レビュアーです。\n"
-        "各サブタスクの単体CI（Ruff/Mypy/Pytest）は既に通過しています。\n"
-        "あなたの唯一の役割は、静的解析やテストでは検知できない『意味的バグ』を\n"
-        "結合diff全体から発見することです。特に次の観点を重視してください。\n"
-        "- 同一のグローバル設定・共有状態・定数に対する、複数タスク間の競合する変更\n"
-        "- 一方のタスクが変更した関数シグネチャ・契約に、他方が追随できていない不整合\n"
-        "- 個々には正しいが結合すると破綻するロジック（重複した副作用・二重処理等）\n\n"
-        f"統合対象サブタスク: {subtask_list}\n\n"
-        "以下は仮マージブランチの結合diffです。\n"
-        "-----BEGIN DIFF-----\n"
-        f"{diff}\n"
-        "-----END DIFF-----\n\n"
-        "判定結果を、余計な文章を付けず次のJSONオブジェクトのみで出力してください。\n"
-        '{"passed": <true|false>, "findings": '
-        '[{"subtask_id": "<原因サブタスクID>", "reason": "<具体的な問題の説明>"}]}\n'
-        "意味的バグが無ければ passed=true, findings=[] とします。"
+        "各サブタスクの単体CIおよび仮マージCI（Ruff/Mypy/Pytest）は既に通過しています。\n\n"
+        f"対象ブランチ: `{temp_branch}`（origin にプッシュ済み）\n"
+        f"比較ベース: `{base_branch}`\n"
+        f"統合対象サブタスク: {subtask_list}\n"
+        f"親Issue: {parent_ref}\n\n"
+        "手順:\n"
+        f"1. `git fetch origin {temp_branch}` の上で "
+        f"`git diff {base_branch}...origin/{temp_branch}` の結合diffを取得する。\n"
+        "2. 静的解析やテストでは検知できない『意味的バグ』のみを探す。特に:\n"
+        "   - 同一のグローバル設定・共有状態・定数に対する、複数タスク間の競合する変更\n"
+        "   - 一方のタスクが変更した関数シグネチャ・契約に、他方が追随できていない不整合\n"
+        "   - 個々には正しいが結合すると破綻するロジック（重複した副作用・二重処理等）\n"
+        "3. 判定に応じて次のいずれかをGitHub上で実施する（自動マージは絶対に行わない）:\n"
+        f"   - 問題なし → 親Issue {parent_ref} に「🎉 意味的レビュー通過、人手での"
+        f"最終マージが可能」というコメントを投稿する。\n"
+        "   - 問題あり → 原因となったサブタスクのIssueについて、ラベルを "
+        "`status:done` から `status:queued` へ付け替え、検出した問題の具体的な説明を"
+        f"コメントする。あわせて親Issue {parent_ref} に差し戻した旨を残す。\n"
+        "前回のレビュー内容は与えられていません。今回のdiffだけを根拠に判断してください。"
     )
 
 
-def _extract_json_object(text: str) -> dict | None:
-    """テキスト中から最初のJSONオブジェクトを抽出してパースする。
-
-    ```json フェンスや前後の地の文が混ざっていても、最初の`{`から対応する
-    `}`までを括弧の深さで走査して取り出す。パースできなければ`None`。
-    """
-    start = text.find("{")
-    if start == -1:
-        return None
-    depth = 0
-    in_string = False
-    escaped = False
-    for index in range(start, len(text)):
-        char = text[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                candidate = text[start : index + 1]
-                try:
-                    parsed = json.loads(candidate)
-                except (json.JSONDecodeError, ValueError):
-                    return None
-                return parsed if isinstance(parsed, dict) else None
-    return None
-
-
-class SubprocessReviewer:
-    """既定Reviewer: Claude Codeヘッドレス(`claude -p`)をサブプロセス起動する。
-
-    引数はリストで渡しシェルを経由しない（OSコマンドインジェクション対策）。
-    CLAUDE.md準拠で最大`max_retries`回・指数バックオフのリトライを行う。
-    """
-
-    def __init__(
-        self,
-        command_prefix: Sequence[str] | None = None,
-        max_retries: int = 3,
-        initial_delay: float = 1.0,
-        timeout: float = 300.0,
-    ):
-        self._command_prefix = list(command_prefix or ["claude", "-p"])
-        self._max_retries = max_retries
-        self._initial_delay = initial_delay
-        self._timeout = timeout
-
-    def __call__(self, prompt: str) -> str:
-        args = [*self._command_prefix, prompt, "--output-format", "json"]
-        stdout = self._run_with_retry(args)
-        # Claude Code の --output-format json エンベロープから result を取り出す。
-        try:
-            envelope = json.loads(stdout)
-        except (json.JSONDecodeError, ValueError):
-            return stdout
-        if isinstance(envelope, dict) and "result" in envelope:
-            return str(envelope["result"])
-        return stdout
-
-    def _run_with_retry(self, args: list[str]) -> str:
-        delay = self._initial_delay
-        last_error: Exception | None = None
-        for attempt in range(self._max_retries + 1):
-            try:
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=self._timeout,
-                )
-                return result.stdout
-            except (
-                subprocess.CalledProcessError,
-                subprocess.TimeoutExpired,
-                OSError,
-            ) as exc:
-                last_error = exc
-            if attempt < self._max_retries:
-                time.sleep(delay)
-                delay *= 2
-        assert last_error is not None
-        raise last_error
-
-
-class AnthropicApiReviewer:
-    """既定Reviewer(CI向け): Anthropic Messages APIを直接叩く。
-
-    ランナーに`claude` CLIを入れずに動くよう、`dispatch_targets.py`と同じ
-    urllibベースでHTTPリクエストする。モデルは既定でOpus 4.8
-    （#186冒頭の議論どおり、低頻度・高精度が要る最終防衛線に適する）。
-    Opus 4.8は`temperature`等のサンプリング引数と`budget_tokens`を受け付けない
-    （送ると400）ため指定しない。深さは`output_config.effort`で制御する。
-    CLAUDE.md準拠で最大`max_retries`回・指数バックオフのリトライを行う。
-    """
-
-    API_URL = "https://api.anthropic.com/v1/messages"
-    ANTHROPIC_VERSION = "2023-06-01"
-    _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "claude-opus-4-8",
-        max_tokens: int = 8000,
-        effort: str = "high",
-        max_retries: int = 3,
-        initial_delay: float = 1.0,
-        timeout: float = 300.0,
-    ):
-        self._api_key = api_key
-        self._model = model
-        self._max_tokens = max_tokens
-        self._effort = effort
-        self._max_retries = max_retries
-        self._initial_delay = initial_delay
-        self._timeout = timeout
-
-    def __call__(self, prompt: str) -> str:
-        body = json.dumps(
-            {
-                "model": self._model,
-                "max_tokens": self._max_tokens,
-                "output_config": {"effort": self._effort},
-                "messages": [{"role": "user", "content": prompt}],
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            self.API_URL,
-            data=body,
-            method="POST",
-            headers={
-                "x-api-key": self._api_key,
-                "anthropic-version": self.ANTHROPIC_VERSION,
-                "content-type": "application/json",
-            },
-        )
-        payload = self._post_with_retry(request)
-        return self._extract_text(payload)
-
-    def _post_with_retry(self, request: urllib.request.Request) -> dict[str, Any]:
-        delay = self._initial_delay
-        last_error: Exception | None = None
-        for attempt in range(self._max_retries + 1):
-            try:
-                with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                    result: dict[str, Any] = json.loads(response.read().decode("utf-8"))
-                    return result
-            except urllib.error.HTTPError as exc:
-                # 4xx（認証・入力エラー等）はリトライ対象外。429のみリトライ。
-                if exc.code not in self._RETRYABLE_STATUSES:
-                    raise
-                last_error = exc
-            except urllib.error.URLError as exc:
-                last_error = exc
-            if attempt < self._max_retries:
-                time.sleep(delay)
-                delay *= 2
-        assert last_error is not None
-        raise last_error
-
-    def _extract_text(self, payload: dict[str, Any]) -> str:
-        blocks = payload.get("content", []) or []
-        texts = [
-            block.get("text", "")
-            for block in blocks
-            if isinstance(block, dict) and block.get("type") == "text"
-        ]
-        return "".join(texts)
-
-
 class IntegrationCoordinator:
-    """結合diffの意味的レビューを統括する。
+    """dispatcherと同一のルーチンを起動して意味的レビューを委譲する。
 
-    `review()`の呼び出しごとに`reviewer_factory()`を呼んで新しいReviewerを
-    生成する。これにより差し戻し後の再レビューでも前回の指摘を引き継がない
-    新規インスタンスが使われ、判断のバイアスを避けられる。
+    `dispatch_review()` は毎回ルーチンをfireするだけで、判定と後続アクション
+    （マージ可能通知 or 差し戻し）は起動されたClaude Codeセッションが担う。
+    fireのたびに新規セッションが立つため、再レビュー時も前回の指摘を引き継がない。
     """
 
-    def __init__(
-        self,
-        reviewer_factory: Callable[[], Reviewer],
-        repository_root: Path | None = None,
-    ):
-        self._reviewer_factory = reviewer_factory
-        self._default_root = repository_root or Path(".")
+    def __init__(self, routine_firer: RoutineFirer):
+        self._routine_firer = routine_firer
 
-    def review(
+    def dispatch_review(
         self,
-        repository_root: Path,
+        temp_branch: str,
         base_branch: str,
-        target_ref: str,
+        parent_issue_number: int | None,
         merged_subtask_ids: Sequence[str],
-    ) -> SemanticReview:
-        diff = self._collect_diff(repository_root, base_branch, target_ref)
-        if not diff.strip():
-            # 差分が収集できない/空なら、CIは通過済みのため人手判断へ回す（フェイルセーフ）。
-            return SemanticReview(
-                passed=True, raw="(結合diffが空または収集できませんでした)"
-            )
-
-        prompt = build_review_prompt(diff, merged_subtask_ids)
-        reviewer = self._reviewer_factory()  # 毎回新規インスタンス（バイアス回避）
-        try:
-            raw = reviewer(prompt)
-        except Exception as exc:  # noqa: BLE001 - レビュー不能でパイプラインを止めない
-            print(f"Warning: semantic reviewer failed: {exc}", file=sys.stderr)
-            return SemanticReview(passed=True, raw=f"reviewer error: {exc}")
-
-        return self._parse_review(raw)
-
-    def _collect_diff(
-        self, repository_root: Path, base_branch: str, target_ref: str
-    ) -> str:
-        try:
-            result = subprocess.run(
-                ["git", "diff", f"{base_branch}...{target_ref}"],
-                cwd=str(repository_root),
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            return result.stdout
-        except (subprocess.CalledProcessError, OSError) as exc:
-            print(
-                f"Warning: failed to collect integration diff: {exc}", file=sys.stderr
-            )
-            return ""
-
-    def _parse_review(self, raw: str) -> SemanticReview:
-        obj = _extract_json_object(raw)
-        if obj is None:
-            # パース不能ならレビュー不能とみなし、人手判断へ回す（フェイルセーフ）。
-            return SemanticReview(passed=True, raw=raw)
-
-        passed = bool(obj.get("passed", True))
-        findings: list[SemanticFinding] = []
-        for entry in obj.get("findings", []) or []:
-            if not isinstance(entry, dict):
-                continue
-            subtask_id = str(entry.get("subtask_id", "")).strip()
-            reason = str(entry.get("reason", "")).strip()
-            if subtask_id or reason:
-                findings.append(SemanticFinding(subtask_id=subtask_id, reason=reason))
-
-        return SemanticReview(passed=passed, findings=tuple(findings), raw=raw)
+    ) -> DispatchHandle:
+        prompt = build_review_routine_prompt(
+            temp_branch=temp_branch,
+            base_branch=base_branch,
+            parent_issue_number=parent_issue_number,
+            merged_subtask_ids=merged_subtask_ids,
+        )
+        return self._routine_firer.fire_text(prompt)
 
 
-def build_integration_coordinator(
-    repository_root: Path | None = None,
-) -> IntegrationCoordinator:
-    """既定構成の統合コーディネーターを構築する。
+def build_integration_coordinator() -> IntegrationCoordinator | None:
+    """環境変数のルーチン認証情報から統合コーディネーターを構築する。
 
-    `ANTHROPIC_API_KEY`があればAPI直叩き(`AnthropicApiReviewer`, Opus 4.8)を使う。
-    CI（`claude` CLI非搭載）でも実際にレビューが機能するのはこちら。未設定の
-    ローカル開発では、認証済み`claude` CLIを使う`SubprocessReviewer`にフォールバック。
-    どちらも`review()`ごとに新規インスタンスを生成する（バイアス回避）。
+    `ORCHESTUNE_ROUTINE_ID`/`ORCHESTUNE_ROUTINE_TOKEN` が揃っていなければ `None` を
+    返し、呼び出し側で意味的レビューを安全にスキップさせる。dispatcher本体では、
+    既に構築済みの `ClaudeCodeCloudRoutineDispatchTarget` を直接再利用する経路も使う。
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-
-    def factory() -> Reviewer:
-        if api_key:
-            return AnthropicApiReviewer(api_key=api_key)
-        return SubprocessReviewer()
-
+    routine_id = os.environ.get(ROUTINE_ID_ENV_VAR)
+    routine_token = os.environ.get(ROUTINE_TOKEN_ENV_VAR)
+    if not (routine_id and routine_token):
+        return None
     return IntegrationCoordinator(
-        reviewer_factory=factory,
-        repository_root=repository_root,
+        ClaudeCodeCloudRoutineDispatchTarget(routine_id, routine_token)
     )

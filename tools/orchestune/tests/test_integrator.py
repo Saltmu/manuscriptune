@@ -3,8 +3,8 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch
 
+from src.dispatch_targets import DispatchHandle
 from src.github import IssueRecord
-from src.integration_coordinator import SemanticFinding, SemanticReview
 from src.integrator import Integrator, IntegratorConfig
 
 
@@ -314,90 +314,60 @@ class TestIntegrator:
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
-    def test_semantic_review_pass_pushes_and_notifies(self, mock_run, mock_list):
+    @patch("src.integrator.github.add_comment")
+    def test_semantic_review_dispatches_routine_and_skips_mergeable_notice(
+        self, mock_comment, mock_run, mock_list
+    ):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=b"", stderr=b""
         )
 
-        class PassingCoordinator:
-            def review(self, **kwargs):
-                return SemanticReview(passed=True)
+        calls = []
 
-        config = IntegratorConfig(
-            apply=True,
-            parent_issue_number=100,
-            enable_semantic_review=True,
-            coordinator=PassingCoordinator(),
-        )
-        integrator = Integrator(config)
-
-        with patch("src.integrator.github.add_comment") as mock_comment:
-            res = integrator.run()
-
-        assert res["status"] == "success"
-        assert res["merged"] == ["task-1"]
-        # マージ可能通知に意味的レビュー通過の追記が含まれる
-        assert "意味的レビューも通過" in mock_comment.call_args[0][1]
-
-    @patch("src.integrator.github.list_issues_by_label")
-    @patch("src.integrator.subprocess.run")
-    @patch("src.integrator.github.remove_label")
-    @patch("src.integrator.github.add_label")
-    @patch("src.integrator.github.add_comment")
-    def test_semantic_review_fail_sends_back_and_skips_push(
-        self, mock_comment, mock_add, mock_remove, mock_run, mock_list
-    ):
-        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
-        issue_b = _issue(
-            2, labels=("status:done",), subtask_id="task-2", depends_on=("task-1",)
-        )
-        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a, issue_b]
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=b"", stderr=b""
-        )
-
-        class FailingCoordinator:
-            def review(self, **kwargs):
-                return SemanticReview(
-                    passed=False,
-                    findings=(
-                        SemanticFinding(
-                            subtask_id="task-2", reason="共有設定への競合更新"
-                        ),
-                    ),
+        class DispatchingCoordinator:
+            def dispatch_review(self, **kwargs):
+                calls.append(kwargs)
+                return DispatchHandle(
+                    external_id="s1", external_url="https://claude.ai/code/s/s1"
                 )
 
         config = IntegratorConfig(
             apply=True,
             parent_issue_number=100,
             enable_semantic_review=True,
-            coordinator=FailingCoordinator(),
+            coordinator=DispatchingCoordinator(),
         )
         integrator = Integrator(config)
         res = integrator.run()
 
-        assert res["status"] == "semantic_review_failed"
-        assert res["sent_back"] == ["task-2"]
-        assert res["findings"] == [
-            {"subtask_id": "task-2", "reason": "共有設定への競合更新"}
-        ]
-        # 原因サブタスク(task-2)が差し戻される
-        mock_remove.assert_called_with(2, "status:done")
-        mock_add.assert_called_with(2, "status:queued")
-        # マージ可能通知(force push)は行われない
+        assert res["status"] == "semantic_review_dispatched"
+        assert res["merged"] == ["task-1"]
+        assert res["review_session_url"] == "https://claude.ai/code/s/s1"
+
+        # 同一ルーチンへレビューが委譲される（マージ済みサブタスク一覧を渡す）
+        assert len(calls) == 1
+        assert calls[0]["merged_subtask_ids"] == ["task-1"]
+        assert calls[0]["temp_branch"] == "integration/temp-main"
+
+        # ブランチのforce pushは行われる（起動セッションがレビューできるように）
         push_calls = [
             call for call in mock_run.call_args_list if "push" in call.args[0]
         ]
-        assert len(push_calls) == 0
+        assert len(push_calls) == 1
+
+        # マージ可能通知は出さない（レビューがゲート）。開始通知のみ。
+        comment_body = mock_comment.call_args[0][1]
+        assert "意味的レビューを開始しました" in comment_body
+        assert "人手での最終マージが可能です" not in comment_body
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
-    def test_semantic_review_explicitly_disabled_skips_review(
+    def test_semantic_review_explicitly_disabled_posts_mergeable(
         self, mock_run, mock_list
     ):
-        # enable_semantic_review=False を明示するとレビューは実行されない。
+        # enable_semantic_review=False を明示するとレビューは委譲されず従来通り。
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
         mock_run.return_value = subprocess.CompletedProcess(
@@ -407,21 +377,23 @@ class TestIntegrator:
         called = []
 
         class TrackingCoordinator:
-            def review(self, **kwargs):
+            def dispatch_review(self, **kwargs):
                 called.append(1)
-                return SemanticReview(passed=False)
+                return DispatchHandle(external_id="s")
 
         config = IntegratorConfig(
             apply=True,
+            parent_issue_number=100,
             enable_semantic_review=False,
             coordinator=TrackingCoordinator(),
         )
         integrator = Integrator(config)
-        with patch("src.integrator.github.add_comment"):
+        with patch("src.integrator.github.add_comment") as mock_comment:
             res = integrator.run()
 
         assert res["status"] == "success"
         assert called == []
+        assert "人手での最終マージが可能です" in mock_comment.call_args[0][1]
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
