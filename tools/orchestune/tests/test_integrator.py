@@ -198,6 +198,46 @@ class TestIntegrator:
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
+    def test_configures_git_identity_before_merging(self, mock_run, mock_list):
+        # CI環境（actions/checkout等）ではgit committer identityが未設定のことがあり、
+        # `git merge --no-ff`でマージコミットを作成する際に
+        # "Committer identity unknown" で必ず失敗するため、事前に設定する必要がある。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "success"
+
+        name_calls = [
+            call
+            for call in mock_run.call_args_list
+            if call.args[0][:3] == ["git", "config", "user.name"]
+        ]
+        email_calls = [
+            call
+            for call in mock_run.call_args_list
+            if call.args[0][:3] == ["git", "config", "user.email"]
+        ]
+        assert len(name_calls) == 1
+        assert len(email_calls) == 1
+
+        identity_index = mock_run.call_args_list.index(name_calls[0])
+        merge_index = next(
+            i
+            for i, call in enumerate(mock_run.call_args_list)
+            if "merge" in call.args[0] and "--no-ff" in call.args[0]
+        )
+        assert identity_index < merge_index
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
     def test_unshallows_repository_before_merging_when_shallow(
         self, mock_run, mock_list
     ):
