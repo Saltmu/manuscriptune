@@ -849,6 +849,15 @@ def main(argv: list[str] | None = None) -> int:
                     parent_issue_number=config.parent_issue_number,
                     apply=config.apply,
                 )
+                # #186: 環境変数で有効化された場合のみ、CI通過後にLLM統合
+                # コーディネーターの意味的レビューを行う（既定は従来通りレビューなし）。
+                if os.environ.get("ORCHESTUNE_SEMANTIC_REVIEW") == "1":
+                    from src.integration_coordinator import (
+                        build_integration_coordinator,
+                    )
+
+                    integrator_config.enable_semantic_review = True
+                    integrator_config.coordinator = build_integration_coordinator()
                 integrator = Integrator(integrator_config)
                 integrator_run_report = integrator.run()
                 print("Integrator Report:")

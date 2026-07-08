@@ -4,6 +4,7 @@ import subprocess
 from unittest.mock import patch
 
 from src.github import IssueRecord
+from src.integration_coordinator import SemanticFinding, SemanticReview
 from src.integrator import Integrator, IntegratorConfig
 
 
@@ -310,6 +311,115 @@ class TestIntegrator:
         assert res["status"] == "success"
         assert res["merged"] == ["task-1"]
         assert ci_calls == 2
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_semantic_review_pass_pushes_and_notifies(self, mock_run, mock_list):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        class PassingCoordinator:
+            def review(self, **kwargs):
+                return SemanticReview(passed=True)
+
+        config = IntegratorConfig(
+            apply=True,
+            parent_issue_number=100,
+            enable_semantic_review=True,
+            coordinator=PassingCoordinator(),
+        )
+        integrator = Integrator(config)
+
+        with patch("src.integrator.github.add_comment") as mock_comment:
+            res = integrator.run()
+
+        assert res["status"] == "success"
+        assert res["merged"] == ["task-1"]
+        # マージ可能通知に意味的レビュー通過の追記が含まれる
+        assert "意味的レビューも通過" in mock_comment.call_args[0][1]
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.remove_label")
+    @patch("src.integrator.github.add_label")
+    @patch("src.integrator.github.add_comment")
+    def test_semantic_review_fail_sends_back_and_skips_push(
+        self, mock_comment, mock_add, mock_remove, mock_run, mock_list
+    ):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        issue_b = _issue(
+            2, labels=("status:done",), subtask_id="task-2", depends_on=("task-1",)
+        )
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a, issue_b]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        class FailingCoordinator:
+            def review(self, **kwargs):
+                return SemanticReview(
+                    passed=False,
+                    findings=(
+                        SemanticFinding(
+                            subtask_id="task-2", reason="共有設定への競合更新"
+                        ),
+                    ),
+                )
+
+        config = IntegratorConfig(
+            apply=True,
+            parent_issue_number=100,
+            enable_semantic_review=True,
+            coordinator=FailingCoordinator(),
+        )
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "semantic_review_failed"
+        assert res["sent_back"] == ["task-2"]
+        assert res["findings"] == [
+            {"subtask_id": "task-2", "reason": "共有設定への競合更新"}
+        ]
+        # 原因サブタスク(task-2)が差し戻される
+        mock_remove.assert_called_with(2, "status:done")
+        mock_add.assert_called_with(2, "status:queued")
+        # マージ可能通知(force push)は行われない
+        push_calls = [
+            call for call in mock_run.call_args_list if "push" in call.args[0]
+        ]
+        assert len(push_calls) == 0
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_semantic_review_disabled_preserves_existing_behavior(
+        self, mock_run, mock_list
+    ):
+        # 既定(enable_semantic_review=False)ではレビューは実行されず既存挙動不変。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        called = []
+
+        class TrackingCoordinator:
+            def review(self, **kwargs):
+                called.append(1)
+                return SemanticReview(passed=False)
+
+        config = IntegratorConfig(
+            apply=True, coordinator=TrackingCoordinator()
+        )  # enable_semantic_review は既定のFalse
+        integrator = Integrator(config)
+        with patch("src.integrator.github.add_comment"):
+            res = integrator.run()
+
+        assert res["status"] == "success"
+        assert called == []
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
