@@ -131,7 +131,7 @@ class Integrator:
                     pass
 
     def _get_sorted_done_tasks(self) -> list[Task]:
-        done_issues = github.list_issues_by_label("status:done")
+        done_issues = github.list_issues_by_label("status:done", state="all")
         if not done_issues:
             return []
 
@@ -143,7 +143,8 @@ class Integrator:
             "status:external-lock",
             "status:done",
         ]:
-            all_issues.extend(github.list_issues_by_label(label))
+            state = "all" if label == "status:done" else "open"
+            all_issues.extend(github.list_issues_by_label(label, state=state))
 
         seen_numbers = set()
         unique_issues = []
