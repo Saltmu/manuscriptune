@@ -46,6 +46,11 @@ logs/
 # Orchestune dispatcher runtime worktrees (tools/orchestune/dispatcher.py)
 tools/orchestune/worktrees/
 
+# Orchestune dispatcher runtime state (persisted on the orchestune-state
+# branch by .github/workflows/orchestune-dispatch.yml, not on main)
+tools/orchestune/run_state.json
+tools/orchestune/events.jsonl
+
 # Temporary and planning files
 implementation_plan.md
 walkthrough.md
