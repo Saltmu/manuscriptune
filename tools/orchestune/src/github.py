@@ -119,6 +119,29 @@ def add_comment(issue_number: int | str, body: str) -> None:
     _run(["gh", "issue", "comment", str(number), "--body-file", "-"], input_text=body)
 
 
+def get_issue_labels(issue_number: int | str) -> tuple[str, ...]:
+    """#186: 統合コーディネーターの意味的レビュー結果（合否ラベル）をポーリングするために使う。"""
+    number = _validate_issue_number(issue_number)
+    stdout = _run(["gh", "issue", "view", str(number), "--json", "labels"])
+    raw = json.loads(stdout)
+    return tuple(entry["name"] for entry in raw.get("labels", []))
+
+
+_VALID_MERGE_METHODS = frozenset({"merge", "squash", "rebase"})
+
+
+def merge_pr(pr_number: int | str, merge_method: str = "merge") -> None:
+    """#186: 意味的レビュー通過後、Python側が決定論的にサブタスクPRをマージする。
+
+    このリポジトリの慣習（通常のマージコミット、squashではない）に合わせ、
+    既定は`--merge`。マージ後はブランチを削除する。
+    """
+    number = _validate_issue_number(pr_number)
+    if merge_method not in _VALID_MERGE_METHODS:
+        raise ValueError(f"merge_methodが不正です: {merge_method!r}")
+    _run(["gh", "pr", "merge", str(number), f"--{merge_method}", "--delete-branch"])
+
+
 def list_remote_branches() -> list[str]:
     stdout = _run(["git", "branch", "-r", "--format=%(refname:short)"])
     return [line.strip() for line in stdout.splitlines() if line.strip()]

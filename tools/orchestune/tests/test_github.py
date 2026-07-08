@@ -12,9 +12,11 @@ from src.github import (
     add_comment,
     add_label,
     branch_changed_files,
+    get_issue_labels,
     list_issues_by_label,
     list_open_prs,
     list_remote_branches,
+    merge_pr,
     remove_label,
 )
 
@@ -333,3 +335,53 @@ class TestBranchChangedFiles:
             )
             files = branch_changed_files("origin/orphan")
         assert files == []
+
+
+class TestGetIssueLabels:
+    def test_returns_label_names(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout='{"labels": [{"name": "semantic-review:passed"}, {"name": "status:done"}]}',
+            )
+            labels = get_issue_labels(181)
+        assert labels == ("semantic-review:passed", "status:done")
+
+    def test_rejects_invalid_issue_number(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            with pytest.raises(ValueError):
+                get_issue_labels("181; rm -rf /")
+            mock_run.assert_not_called()
+
+
+class TestMergePr:
+    def test_merges_with_default_merge_method_and_deletes_branch(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=""
+            )
+            merge_pr(42)
+        called_args = mock_run.call_args.args[0]
+        assert called_args == ["gh", "pr", "merge", "42", "--merge", "--delete-branch"]
+
+    def test_supports_alternate_merge_method(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=""
+            )
+            merge_pr(42, merge_method="squash")
+        called_args = mock_run.call_args.args[0]
+        assert "--squash" in called_args
+
+    def test_rejects_invalid_merge_method(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            with pytest.raises(ValueError):
+                merge_pr(42, merge_method="evil; rm -rf /")
+            mock_run.assert_not_called()
+
+    def test_rejects_invalid_pr_number(self):
+        with patch("src.github.subprocess.run") as mock_run:
+            with pytest.raises(ValueError):
+                merge_pr("42; rm -rf /")
+            mock_run.assert_not_called()

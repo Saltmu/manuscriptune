@@ -3,7 +3,9 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch
 
-from src.github import IssueRecord
+from src.dispatch_targets import DispatchHandle
+from src.github import IssueRecord, PrRecord
+from src.integration_review_state import load_integration_review_state
 from src.integrator import Integrator, IntegratorConfig
 
 
@@ -393,6 +395,160 @@ class TestIntegrator:
         assert res["status"] == "success"
         assert res["merged"] == ["task-1"]
         assert ci_calls == 2
+
+    @patch("src.integrator.github.list_open_prs")
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.add_comment")
+    def test_semantic_review_dispatches_routine_and_records_pending_review(
+        self, mock_comment, mock_run, mock_list, mock_open_prs, tmp_path
+    ):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+        mock_open_prs.return_value = [
+            PrRecord(number=55, head_ref="claude/issue-1-task-1", changed_files=())
+        ]
+
+        calls = []
+
+        class DispatchingCoordinator:
+            def dispatch_review(self, **kwargs):
+                calls.append(kwargs)
+                return DispatchHandle(
+                    external_id="s1", external_url="https://claude.ai/code/s/s1"
+                )
+
+        state_path = tmp_path / "review_state.json"
+        config = IntegratorConfig(
+            apply=True,
+            parent_issue_number=100,
+            enable_semantic_review=True,
+            coordinator=DispatchingCoordinator(),
+            review_state_path=state_path,
+        )
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "semantic_review_dispatched"
+        assert res["merged"] == ["task-1"]
+        assert res["review_session_url"] == "https://claude.ai/code/s/s1"
+
+        # 同一ルーチンへレビューが委譲される（オープンPRが解決できたサブタスクのみ）
+        assert len(calls) == 1
+        assert calls[0]["merged_subtask_ids"] == ["task-1"]
+        assert calls[0]["temp_branch"] == "integration/temp-main"
+
+        # 後続サイクルでの決定論的マージのため、PR番号付きで保留状態に記録される
+        state = load_integration_review_state(state_path)
+        assert len(state.pending) == 1
+        assert state.pending[0].parent_issue_number == 100
+        assert state.pending[0].subtask_prs[0].subtask_id == "task-1"
+        assert state.pending[0].subtask_prs[0].pr_number == 55
+
+        # ブランチのforce pushは行われる（起動セッションがレビューできるように）
+        push_calls = [
+            call for call in mock_run.call_args_list if "push" in call.args[0]
+        ]
+        assert len(push_calls) == 1
+
+        # マージ可能通知は出さない（レビューがゲート）。開始通知のみ。
+        comment_body = mock_comment.call_args[0][1]
+        assert "意味的レビューを開始しました" in comment_body
+        assert "人手での最終マージが可能です" not in comment_body
+
+    @patch("src.integrator.github.list_open_prs")
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_semantic_review_skipped_when_all_subtasks_already_merged(
+        self, mock_run, mock_list, mock_open_prs, tmp_path
+    ):
+        # status:doneはdependency解決のためcloseされたIssueにも残る(#236)。
+        # 既にmainへマージ済み(openなPRが無い)サブタスクは静かにスキップされ、
+        # 再レビュー・再マージは行われない。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+        mock_open_prs.return_value = []  # task-1のPRは既にマージ済みでopenではない
+
+        called = []
+
+        class DispatchingCoordinator:
+            def dispatch_review(self, **kwargs):
+                called.append(1)
+                return DispatchHandle(external_id="s")
+
+        config = IntegratorConfig(
+            apply=True,
+            parent_issue_number=100,
+            enable_semantic_review=True,
+            coordinator=DispatchingCoordinator(),
+            review_state_path=tmp_path / "review_state.json",
+        )
+        integrator = Integrator(config)
+        with patch("src.integrator.github.add_comment") as mock_comment:
+            res = integrator.run()
+
+        assert res["status"] == "success"
+        assert called == []
+        mock_comment.assert_not_called()
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_semantic_review_explicitly_disabled_posts_mergeable(
+        self, mock_run, mock_list
+    ):
+        # enable_semantic_review=False を明示するとレビューは委譲されず従来通り。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        called = []
+
+        class TrackingCoordinator:
+            def dispatch_review(self, **kwargs):
+                called.append(1)
+                return DispatchHandle(external_id="s")
+
+        config = IntegratorConfig(
+            apply=True,
+            parent_issue_number=100,
+            enable_semantic_review=False,
+            coordinator=TrackingCoordinator(),
+        )
+        integrator = Integrator(config)
+        with patch("src.integrator.github.add_comment") as mock_comment:
+            res = integrator.run()
+
+        assert res["status"] == "success"
+        assert called == []
+        assert "人手での最終マージが可能です" in mock_comment.call_args[0][1]
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_semantic_review_default_on_but_skips_without_coordinator(
+        self, mock_run, mock_list
+    ):
+        # 既定ONだが coordinator 未注入なら安全にスキップ（既存の直接構築呼び出しを壊さない）。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        config = IntegratorConfig(apply=True)  # coordinator=None, enable=既定True
+        assert config.enable_semantic_review is True
+        integrator = Integrator(config)
+        with patch("src.integrator.github.add_comment"):
+            res = integrator.run()
+
+        assert res["status"] == "success"
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")

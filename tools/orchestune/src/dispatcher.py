@@ -53,6 +53,7 @@ from src.dispatch_state import (
     save_run_state,
 )
 from src.dispatch_targets import (
+    ClaudeCodeCloudRoutineDispatchTarget,
     DispatchHandle,
     DispatchTarget,
     LocalProcessDispatchTarget,
@@ -819,6 +820,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="#215: クラウドルーチンのAPIトークン（未指定時はORCHESTUNE_ROUTINE_TOKEN環境変数を使用）",
     )
+    parser.add_argument(
+        "--integration-review-state-path",
+        type=Path,
+        default=Path("integration_review_state.json"),
+        help="#186: 保留中の意味的レビュー（合否ポーリング・自動マージ待ち）の永続化先",
+    )
     args = parser.parse_args(argv)
 
     config = DispatcherConfig(
@@ -842,13 +849,49 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
 
         if config.apply:
+            # #186: CI通過後にLLM統合コーディネーターの意味的レビューを行う。
+            # 当初構想どおり既定ON。`ORCHESTUNE_SEMANTIC_REVIEW=0`で無効化できる。
+            semantic_review_enabled = (
+                os.environ.get("ORCHESTUNE_SEMANTIC_REVIEW", "1") != "0"
+            )
+
+            if semantic_review_enabled:
+                try:
+                    from src.integration_coordinator import process_pending_reviews
+
+                    review_report = process_pending_reviews(
+                        args.integration_review_state_path
+                    )
+                    print("Pending Semantic Review Report:")
+                    print(json.dumps(review_report, ensure_ascii=False, indent=2))
+                except Exception as re:
+                    print(
+                        f"Warning: failed to process pending semantic reviews: {re}",
+                        file=sys.stderr,
+                    )
+
             try:
                 from src.integrator import Integrator, IntegratorConfig
 
                 integrator_config = IntegratorConfig(
                     parent_issue_number=config.parent_issue_number,
                     apply=config.apply,
+                    review_state_path=args.integration_review_state_path,
                 )
+                # レビューはdispatcherと同一のクラウドルーチンを再利用して起動するため、
+                # 実ディスパッチ先がクラウドルーチンのときのみ新規レビューを有効化する
+                # （保留分のポーリング・マージは上のprocess_pending_reviewsが常に担う）。
+                if semantic_review_enabled and isinstance(
+                    config.dispatch_target, ClaudeCodeCloudRoutineDispatchTarget
+                ):
+                    from src.integration_coordinator import IntegrationCoordinator
+
+                    integrator_config.enable_semantic_review = True
+                    integrator_config.coordinator = IntegrationCoordinator(
+                        config.dispatch_target
+                    )
+                else:
+                    integrator_config.enable_semantic_review = False
                 integrator = Integrator(integrator_config)
                 integrator_run_report = integrator.run()
                 print("Integrator Report:")
