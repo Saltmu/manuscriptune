@@ -1,19 +1,19 @@
 {
   "active_worktrees": {
-    "249": {
-      "issue_number": 249,
-      "branch": "claude/issue-249-plot-writer-service",
-      "worktree_path": "worktrees/claude-issue-249-plot-writer-service",
+    "250": {
+      "issue_number": 250,
+      "branch": "claude/issue-250-plot-api-routes",
+      "worktree_path": "worktrees/claude-issue-250-plot-api-routes",
       "pid": null,
-      "started_at": 1783521675.5482457,
+      "started_at": 1783528331.2970781,
       "declared_footprint": [
-        "src/services/plot_writer_service.py",
-        "tests/test_plot_writer_service.py"
+        "src/routes/plots.py",
+        "tests/test_review_server.py"
       ],
       "recompute_count": 0,
       "forced_serial": false,
-      "external_id": "session_01TbvMLZejpY3Y8NGZf5iYeB",
-      "external_url": "https://claude.ai/code/session_01TbvMLZejpY3Y8NGZf5iYeB"
+      "external_id": "session_01Mv4RSVQxcqfJBP2BfuuBYo",
+      "external_url": "https://claude.ai/code/session_01Mv4RSVQxcqfJBP2BfuuBYo"
     }
   },
   "launch_history": [
@@ -25,7 +25,8 @@
     1783492738.714515,
     1783503433.146723,
     1783511870.0891979,
-    1783521675.5482457
+    1783521675.5482457,
+    1783528331.2970781
   ],
   "completed_worktrees": [
     {
@@ -88,6 +89,15 @@
       "branch": "claude/issue-248-plot-ai-tasks",
       "started_at": 1783511870.0891979,
       "completed_at": 1783521683.8387501,
+      "recompute_count": 0,
+      "forced_serial": false
+    },
+    {
+      "issue_number": 249,
+      "subtask_id": "plot-writer-service",
+      "branch": "claude/issue-249-plot-writer-service",
+      "started_at": 1783521675.5482457,
+      "completed_at": 1783528338.062201,
       "recompute_count": 0,
       "forced_serial": false
     }
