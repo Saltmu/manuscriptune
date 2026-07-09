@@ -15,20 +15,21 @@
       "external_id": "session_01Mv4RSVQxcqfJBP2BfuuBYo",
       "external_url": "https://claude.ai/code/session_01Mv4RSVQxcqfJBP2BfuuBYo"
     },
-    "249": {
-      "issue_number": 249,
-      "branch": "claude/issue-249-plot-writer-service",
-      "worktree_path": "worktrees/claude-issue-249-plot-writer-service",
+    "251": {
+      "issue_number": 251,
+      "branch": "claude/issue-251-plot-create-frontend",
+      "worktree_path": "worktrees/claude-issue-251-plot-create-frontend",
       "pid": null,
-      "started_at": 1783553544.848061,
+      "started_at": 1783565237.4464114,
       "declared_footprint": [
-        "src/services/plot_writer_service.py",
-        "tests/test_plot_writer_service.py"
+        "frontend/src/views/PlotCreate.svelte",
+        "frontend/src/App.svelte",
+        "frontend/src/store.js"
       ],
       "recompute_count": 0,
       "forced_serial": false,
-      "external_id": "session_01S8bXSZDftMPAuWduZcwDDb",
-      "external_url": "https://claude.ai/code/session_01S8bXSZDftMPAuWduZcwDDb"
+      "external_id": "session_018NVq9F4NzgGKtgnw7n2TFr",
+      "external_url": "https://claude.ai/code/session_018NVq9F4NzgGKtgnw7n2TFr"
     }
   },
   "launch_history": [
@@ -45,7 +46,8 @@
     1783536313.675088,
     1783543071.1309013,
     1783549040.4459794,
-    1783553544.848061
+    1783553544.848061,
+    1783565237.4464114
   ],
   "completed_worktrees": [
     {
@@ -144,6 +146,15 @@
       "branch": "claude/issue-248-plot-ai-tasks",
       "started_at": 1783549040.4459794,
       "completed_at": 1783550489.9286828,
+      "recompute_count": 0,
+      "forced_serial": false
+    },
+    {
+      "issue_number": 249,
+      "subtask_id": "plot-writer-service",
+      "branch": "claude/issue-249-plot-writer-service",
+      "started_at": 1783553544.848061,
+      "completed_at": 1783565246.9597366,
       "recompute_count": 0,
       "forced_serial": false
     }
