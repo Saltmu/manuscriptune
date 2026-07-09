@@ -118,6 +118,48 @@ class TestScanExternalLocks:
         )
         assert [t.issue_number for t in result.to_unlock] == [1]
 
+    def test_done_task_is_never_locked(self):
+        done_task = Task(
+            issue_number=1,
+            subtask_id="task-1",
+            footprint=("src/shared.py",),
+            symbols=(),
+            risk=False,
+            priority="medium",
+            progress_partial=False,
+            status_labels=("status:done",),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+        prs = [
+            PrRecord(number=99, head_ref="feat/other", changed_files=("src/shared.py",))
+        ]
+        result = scan_external_locks(
+            [done_task], remote_branches=[], prs=prs, active_branches=[]
+        )
+        assert result.to_lock == []
+        assert result.to_unlock == []
+
+    def test_done_task_with_external_lock_label_is_unlocked(self):
+        done_locked_task = Task(
+            issue_number=1,
+            subtask_id="task-1",
+            footprint=("src/shared.py",),
+            symbols=(),
+            risk=False,
+            priority="medium",
+            progress_partial=False,
+            status_labels=("status:done", "status:external-lock"),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+        prs = [
+            PrRecord(number=99, head_ref="feat/other", changed_files=("src/shared.py",))
+        ]
+        result = scan_external_locks(
+            [done_locked_task], remote_branches=[], prs=prs, active_branches=[]
+        )
+        assert result.to_lock == []
+        assert [t.issue_number for t in result.to_unlock] == [1]
+
 
 class TestCheckFootprintDeviation:
     def test_returns_files_outside_declared_footprint(self):

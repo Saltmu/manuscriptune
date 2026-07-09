@@ -46,6 +46,12 @@ def scan_external_locks(
     to_lock: list[Task] = []
     to_unlock: list[Task] = []
     for task in queued_tasks:
+        currently_locked = "status:external-lock" in task.status_labels
+        if "status:done" in task.status_labels:
+            if currently_locked:
+                to_unlock.append(task)
+            continue
+
         pr_footprints = [
             set(pr.changed_files)
             for pr in prs
@@ -56,7 +62,6 @@ def scan_external_locks(
             set(task.footprint) & footprint
             for footprint in [*branch_footprints, *pr_footprints]
         )
-        currently_locked = "status:external-lock" in task.status_labels
         if overlaps and not currently_locked:
             to_lock.append(task)
         elif not overlaps and currently_locked:
