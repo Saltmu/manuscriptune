@@ -77,6 +77,20 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
+      - name: Load cached root venv
+        # Integratorは仮マージ検証のためルートリポジトリの一時worktreeで
+        # ./scripts/local-ci.sh を実行するが、上記の Install dependencies は
+        # tools/orchestune（このジョブのdefault working-directory）のpoetry環境しか
+        # 整備しないため、ルートプロジェクト用に別途セットアップする。
+        uses: actions/cache@v5
+        with:
+          path: .venv
+          key: root-venv-v1-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install root project dependencies
+        working-directory: .
+        run: poetry install --no-interaction
+
       - name: Run dispatch cycle (scheduled)
         if: github.event_name == 'schedule'
         env:
