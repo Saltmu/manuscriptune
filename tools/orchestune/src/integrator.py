@@ -18,7 +18,6 @@ class IntegratorConfig:
     base_branch: str = "origin/main"
     temp_branch: str = "integration/temp-main"
     ci_command: list[str] | None = None
-    max_flaky_retries: int = 2
     parent_issue_number: int | None = None
     apply: bool = False
     # Integratorの仕事は「統合ブランチ(temp_branch)を作成しCI通過を確認した上で、
@@ -434,8 +433,12 @@ class Integrator:
             pass
 
     def _run_ci_with_flaky_check(self) -> tuple[bool, str]:
+        # #208: 丸ごとの再実行はしない。既知のflakyテストは呼び出し先の
+        # pytest-rerunfailures（quarantineリストに基づく個別リトライ）が
+        # 内部で吸収するため、ここで通しの再実行を重ねる必要はない。
+        # quarantine対象外のテストが不安定な場合は、そのままCI失敗として
+        # 正しく検知させ、人間がquarantineリストへの追加を判断する。
         ci_cmd = self.config.ci_command or ["./scripts/local-ci.sh"]
-        last_output = ""
 
         env = os.environ.copy()
         venv_path = self.original_root / ".venv"
@@ -450,22 +453,19 @@ class Integrator:
             if bin_path.exists():
                 env["PATH"] = f"{bin_path.resolve()}{os.pathsep}{env.get('PATH', '')}"
 
-        for _ in range(1 + self.config.max_flaky_retries):
-            try:
-                subprocess.run(
-                    ci_cmd,
-                    cwd=str(self.config.repository_root),
-                    check=True,
-                    capture_output=True,
-                    env=env,
-                )
-                return True, ""
-            except subprocess.CalledProcessError as e:
-                stdout = (e.stdout or b"").decode(errors="replace")
-                stderr = (e.stderr or b"").decode(errors="replace")
-                last_output = f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
-
-        return False, last_output
+        try:
+            subprocess.run(
+                ci_cmd,
+                cwd=str(self.config.repository_root),
+                check=True,
+                capture_output=True,
+                env=env,
+            )
+            return True, ""
+        except subprocess.CalledProcessError as e:
+            stdout = (e.stdout or b"").decode(errors="replace")
+            stderr = (e.stderr or b"").decode(errors="replace")
+            return False, f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
 
     # #295: GitHubコメントの肥大化を避けるため、末尾のみを埋め込む。
     # エラーメッセージ本体は通常出力の末尾に現れるため、これで十分な情報量を確保する。

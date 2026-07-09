@@ -1,0 +1,13 @@
+# 既知のflaky testの隔離リスト。
+#
+# ここに列挙したテストは、Orchestune Integratorの統合CI検証時に
+# pytest-rerunfailures により個別に自動リトライされ（reruns=3）、
+# 無関係なflakyテストの失敗で正しいブランチが誤って「原因」と判定される
+# ことを防ぐ。新規にflakyと判明したテストを追加する際は、必ずこの下に
+# 観測した非決定的な失敗の状況（日付・症状）をコメントで残すこと。
+#
+# 例:
+#   tests:
+#     # 2026-07-10: 並列実行時に稀にタイムアウトすることを確認 (#208)
+#     - tests/test_example.py::test_flaky_thing
+tests: []
