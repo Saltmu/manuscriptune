@@ -34,11 +34,13 @@ export const selectedReviewHistoryVersion = writable(null);
 export const consoleLogMap = writable({
     sync: '--- プロセスを開始します ---\n',
     plot_review: '--- プロセスを開始します ---\n',
+    plot_create: '--- プロセスを開始します ---\n',
     editor: '--- プロセスを開始します ---\n'
 });
 
 export const consoleStatusMap = writable({
     sync: 'IDLE',
     plot_review: 'IDLE',
+    plot_create: 'IDLE',
     editor: 'IDLE'
 });
