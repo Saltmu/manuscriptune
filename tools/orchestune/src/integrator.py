@@ -351,7 +351,7 @@ class Integrator:
                     failed_tasks.append(task.subtask_id)
                     continue
 
-                ci_success = self._run_ci_with_flaky_check()
+                ci_success, ci_output = self._run_ci_with_flaky_check()
                 if not ci_success:
                     subprocess.run(
                         ["git", "reset", "--hard", "HEAD~1"],
@@ -359,7 +359,9 @@ class Integrator:
                         check=True,
                         capture_output=True,
                     )
-                    self._handle_failure(task, "CI verification failed")
+                    self._handle_failure(
+                        task, "CI verification failed", ci_output=ci_output
+                    )
                     failed_tasks.append(task.subtask_id)
                     continue
 
@@ -430,8 +432,9 @@ class Integrator:
         except (subprocess.CalledProcessError, OSError):
             pass
 
-    def _run_ci_with_flaky_check(self) -> bool:
+    def _run_ci_with_flaky_check(self) -> tuple[bool, str]:
         ci_cmd = self.config.ci_command or ["./scripts/local-ci.sh"]
+        last_output = ""
         for _ in range(1 + self.config.max_flaky_retries):
             try:
                 subprocess.run(
@@ -440,19 +443,41 @@ class Integrator:
                     check=True,
                     capture_output=True,
                 )
-                return True
-            except subprocess.CalledProcessError:
-                pass
+                return True, ""
+            except subprocess.CalledProcessError as e:
+                stdout = (e.stdout or b"").decode(errors="replace")
+                stderr = (e.stderr or b"").decode(errors="replace")
+                last_output = f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
 
-        return False
+        return False, last_output
 
-    def _handle_failure(self, task: Task, reason: str):
+    # #295: GitHubコメントの肥大化を避けるため、末尾のみを埋め込む。
+    # エラーメッセージ本体は通常出力の末尾に現れるため、これで十分な情報量を確保する。
+    _CI_OUTPUT_COMMENT_TAIL_CHARS = 4000
+
+    def _handle_failure(
+        self, task: Task, reason: str, ci_output: str | None = None
+    ) -> None:
+        if ci_output:
+            # #295: ジョブログ（stderr）には切り詰めずに全文を残し、
+            # コメントに書ききれない詳細もそこから追跡できるようにする。
+            print(
+                f"[Integrator] CI failure output for {task.subtask_id}:\n{ci_output}",
+                file=sys.stderr,
+            )
         if self.config.apply:
             github.remove_label(task.issue_number, "status:done")
             github.add_label(task.issue_number, "status:queued")
-            github.add_comment(
-                task.issue_number,
+            comment_body = (
                 f"仮マージCIでエラーが検出されたため、マージを取り消し差し戻しました。\n"
                 f"理由: {reason}\n"
-                f"自動修復エージェントの再起動を待ちます。",
             )
+            if ci_output:
+                truncated = ci_output[-self._CI_OUTPUT_COMMENT_TAIL_CHARS :]
+                comment_body += (
+                    "\n<details><summary>CI出力（末尾"
+                    f"{self._CI_OUTPUT_COMMENT_TAIL_CHARS}文字）</summary>\n\n"
+                    f"```\n{truncated}\n```\n</details>\n"
+                )
+            comment_body += "自動修復エージェントの再起動を待ちます。"
+            github.add_comment(task.issue_number, comment_body)

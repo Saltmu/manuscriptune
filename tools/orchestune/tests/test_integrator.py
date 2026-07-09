@@ -132,7 +132,10 @@ class TestIntegrator:
         def run_side_effect(args, **kwargs):
             if "local-ci.sh" in args[0] or "local-ci.sh" in args:
                 raise subprocess.CalledProcessError(
-                    returncode=1, cmd=args, stderr=b"CI fail"
+                    returncode=1,
+                    cmd=args,
+                    output=b"5 passed, 1 failed",
+                    stderr=b"CI fail",
                 )
             return subprocess.CompletedProcess(args=args, returncode=0)
 
@@ -153,7 +156,71 @@ class TestIntegrator:
 
         mock_remove.assert_called_with(1, "status:done")
         mock_add.assert_called_with(1, "status:queued")
-        assert "CI verification failed" in mock_comment.call_args[0][1]
+        comment_body = mock_comment.call_args[0][1]
+        assert "CI verification failed" in comment_body
+        # #295: CI出力が破棄されず、コメントに含まれることを検証する
+        assert "CI fail" in comment_body
+        assert "5 passed, 1 failed" in comment_body
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.remove_label")
+    @patch("src.integrator.github.add_label")
+    @patch("src.integrator.github.add_comment")
+    def test_ci_failure_output_is_logged_to_job_log(
+        self, mock_comment, mock_add, mock_remove, mock_run, mock_list, capsys
+    ):
+        # #295: GitHub Actionsのジョブログからも追跡できるよう、
+        # コメントへの切り詰め有無に関わらず出力全文をstderrへprintする。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        def run_side_effect(args, **kwargs):
+            if "local-ci.sh" in args[0] or "local-ci.sh" in args:
+                raise subprocess.CalledProcessError(
+                    returncode=1, cmd=args, stderr=b"UNIQUE_JOB_LOG_MARKER"
+                )
+            return subprocess.CompletedProcess(args=args, returncode=0)
+
+        mock_run.side_effect = run_side_effect
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        integrator.run()
+
+        captured = capsys.readouterr()
+        assert "UNIQUE_JOB_LOG_MARKER" in captured.err
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.remove_label")
+    @patch("src.integrator.github.add_label")
+    @patch("src.integrator.github.add_comment")
+    def test_ci_failure_comment_truncates_long_output(
+        self, mock_comment, mock_add, mock_remove, mock_run, mock_list
+    ):
+        # コメント本文の肥大化を避けるため、末尾のみを埋め込む。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        long_output = ("x" * 10000 + "TAIL_MARKER").encode()
+
+        def run_side_effect(args, **kwargs):
+            if "local-ci.sh" in args[0] or "local-ci.sh" in args:
+                raise subprocess.CalledProcessError(
+                    returncode=1, cmd=args, output=long_output
+                )
+            return subprocess.CompletedProcess(args=args, returncode=0)
+
+        mock_run.side_effect = run_side_effect
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        integrator.run()
+
+        comment_body = mock_comment.call_args[0][1]
+        assert "TAIL_MARKER" in comment_body
+        assert len(comment_body) < 6000
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
