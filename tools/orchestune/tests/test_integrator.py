@@ -717,6 +717,11 @@ class TestIntegrator:
         assert "env" in call_kwargs
         env = call_kwargs["env"]
         assert "VIRTUAL_ENV" in env
-        assert env["VIRTUAL_ENV"].endswith(".venv")
+
+        expected_venv = integrator.original_root / ".venv"
+        if "tools/orchestune" in str(expected_venv):
+            expected_venv = expected_venv.parent.parent.parent / ".venv"
+
+        assert env["VIRTUAL_ENV"] == str(expected_venv.resolve())
         assert "PATH" in env
-        assert env["PATH"].startswith(str(integrator.original_root / ".venv" / "bin"))
+        assert env["PATH"].startswith(str(expected_venv / "bin"))
