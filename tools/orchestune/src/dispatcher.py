@@ -666,7 +666,8 @@ def _sync_external_locks(
             github.add_label(task.issue_number, "status:external-lock")
         for task in lock_result.to_unlock:
             github.remove_label(task.issue_number, "status:external-lock")
-            github.add_label(task.issue_number, "status:queued")
+            if "status:done" not in task.status_labels:
+                github.add_label(task.issue_number, "status:queued")
 
     return lock_result
 

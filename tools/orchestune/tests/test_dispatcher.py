@@ -2164,3 +2164,43 @@ class TestStaleActiveEntryReconciliation:
 
         loaded = load_run_state(run_state_path)
         assert "1" not in loaded.active_worktrees
+
+
+class TestSyncExternalLocks:
+    @patch("src.dispatcher.github.list_remote_branches")
+    @patch("src.dispatcher.github.remove_label")
+    @patch("src.dispatcher.github.add_label")
+    def test_sync_external_locks_unlocks_without_requeue_for_done_tasks(
+        self, mock_add_label, mock_remove_label, mock_list_branches
+    ):
+        from src.dispatcher import _sync_external_locks
+
+        mock_list_branches.return_value = []
+
+        done_task = Task(
+            issue_number=1,
+            subtask_id="task-1",
+            footprint=("src/shared.py",),
+            symbols=(),
+            risk=False,
+            priority="medium",
+            progress_partial=False,
+            status_labels=("status:done", "status:external-lock"),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+
+        run_state = RunState(active_worktrees={})
+        config = DispatcherConfig(apply=True)
+
+        res = _sync_external_locks(
+            tasks_by_issue={1: done_task},
+            prs=[],
+            run_state=run_state,
+            config=config,
+        )
+
+        assert res.to_lock == []
+        assert [t.issue_number for t in res.to_unlock] == [1]
+
+        mock_remove_label.assert_called_once_with(1, "status:external-lock")
+        assert mock_add_label.call_count == 0
