@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ class Integrator:
         self.config = config
         if self.config.ci_command is None:
             self.config.ci_command = ["./scripts/local-ci.sh"]
+        self.original_root = Path(self.config.repository_root).resolve()
 
     def run(self) -> dict:
         sorted_done_tasks = self._get_sorted_done_tasks()
@@ -435,6 +437,15 @@ class Integrator:
     def _run_ci_with_flaky_check(self) -> tuple[bool, str]:
         ci_cmd = self.config.ci_command or ["./scripts/local-ci.sh"]
         last_output = ""
+
+        env = os.environ.copy()
+        venv_path = self.original_root / ".venv"
+        if venv_path.exists():
+            env["VIRTUAL_ENV"] = str(venv_path.resolve())
+            bin_path = venv_path / "bin"
+            if bin_path.exists():
+                env["PATH"] = f"{bin_path.resolve()}{os.pathsep}{env.get('PATH', '')}"
+
         for _ in range(1 + self.config.max_flaky_retries):
             try:
                 subprocess.run(
@@ -442,6 +453,7 @@ class Integrator:
                     cwd=str(self.config.repository_root),
                     check=True,
                     capture_output=True,
+                    env=env,
                 )
                 return True, ""
             except subprocess.CalledProcessError as e:
