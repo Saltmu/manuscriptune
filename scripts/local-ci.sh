@@ -252,6 +252,24 @@ if [ "$ORCHESTUNE_CHANGED" = "true" ]; then
   ORCH_PID=$!
 fi
 
+# tests/test_review_server.py::test_get_index requires frontend/dist/index.html
+# to exist. frontend/dist is gitignored, so a clean working tree that has never
+# run a frontend build (e.g. Orchestune Integrator's throwaway git worktree, or
+# any first-time checkout) has no index.html yet. In "backend"-only scope
+# run_frontend_steps never runs at all, so that test always fails regardless of
+# the backend change under test (regression of #167). In "full"/"both" scope
+# run_frontend_steps does build it, but does so in a background job racing
+# against the backend pytest run below, so a cold cache can still lose the
+# race. Build it synchronously up front whenever backend tests are about to run.
+if [ ! -f "frontend/dist/index.html" ]; then
+  case "$CHANGE_TYPE" in
+    full | both | backend)
+      echo "frontend/dist/index.html not found; building frontend once (required by backend tests)..."
+      (cd frontend && npm ci && npm run build)
+      ;;
+  esac
+fi
+
 if [ "$CHANGE_TYPE" = "full" ] || [ "$CHANGE_TYPE" = "both" ]; then
   echo "Running frontend and backend CI steps in parallel..."
   
