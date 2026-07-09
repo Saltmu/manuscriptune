@@ -14,22 +14,6 @@
       "forced_serial": false,
       "external_id": "session_01Mv4RSVQxcqfJBP2BfuuBYo",
       "external_url": "https://claude.ai/code/session_01Mv4RSVQxcqfJBP2BfuuBYo"
-    },
-    "251": {
-      "issue_number": 251,
-      "branch": "claude/issue-251-plot-create-frontend",
-      "worktree_path": "worktrees/claude-issue-251-plot-create-frontend",
-      "pid": null,
-      "started_at": 1783565237.4464114,
-      "declared_footprint": [
-        "frontend/src/views/PlotCreate.svelte",
-        "frontend/src/App.svelte",
-        "frontend/src/store.js"
-      ],
-      "recompute_count": 0,
-      "forced_serial": false,
-      "external_id": "session_018NVq9F4NzgGKtgnw7n2TFr",
-      "external_url": "https://claude.ai/code/session_018NVq9F4NzgGKtgnw7n2TFr"
     }
   },
   "launch_history": [
@@ -155,6 +139,15 @@
       "branch": "claude/issue-249-plot-writer-service",
       "started_at": 1783553544.848061,
       "completed_at": 1783565246.9597366,
+      "recompute_count": 0,
+      "forced_serial": false
+    },
+    {
+      "issue_number": 251,
+      "subtask_id": "plot-create-frontend",
+      "branch": "claude/issue-251-plot-create-frontend",
+      "started_at": 1783565237.4464114,
+      "completed_at": 1783570431.6244624,
       "recompute_count": 0,
       "forced_serial": false
     }
