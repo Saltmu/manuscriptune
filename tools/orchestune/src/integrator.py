@@ -35,6 +35,7 @@ class Integrator:
         if self.config.ci_command is None:
             self.config.ci_command = ["./scripts/local-ci.sh"]
         self.original_root = Path(self.config.repository_root).resolve()
+        self.failed_reasons: dict[str, str] = {}
 
     def run(self) -> dict:
         sorted_done_tasks = self._get_sorted_done_tasks()
@@ -164,6 +165,7 @@ class Integrator:
                 "status": "partial_success" if merged_tasks else "failure",
                 "merged": merged_tasks,
                 "failed": failed_tasks,
+                "failed_reasons": self.failed_reasons,
             }
         finally:
             if temp_worktree_path:
@@ -490,6 +492,7 @@ class Integrator:
     def _handle_failure(
         self, task: Task, reason: str, ci_output: str | None = None
     ) -> None:
+        self.failed_reasons[task.subtask_id] = reason
         if ci_output:
             # #295: ジョブログ（stderr）には切り詰めずに全文を残し、
             # コメントに書ききれない詳細もそこから追跡できるようにする。
