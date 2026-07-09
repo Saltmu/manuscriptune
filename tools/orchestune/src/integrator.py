@@ -300,9 +300,14 @@ class Integrator:
         merged_tasks = []
         failed_tasks = []
 
+        open_pr_branches = set()
         if self.config.apply:
             self._ensure_git_identity()
             self._ensure_full_history()
+            try:
+                open_pr_branches = {pr.head_ref for pr in github.list_open_prs()}
+            except Exception as e:
+                print(f"Warning: Failed to list open PRs: {e}", file=sys.stderr)
 
         for task in sorted_done_tasks:
             branch_name = (
@@ -327,6 +332,16 @@ class Integrator:
                         capture_output=True,
                     )
                 except subprocess.CalledProcessError as e:
+                    # もし対象ブランチのOpen PRが存在しない場合は、すでにマージ及びブランチ削除
+                    # 済みとみなして、失敗扱いにはせず正常マージ完了扱いでスキップする。
+                    if branch_name not in open_pr_branches:
+                        print(
+                            f"[Integrator] Branch {branch_name} not found and no open PR exists. "
+                            "Assuming already merged, skipping integration merge."
+                        )
+                        merged_tasks.append(task.subtask_id)
+                        continue
+
                     self._handle_failure(
                         task, f"Failed to fetch branch: {e.stderr.decode()}"
                     )
