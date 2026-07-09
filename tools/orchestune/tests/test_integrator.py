@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from src.dispatch_targets import DispatchHandle
 from src.github import IssueRecord, PrRecord
-from src.integration_review_state import load_integration_review_state
 from src.integrator import Integrator, IntegratorConfig
 
 
@@ -43,7 +42,11 @@ class TestIntegrator:
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
-    def test_success_integration(self, mock_run, mock_list):
+    @patch("src.integrator.github.list_open_prs")
+    @patch("src.integrator.github.create_pull_request")
+    def test_success_integration(
+        self, mock_create_pr, mock_open_prs, mock_run, mock_list
+    ):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         issue_b = _issue(
             2, labels=("status:done",), subtask_id="task-2", depends_on=("task-1",)
@@ -59,15 +62,18 @@ class TestIntegrator:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=b"", stderr=b""
         )
+        mock_open_prs.return_value = []
+        mock_create_pr.return_value = 999
 
         config = IntegratorConfig(apply=True, parent_issue_number=100)
         integrator = Integrator(config)
 
-        with patch("src.integrator.github.add_comment") as mock_comment:
-            res = integrator.run()
+        res = integrator.run()
 
         assert res["status"] == "success"
         assert res["merged"] == ["task-1", "task-2"]
+        assert res["integration_pr_number"] == 999
+        assert res["semantic_review_dispatched"] is False
 
         merge_calls = [
             call for call in mock_run.call_args_list if "merge" in call.args[0]
@@ -76,11 +82,62 @@ class TestIntegrator:
         assert any("claude/issue-1-task-1" in arg for arg in merge_calls[0].args[0])
         assert any("claude/issue-2-task-2" in arg for arg in merge_calls[1].args[0])
 
-        mock_comment.assert_called_once()
-        assert (
-            "🎉 すべての完了タスク (task-1, task-2) の仮マージCIが正常に通過しました。"
-            in mock_comment.call_args[0][1]
+        # 統合ブランチからmainへのPRが作成され、成功時の統合作業はここで完結する
+        # （最終マージは常に人間が行う）。
+        mock_create_pr.assert_called_once()
+        assert mock_create_pr.call_args.kwargs["head"] == "integration/temp-main"
+        assert mock_create_pr.call_args.kwargs["base"] == "main"
+        assert "task-1" in mock_create_pr.call_args.kwargs["body"]
+        assert "人間が行ってください" in mock_create_pr.call_args.kwargs["body"]
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.create_pull_request")
+    def test_success_integration_reuses_existing_open_pr(
+        self, mock_create_pr, mock_run, mock_list
+    ):
+        # 既にintegration/temp-main→mainのopenなPRがある場合は重複作成しない。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
         )
+
+        with patch("src.integrator.github.list_open_prs") as mock_open_prs:
+            mock_open_prs.return_value = [
+                PrRecord(number=777, head_ref="integration/temp-main", changed_files=())
+            ]
+            config = IntegratorConfig(apply=True)
+            integrator = Integrator(config)
+            res = integrator.run()
+
+        assert res["status"] == "success"
+        assert res["integration_pr_number"] == 777
+        mock_create_pr.assert_not_called()
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.list_open_prs")
+    @patch("src.integrator.github.create_pull_request")
+    def test_success_integration_pr_creation_failure_is_non_fatal(
+        self, mock_create_pr, mock_open_prs, mock_run, mock_list
+    ):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+        mock_open_prs.return_value = []
+        mock_create_pr.side_effect = RuntimeError("no commits between main and branch")
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "success"
+        assert res["merged"] == ["task-1"]
+        assert res["integration_pr_number"] is None
+        assert res["semantic_review_dispatched"] is False
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
@@ -517,18 +574,16 @@ class TestIntegrator:
     @patch("src.integrator.github.list_open_prs")
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
-    @patch("src.integrator.github.add_comment")
-    def test_semantic_review_dispatches_routine_and_records_pending_review(
-        self, mock_comment, mock_run, mock_list, mock_open_prs, tmp_path
+    def test_semantic_review_dispatched_fire_and_forget_after_pr_created(
+        self, mock_run, mock_list, mock_open_prs
     ):
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=b"", stderr=b""
         )
-        mock_open_prs.return_value = [
-            PrRecord(number=55, head_ref="claude/issue-1-task-1", changed_files=())
-        ]
+        # 統合ブランチ(temp-main)向けのopenなPRはまだ無いので新規作成される。
+        mock_open_prs.return_value = []
 
         calls = []
 
@@ -539,32 +594,28 @@ class TestIntegrator:
                     external_id="s1", external_url="https://claude.ai/code/s/s1"
                 )
 
-        state_path = tmp_path / "review_state.json"
         config = IntegratorConfig(
             apply=True,
             parent_issue_number=100,
             enable_semantic_review=True,
             coordinator=DispatchingCoordinator(),
-            review_state_path=state_path,
         )
         integrator = Integrator(config)
-        res = integrator.run()
+        with patch("src.integrator.github.create_pull_request") as mock_create_pr:
+            mock_create_pr.return_value = 315
+            res = integrator.run()
 
-        assert res["status"] == "semantic_review_dispatched"
+        assert res["status"] == "success"
         assert res["merged"] == ["task-1"]
-        assert res["review_session_url"] == "https://claude.ai/code/s/s1"
+        assert res["integration_pr_number"] == 315
+        assert res["semantic_review_dispatched"] is True
 
-        # 同一ルーチンへレビューが委譲される（オープンPRが解決できたサブタスクのみ）
+        # レビューは統合PR番号付きでfire-and-forgetで起動される。結果を待ったり、
+        # 状態を記録したりはしない（自動マージ等の後続処理が無くなったため）。
         assert len(calls) == 1
         assert calls[0]["merged_subtask_ids"] == ["task-1"]
         assert calls[0]["temp_branch"] == "integration/temp-main"
-
-        # 後続サイクルでの決定論的マージのため、PR番号付きで保留状態に記録される
-        state = load_integration_review_state(state_path)
-        assert len(state.pending) == 1
-        assert state.pending[0].parent_issue_number == 100
-        assert state.pending[0].subtask_prs[0].subtask_id == "task-1"
-        assert state.pending[0].subtask_prs[0].pr_number == 55
+        assert calls[0]["pr_number"] == 315
 
         # ブランチのforce pushは行われる（起動セッションがレビューできるように）
         push_calls = [
@@ -572,60 +623,21 @@ class TestIntegrator:
         ]
         assert len(push_calls) == 1
 
-        # マージ可能通知は出さない（レビューがゲート）。開始通知のみ。
-        comment_body = mock_comment.call_args[0][1]
-        assert "意味的レビューを開始しました" in comment_body
-        assert "人手での最終マージが可能です" not in comment_body
-
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
     @patch("src.integrator.github.list_open_prs")
-    @patch("src.integrator.github.list_issues_by_label")
-    @patch("src.integrator.subprocess.run")
-    def test_semantic_review_skipped_when_all_subtasks_already_merged(
-        self, mock_run, mock_list, mock_open_prs, tmp_path
+    @patch("src.integrator.github.create_pull_request")
+    def test_semantic_review_explicitly_disabled_is_not_dispatched(
+        self, mock_create_pr, mock_open_prs, mock_run, mock_list
     ):
-        # status:doneはdependency解決のためcloseされたIssueにも残る(#236)。
-        # 既にmainへマージ済み(openなPRが無い)サブタスクは静かにスキップされ、
-        # 再レビュー・再マージは行われない。
+        # enable_semantic_review=False を明示するとレビューは委譲されない。
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=b"", stderr=b""
         )
-        mock_open_prs.return_value = []  # task-1のPRは既にマージ済みでopenではない
-
-        called = []
-
-        class DispatchingCoordinator:
-            def dispatch_review(self, **kwargs):
-                called.append(1)
-                return DispatchHandle(external_id="s")
-
-        config = IntegratorConfig(
-            apply=True,
-            parent_issue_number=100,
-            enable_semantic_review=True,
-            coordinator=DispatchingCoordinator(),
-            review_state_path=tmp_path / "review_state.json",
-        )
-        integrator = Integrator(config)
-        with patch("src.integrator.github.add_comment") as mock_comment:
-            res = integrator.run()
-
-        assert res["status"] == "success"
-        assert called == []
-        mock_comment.assert_not_called()
-
-    @patch("src.integrator.github.list_issues_by_label")
-    @patch("src.integrator.subprocess.run")
-    def test_semantic_review_explicitly_disabled_posts_mergeable(
-        self, mock_run, mock_list
-    ):
-        # enable_semantic_review=False を明示するとレビューは委譲されず従来通り。
-        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
-        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=b"", stderr=b""
-        )
+        mock_open_prs.return_value = []
+        mock_create_pr.return_value = 315
 
         called = []
 
@@ -641,12 +653,11 @@ class TestIntegrator:
             coordinator=TrackingCoordinator(),
         )
         integrator = Integrator(config)
-        with patch("src.integrator.github.add_comment") as mock_comment:
-            res = integrator.run()
+        res = integrator.run()
 
         assert res["status"] == "success"
         assert called == []
-        assert "人手での最終マージが可能です" in mock_comment.call_args[0][1]
+        assert res["semantic_review_dispatched"] is False
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
@@ -663,10 +674,14 @@ class TestIntegrator:
         config = IntegratorConfig(apply=True)  # coordinator=None, enable=既定True
         assert config.enable_semantic_review is True
         integrator = Integrator(config)
-        with patch("src.integrator.github.add_comment"):
+        with (
+            patch("src.integrator.github.list_open_prs", return_value=[]),
+            patch("src.integrator.github.create_pull_request", return_value=315),
+        ):
             res = integrator.run()
 
         assert res["status"] == "success"
+        assert res["semantic_review_dispatched"] is False
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
