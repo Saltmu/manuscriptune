@@ -14,21 +14,6 @@
       "forced_serial": false,
       "external_id": "session_01Mv4RSVQxcqfJBP2BfuuBYo",
       "external_url": "https://claude.ai/code/session_01Mv4RSVQxcqfJBP2BfuuBYo"
-    },
-    "248": {
-      "issue_number": 248,
-      "branch": "claude/issue-248-plot-ai-tasks",
-      "worktree_path": "worktrees/claude-issue-248-plot-ai-tasks",
-      "pid": null,
-      "started_at": 1783606415.666746,
-      "declared_footprint": [
-        "src/utils/ai_tasks/plotting.py",
-        "tests/test_ai_tasks_plotting.py"
-      ],
-      "recompute_count": 0,
-      "forced_serial": false,
-      "external_id": "session_01JQ2SxNLuUDVeWKQkGoYEpG",
-      "external_url": "https://claude.ai/code/session_01JQ2SxNLuUDVeWKQkGoYEpG"
     }
   },
   "launch_history": [
@@ -204,6 +189,15 @@
       "branch": "claude/issue-249-plot-writer-service",
       "started_at": 1783602425.6617277,
       "completed_at": 1783603528.2957728,
+      "recompute_count": 0,
+      "forced_serial": false
+    },
+    {
+      "issue_number": 248,
+      "subtask_id": "plot-ai-tasks",
+      "branch": "claude/issue-248-plot-ai-tasks",
+      "started_at": 1783606415.666746,
+      "completed_at": 1783606805.0236864,
       "recompute_count": 0,
       "forced_serial": false
     }
