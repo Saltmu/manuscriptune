@@ -96,21 +96,39 @@ def quota_available(
     return min(concurrent_remaining, rate_remaining)
 
 
-def _wait_seconds(task: Task, now: float) -> float:
+def _last_attempt_at(task: Task, run_state: RunState) -> float | None:
+    """このタスクが直近に試行完了(成功/失敗問わず)した時刻。履歴が無ければNone。"""
+    timestamps = [
+        w.completed_at
+        for w in run_state.completed_worktrees
+        if w.issue_number == task.issue_number
+    ]
+    return max(timestamps) if timestamps else None
+
+
+def _wait_seconds(task: Task, run_state: RunState, now: float) -> float:
+    # #299: created_at（Issue作成時刻、不変値）だけを基準にすると、
+    # ほぼ同時刻に作成された同priorityのタスク同士が恒常的に同点になり、
+    # issue番号の小さい方がタイブレークで勝ち続けて番号の大きい方が
+    # 「飢餓状態」になる。直近に試行済みのタスクは相対的に後回しに
+    # なるよう、試行履歴があればそちらを基準にする。
+    last_attempt = _last_attempt_at(task, run_state)
+    if last_attempt is not None:
+        return max(0.0, now - last_attempt)
     created = datetime.fromisoformat(task.created_at)
     return max(0.0, now - created.timestamp())
 
 
 def compute_priority_score(
-    task: Task, all_candidate_tasks: list[Task], now: float
+    task: Task, all_candidate_tasks: list[Task], run_state: RunState, now: float
 ) -> float:
     base_priority = BASE_PRIORITY[task.priority]
-    waits = [_wait_seconds(t, now) for t in all_candidate_tasks]
+    waits = [_wait_seconds(t, run_state, now) for t in all_candidate_tasks]
     avg_wait = sum(waits) / len(waits) if waits else 0.0
 
     time_bonus = 0.0
     if avg_wait > 0:
-        wait = _wait_seconds(task, now)
+        wait = _wait_seconds(task, run_state, now)
         time_bonus = max(0.0, (wait / avg_wait) - 1.0) * TIME_BONUS_WEIGHT
 
     progress_factor = PROGRESS_BONUS if task.progress_partial else 0.0
@@ -139,6 +157,9 @@ def select_next_tasks(
     )
     scored = sorted(
         eligible,
-        key=lambda t: (-compute_priority_score(t, eligible, now), t.issue_number),
+        key=lambda t: (
+            -compute_priority_score(t, eligible, run_state, now),
+            t.issue_number,
+        ),
     )
     return scored[:slots]
