@@ -36,6 +36,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Configure git identity
+        # dispatch-cycle経由でIntegratorがgit merge --no-ffでコミットを作成するため、
+        # それより前にidentityを設定しておく必要がある（未設定だと
+        # "Committer identity unknown" でmergeが失敗し、Merge conflictと誤診断される）。
+        run: |
+          git config user.name "orchestune-bot"
+          git config user.email "orchestune-bot@users.noreply.github.com"
+
       - name: Restore state files from state branch
         run: |
           if git ls-remote --exit-code --heads origin "$STATE_BRANCH" > /dev/null 2>&1; then
@@ -69,6 +77,20 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction
 
+      - name: Load cached root venv
+        # Integratorは仮マージ検証のためルートリポジトリの一時worktreeで
+        # ./scripts/local-ci.sh を実行するが、上記の Install dependencies は
+        # tools/orchestune（このジョブのdefault working-directory）のpoetry環境しか
+        # 整備しないため、ルートプロジェクト用に別途セットアップする。
+        uses: actions/cache@v5
+        with:
+          path: .venv
+          key: root-venv-v1-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install root project dependencies
+        working-directory: .
+        run: poetry install --no-interaction
+
       - name: Run dispatch cycle (scheduled)
         if: github.event_name == 'schedule'
         env:
@@ -96,9 +118,6 @@ jobs:
       - name: Persist state files to state branch
         if: always()
         run: |
-          git config user.name "orchestune-bot"
-          git config user.email "orchestune-bot@users.noreply.github.com"
-
           STATE_DIR=$(mktemp -d)
           cp "$RUN_STATE_PATH" "$STATE_DIR/$RUN_STATE_PATH"
           cp "$EVENTS_LOG_PATH" "$STATE_DIR/$EVENTS_LOG_PATH"

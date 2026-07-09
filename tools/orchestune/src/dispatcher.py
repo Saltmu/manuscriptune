@@ -22,6 +22,7 @@ from src import github
 from src.dispatch_gc import (
     _collect_zombies_and_timeouts,
     _finalize_completed_worktree,
+    _finalize_not_needed_worktree,
     is_process_alive,
     remove_worktree,
     worktree_has_uncommitted_changes,
@@ -53,6 +54,7 @@ from src.dispatch_state import (
     save_run_state,
 )
 from src.dispatch_targets import (
+    ClaudeCodeCloudRoutineDispatchTarget,
     DispatchHandle,
     DispatchTarget,
     LocalProcessDispatchTarget,
@@ -185,6 +187,8 @@ class DispatcherConfig:
     deviation_buffer_lines: int = 5
     max_recompute_retries: int = 2
     task_timeout_seconds: int = 0
+    # #282: status:not-needed判定の独立検証レビュー（保留分）の永続化先。
+    not_needed_review_state_path: Path = Path("not_needed_review_state.json")
 
     def __post_init__(self) -> None:
         if self.dispatch_target is None:
@@ -245,6 +249,28 @@ def _process_active_worktrees(  # noqa: C901
 
     for key, active in list(run_state.active_worktrees.items()):
         active_task = tasks_by_issue.get(active.issue_number)
+
+        if active_task is not None and "status:not-needed" in active_task.status_labels:
+            # #280: セッションが「対応不要」と判断した場合、コミット・PRを作らない
+            # ためclosingIssuesReferences等の完了シグナルが発生せず、
+            # _is_worktree_complete()（PID/PR存在ベース）は永遠にFalseを返し続ける。
+            # ラベル検知を最優先の完了シグナルとして扱い、下のstale判定より先に処理する。
+            completion_event = _finalize_not_needed_worktree(
+                active, active_task, config
+            )
+            completion_events.append(completion_event)
+            # #282: 即時クローズ・検証レビューへの委譲のどちらの経路でも、
+            # 対応不要の根拠自体は「mainに既に実装されている」ことなので、
+            # Issueクローズの可否とは独立に依存関係は解決済みとして扱ってよい。
+            if completion_event["action"] in (
+                "not_needed",
+                "not_needed_review_dispatched",
+            ):
+                if active_task.subtask_id:
+                    completed_subtask_ids.add(active_task.subtask_id)
+                if config.apply:
+                    del run_state.active_worktrees[key]
+            continue
 
         if (
             active_task is not None
@@ -360,7 +386,12 @@ def _promote_blocked_tasks(
     completed_subtask_ids: set[str],
     config: DispatcherConfig,
 ) -> list[dict]:
-    """#193: 依存先が全て解決したstatus:blockedタスクをstatus:queuedへ昇格する。"""
+    """#193: 依存先が全て解決したstatus:blockedタスクをstatus:queuedへ昇格する。
+
+    #280: `done_issues`には`status:done`と`status:not-needed`の両方を
+    呼び出し側で合流させて渡すことで、対応不要と判定された依存先も
+    「解決済み」として扱われる（このタスク自体は依存先の状態を区別しない）。
+    """
     done_subtask_ids = {
         task.subtask_id
         for task in (parse_task_from_issue(issue) for issue in done_issues)
@@ -455,6 +486,13 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
         # #236: 完了Issueは人間が通常のGitHub運用でCloseすることが多いため、
         # 依存解決判定はclosedなIssueも含めて検索する。
         done_issues = github.list_issues_by_label("status:done", state="all")
+        # #280: セッションがstatus:not-neededを付与すると同時にstatus:in-progressを
+        # 外すため、in_progress_issuesの一覧には現れなくなる。tasks_by_issueに含めて
+        # おかないと_process_active_worktrees側で完了検知できず、依存解決からも
+        # 漏れてしまう（closedなIssueもクローズ後の依存解決に必要なためstate="all"）。
+        not_needed_issues = github.list_issues_by_label(
+            "status:not-needed", state="all"
+        )
         tasks_by_issue = {
             issue.number: parse_task_from_issue(issue)
             for issue in [
@@ -463,6 +501,7 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
                 *in_progress_issues,
                 *blocked_issues,
                 *done_issues,
+                *not_needed_issues,
             ]
         }
         issue_number_by_subtask_id = {
@@ -520,7 +559,10 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
         completion_events.extend(gc_events)
 
         promotion_events = _promote_blocked_tasks(
-            blocked_issues, done_issues, completed_subtask_ids, config
+            blocked_issues,
+            done_issues + not_needed_issues,
+            completed_subtask_ids,
+            config,
         )
 
         lock_result = _sync_external_locks(tasks_by_issue, prs, run_state, config)
@@ -819,6 +861,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="#215: クラウドルーチンのAPIトークン（未指定時はORCHESTUNE_ROUTINE_TOKEN環境変数を使用）",
     )
+    parser.add_argument(
+        "--integration-review-state-path",
+        type=Path,
+        default=Path("integration_review_state.json"),
+        help="#186: 保留中の意味的レビュー（合否ポーリング・自動マージ待ち）の永続化先",
+    )
+    parser.add_argument(
+        "--not-needed-review-state-path",
+        type=Path,
+        default=Path("not_needed_review_state.json"),
+        help="#282: 保留中のstatus:not-needed検証レビュー（合否ポーリング・自動クローズ待ち）の永続化先",
+    )
     args = parser.parse_args(argv)
 
     config = DispatcherConfig(
@@ -836,19 +890,78 @@ def main(argv: list[str] | None = None) -> int:
         ),
         deviation_buffer_lines=args.deviation_buffer_lines,
         max_recompute_retries=args.max_recompute_retries,
+        not_needed_review_state_path=args.not_needed_review_state_path,
     )
     try:
         report = run_dispatch_cycle(config)
         print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
 
         if config.apply:
+            # #186: CI通過後にLLM統合コーディネーターの意味的レビューを行う。
+            # 当初構想どおり既定ON。`ORCHESTUNE_SEMANTIC_REVIEW=0`で無効化できる。
+            semantic_review_enabled = (
+                os.environ.get("ORCHESTUNE_SEMANTIC_REVIEW", "1") != "0"
+            )
+
+            if semantic_review_enabled:
+                try:
+                    from src.integration_coordinator import process_pending_reviews
+
+                    review_report = process_pending_reviews(
+                        args.integration_review_state_path
+                    )
+                    print("Pending Semantic Review Report:")
+                    print(json.dumps(review_report, ensure_ascii=False, indent=2))
+                except Exception as re:
+                    print(
+                        f"Warning: failed to process pending semantic reviews: {re}",
+                        file=sys.stderr,
+                    )
+
+                # #282: status:not-needed判定の独立検証レビュー（保留分）のポーリング。
+                # 同じORCHESTUNE_SEMANTIC_REVIEWフラグでまとめて無効化できる。
+                try:
+                    from src.integration_coordinator import (
+                        process_pending_not_needed_reviews,
+                    )
+
+                    not_needed_review_report = process_pending_not_needed_reviews(
+                        args.not_needed_review_state_path
+                    )
+                    print("Pending Not-Needed Review Report:")
+                    print(
+                        json.dumps(
+                            not_needed_review_report, ensure_ascii=False, indent=2
+                        )
+                    )
+                except Exception as re:
+                    print(
+                        f"Warning: failed to process pending not-needed reviews: {re}",
+                        file=sys.stderr,
+                    )
+
             try:
                 from src.integrator import Integrator, IntegratorConfig
 
                 integrator_config = IntegratorConfig(
                     parent_issue_number=config.parent_issue_number,
                     apply=config.apply,
+                    review_state_path=args.integration_review_state_path,
                 )
+                # レビューはdispatcherと同一のクラウドルーチンを再利用して起動するため、
+                # 実ディスパッチ先がクラウドルーチンのときのみ新規レビューを有効化する
+                # （保留分のポーリング・マージは上のprocess_pending_reviewsが常に担う）。
+                if semantic_review_enabled and isinstance(
+                    config.dispatch_target, ClaudeCodeCloudRoutineDispatchTarget
+                ):
+                    from src.integration_coordinator import IntegrationCoordinator
+
+                    integrator_config.enable_semantic_review = True
+                    integrator_config.coordinator = IntegrationCoordinator(
+                        config.dispatch_target
+                    )
+                else:
+                    integrator_config.enable_semantic_review = False
                 integrator = Integrator(integrator_config)
                 integrator_run_report = integrator.run()
                 print("Integrator Report:")

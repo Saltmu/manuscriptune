@@ -151,43 +151,43 @@ run_frontend_steps() {
     if [ -d "node_modules" ] && [ -f "$CACHE_FILE" ] && [ "$(cat "$CACHE_FILE")" = "$LOCKFILE_HASH" ]; then
       echo "npm ci is cached. Skipping..."
     else
-      npm ci
+      npm ci || return $?
       mkdir -p node_modules
       echo "$LOCKFILE_HASH" > "$CACHE_FILE"
     fi
-    npm run build
-  )
+    npm run build || return $?
+  ) || return $?
 
   # 6. Run frontend tests (vitest)
   echo "[6/8] Running frontend tests (vitest)..."
-  (cd frontend && npm run test)
+  (cd frontend && npm run test) || return $?
 }
 
 run_backend_steps() {
   # 2. Check code format & 3. Run Lint check
   if [ "$RUN_FIX" = "true" ]; then
     echo "[2/8] Formatting code (ruff format)..."
-    poetry run ruff format
+    poetry run ruff format || return $?
     echo "[3/8] Fixing lint issues (ruff check --fix)..."
-    poetry run ruff check --fix
+    poetry run ruff check --fix || return $?
   else
     echo "[2/8] Checking code format (ruff format)..."
-    poetry run ruff format --check
+    poetry run ruff format --check || return $?
     echo "[3/8] Running lint (ruff check)..."
-    poetry run ruff check
+    poetry run ruff check || return $?
   fi
 
   # 4. Type check
   echo "[4/8] Checking types (mypy)..."
-  poetry run mypy src tests
+  poetry run mypy src tests || return $?
 
   # 5. Run backend tests with coverage fail-under check (defined in pyproject.toml)
   echo "[5/8] Running backend tests (pytest)..."
-  poetry run pytest -n auto
+  poetry run pytest -n auto || return $?
 
   # 7. Check code bloat
   echo "[7/8] Checking code bloat (detect-bloat)..."
-  poetry run detect-bloat
+  poetry run detect-bloat || return $?
 
   # 8. Audit dependencies for known vulnerabilities
   echo "[8/8] Auditing dependencies (pip-audit)..."
@@ -216,7 +216,7 @@ run_backend_steps() {
   if [ "$SKIP_AUDIT" = "true" ]; then
     echo "pip-audit is cached. Skipping..."
   else
-    poetry run pip-audit --ignore-vuln CVE-2025-71176
+    poetry run pip-audit --ignore-vuln CVE-2025-71176 || return $?
     echo "$POETRY_LOCK_HASH $(date +%s)" > "$AUDIT_CACHE_FILE"
   fi
 }
@@ -250,6 +250,24 @@ ORCH_PID=""
 if [ "$ORCHESTUNE_CHANGED" = "true" ]; then
   run_orchestune_steps > "$ORCHESTUNE_LOG" 2>&1 &
   ORCH_PID=$!
+fi
+
+# tests/test_review_server.py::test_get_index requires frontend/dist/index.html
+# to exist. frontend/dist is gitignored, so a clean working tree that has never
+# run a frontend build (e.g. Orchestune Integrator's throwaway git worktree, or
+# any first-time checkout) has no index.html yet. In "backend"-only scope
+# run_frontend_steps never runs at all, so that test always fails regardless of
+# the backend change under test (regression of #167). In "full"/"both" scope
+# run_frontend_steps does build it, but does so in a background job racing
+# against the backend pytest run below, so a cold cache can still lose the
+# race. Build it synchronously up front whenever backend tests are about to run.
+if [ ! -f "frontend/dist/index.html" ]; then
+  case "$CHANGE_TYPE" in
+    full | both | backend)
+      echo "frontend/dist/index.html not found; building frontend once (required by backend tests)..."
+      (cd frontend && npm ci && npm run build)
+      ;;
+  esac
 fi
 
 if [ "$CHANGE_TYPE" = "full" ] || [ "$CHANGE_TYPE" = "both" ]; then

@@ -8,6 +8,7 @@ from pathlib import Path
 from src import github
 from src.dag import SubTask, build_dag
 from src.dispatcher import Task, parse_task_from_issue
+from src.integration_coordinator import IntegrationCoordinator, record_pending_review
 
 
 @dataclass
@@ -19,6 +20,12 @@ class IntegratorConfig:
     max_flaky_retries: int = 2
     parent_issue_number: int | None = None
     apply: bool = False
+    # #186: CI通過後のLLM統合コーディネーターによる意味的レビュー。
+    # 当初構想どおり既定ON。ただし`coordinator`が注入されている場合のみ実行され、
+    # 未注入なら安全にスキップされる（`run()`のガードを参照）。
+    enable_semantic_review: bool = True
+    coordinator: IntegrationCoordinator | None = None
+    review_state_path: Path = Path("integration_review_state.json")
 
 
 class Integrator:
@@ -99,6 +106,50 @@ class Integrator:
                             file=sys.stderr,
                         )
 
+                    # #186: 意味的レビューが有効なら、dispatcherと同一のルーチンを起動して
+                    # レビューを委譲する。合否はレビューセッションが親Issueへラベル付与で
+                    # 伝え、実際のPRマージはPython側(process_pending_reviews)が後続サイクルで
+                    # 決定論的に実行する（レビューセッション自身はマージしない）。
+                    if (
+                        self.config.enable_semantic_review
+                        and self.config.coordinator is not None
+                        and self.config.parent_issue_number
+                    ):
+                        new_subtask_prs = self._resolve_open_prs_for_merge(
+                            sorted_done_tasks, merged_tasks
+                        )
+                        if new_subtask_prs:
+                            new_subtask_ids = [sid for sid, _, _ in new_subtask_prs]
+                            handle = self.config.coordinator.dispatch_review(
+                                temp_branch=self.config.temp_branch,
+                                base_branch=self.config.base_branch,
+                                parent_issue_number=self.config.parent_issue_number,
+                                merged_subtask_ids=new_subtask_ids,
+                            )
+                            record_pending_review(
+                                self.config.review_state_path,
+                                parent_issue_number=self.config.parent_issue_number,
+                                subtask_prs=new_subtask_prs,
+                                session_handle=handle,
+                            )
+                            github.add_comment(
+                                self.config.parent_issue_number,
+                                f"🔍 完了タスク ({', '.join(new_subtask_ids)}) の仮マージCIが通過したため、"
+                                "統合コーディネーターによる意味的レビューを開始しました。\n"
+                                "問題なければサブタスクPRは自動マージされ、問題があれば該当サブタスクが"
+                                "差し戻されます（この判定・実行を除き、最終的なマージ操作は"
+                                "すべてPython側が決定論的に行います）。\n"
+                                f"レビューセッション: {handle.external_url or '(URL不明)'}",
+                            )
+                            return {
+                                "status": "semantic_review_dispatched",
+                                "merged": new_subtask_ids,
+                                "review_session_url": handle.external_url,
+                            }
+                        # 対象サブタスクが全て既にマージ済み（再選出）だった場合は
+                        # レビューする新規差分が無いため、静かに成功として扱う。
+                        return {"status": "success", "merged": merged_tasks}
+
                     if self.config.parent_issue_number:
                         github.add_comment(
                             self.config.parent_issue_number,
@@ -129,6 +180,36 @@ class Integrator:
                     )
                 except Exception:
                     pass
+
+    def _resolve_open_prs_for_merge(
+        self, sorted_done_tasks: list[Task], merged_tasks: list[str]
+    ) -> list[tuple[str, int, int]]:
+        """#186: `merged_tasks`のうち、まだmainへ未マージ（openなPRが存在する）
+        サブタスクだけを (subtask_id, issue_number, pr_number) のタプルとして、
+        `merged_tasks`の依存順を保ったまま返す。
+
+        `status:done`はdependency解決のためcloseされたIssueにも意図的に残る
+        （#236）ため、`_get_sorted_done_tasks`は既にmainへマージ済みの
+        サブタスクを毎サイクル再選出しうる。それらはopenなPRを持たないため、
+        ここで黙って除外される（再マージや意味的レビューの対象外）。
+        """
+        open_pr_numbers_by_branch = {
+            pr.head_ref: pr.number for pr in github.list_open_prs()
+        }
+        task_by_subtask = {
+            task.subtask_id: task for task in sorted_done_tasks if task.subtask_id
+        }
+        resolved: list[tuple[str, int, int]] = []
+        for subtask_id in merged_tasks:
+            task = task_by_subtask.get(subtask_id)
+            if task is None:
+                continue
+            branch_name = f"claude/issue-{task.issue_number}-{subtask_id}"
+            pr_number = open_pr_numbers_by_branch.get(branch_name)
+            if pr_number is None:
+                continue
+            resolved.append((subtask_id, task.issue_number, pr_number))
+        return resolved
 
     def _get_sorted_done_tasks(self) -> list[Task]:
         done_issues = github.list_issues_by_label("status:done", state="all")
@@ -217,6 +298,10 @@ class Integrator:
         merged_tasks = []
         failed_tasks = []
 
+        if self.config.apply:
+            self._ensure_git_identity()
+            self._ensure_full_history()
+
         for task in sorted_done_tasks:
             branch_name = (
                 f"claude/issue-{task.issue_number}-{task.subtask_id or 'task'}"
@@ -266,7 +351,7 @@ class Integrator:
                     failed_tasks.append(task.subtask_id)
                     continue
 
-                ci_success = self._run_ci_with_flaky_check()
+                ci_success, ci_output = self._run_ci_with_flaky_check()
                 if not ci_success:
                     subprocess.run(
                         ["git", "reset", "--hard", "HEAD~1"],
@@ -274,13 +359,65 @@ class Integrator:
                         check=True,
                         capture_output=True,
                     )
-                    self._handle_failure(task, "CI verification failed")
+                    self._handle_failure(
+                        task, "CI verification failed", ci_output=ci_output
+                    )
                     failed_tasks.append(task.subtask_id)
                     continue
 
             merged_tasks.append(task.subtask_id)
 
         return merged_tasks, failed_tasks
+
+    def _ensure_git_identity(self) -> None:
+        # CI環境（actions/checkout等）ではgit committer identityが未設定のことがあり、
+        # `git merge --no-ff`でマージコミットを作成する際に
+        # "Committer identity unknown" で必ず失敗するため、事前に設定しておく。
+        subprocess.run(
+            ["git", "config", "user.name", "orchestune-integrator"],
+            cwd=str(self.config.repository_root),
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "user.email",
+                "orchestune-integrator@users.noreply.github.com",
+            ],
+            cwd=str(self.config.repository_root),
+            capture_output=True,
+        )
+
+    def _ensure_full_history(self) -> None:
+        # actions/checkout@v6 のデフォルト（浅い・単一ブランチのclone）のままだと、
+        # タスクブランチをrefspec指定でfetchしても取得されるのはそのブランチの
+        # 先端コミット1つのみ（親情報を持たない）になり、mainと共通の祖先が
+        # 見つからず `refusing to merge unrelated histories` でmergeが必ず
+        # 失敗する。浅いリポジトリの場合のみ、ベースブランチの履歴を深くしておく。
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-shallow-repository"],
+                cwd=str(self.config.repository_root),
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            return
+
+        if (result.stdout or b"").decode().strip() != "true":
+            return
+
+        base_branch_name = self.config.base_branch.removeprefix("origin/")
+        try:
+            subprocess.run(
+                ["git", "fetch", "--unshallow", "origin", base_branch_name],
+                cwd=str(self.config.repository_root),
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
 
     def _abort_merge(self) -> None:
         # マージ失敗時にMERGE_HEADを残したままにすると、後続タスクのマージが
@@ -295,8 +432,9 @@ class Integrator:
         except (subprocess.CalledProcessError, OSError):
             pass
 
-    def _run_ci_with_flaky_check(self) -> bool:
+    def _run_ci_with_flaky_check(self) -> tuple[bool, str]:
         ci_cmd = self.config.ci_command or ["./scripts/local-ci.sh"]
+        last_output = ""
         for _ in range(1 + self.config.max_flaky_retries):
             try:
                 subprocess.run(
@@ -305,19 +443,41 @@ class Integrator:
                     check=True,
                     capture_output=True,
                 )
-                return True
-            except subprocess.CalledProcessError:
-                pass
+                return True, ""
+            except subprocess.CalledProcessError as e:
+                stdout = (e.stdout or b"").decode(errors="replace")
+                stderr = (e.stderr or b"").decode(errors="replace")
+                last_output = f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
 
-        return False
+        return False, last_output
 
-    def _handle_failure(self, task: Task, reason: str):
+    # #295: GitHubコメントの肥大化を避けるため、末尾のみを埋め込む。
+    # エラーメッセージ本体は通常出力の末尾に現れるため、これで十分な情報量を確保する。
+    _CI_OUTPUT_COMMENT_TAIL_CHARS = 4000
+
+    def _handle_failure(
+        self, task: Task, reason: str, ci_output: str | None = None
+    ) -> None:
+        if ci_output:
+            # #295: ジョブログ（stderr）には切り詰めずに全文を残し、
+            # コメントに書ききれない詳細もそこから追跡できるようにする。
+            print(
+                f"[Integrator] CI failure output for {task.subtask_id}:\n{ci_output}",
+                file=sys.stderr,
+            )
         if self.config.apply:
             github.remove_label(task.issue_number, "status:done")
             github.add_label(task.issue_number, "status:queued")
-            github.add_comment(
-                task.issue_number,
+            comment_body = (
                 f"仮マージCIでエラーが検出されたため、マージを取り消し差し戻しました。\n"
                 f"理由: {reason}\n"
-                f"自動修復エージェントの再起動を待ちます。",
             )
+            if ci_output:
+                truncated = ci_output[-self._CI_OUTPUT_COMMENT_TAIL_CHARS :]
+                comment_body += (
+                    "\n<details><summary>CI出力（末尾"
+                    f"{self._CI_OUTPUT_COMMENT_TAIL_CHARS}文字）</summary>\n\n"
+                    f"```\n{truncated}\n```\n</details>\n"
+                )
+            comment_body += "自動修復エージェントの再起動を待ちます。"
+            github.add_comment(task.issue_number, comment_body)
