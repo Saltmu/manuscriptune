@@ -8,6 +8,7 @@
     import Dashboard from './views/Dashboard.svelte';
     import Sync from './views/Sync.svelte';
     import PlotReview from './views/PlotReview.svelte';
+    import PlotCreate from './views/PlotCreate.svelte';
     import Editor from './views/Editor.svelte';
     import Settings from './views/Settings.svelte';
     import ReviewHistory from './views/ReviewHistory.svelte';
@@ -32,7 +33,7 @@
         }
 
         const { view, file } = parseHash();
-        const validViews = ['dashboard', 'sync', 'editor', 'plot_review', 'review_history', 'settings'];
+        const validViews = ['dashboard', 'sync', 'editor', 'plot_review', 'plot_create', 'review_history', 'settings'];
         if (!validViews.includes(view)) {
             window.location.hash = '#/dashboard';
             return;
@@ -139,6 +140,12 @@
         </li>
         <!-- svelte-ignore a11y-invalid-attribute -->
         <li>
+            <a class="nav-item {$activeView === 'plot_create' ? 'active' : ''}" href="javascript:void(0)" on:click={() => switchView('plot_create')}>
+                🪄 プロット作成
+            </a>
+        </li>
+        <!-- svelte-ignore a11y-invalid-attribute -->
+        <li>
             <a class="nav-item {$activeView === 'editor' ? 'active' : ''}" href="javascript:void(0)" on:click={() => switchView('editor')}>
                 📝 執筆・校閲エディタ
             </a>
@@ -170,6 +177,8 @@
         <Sync />
     {:else if $activeView === 'plot_review'}
         <PlotReview />
+    {:else if $activeView === 'plot_create'}
+        <PlotCreate />
     {:else if $activeView === 'editor'}
         <Editor />
     {:else if $activeView === 'review_history'}
