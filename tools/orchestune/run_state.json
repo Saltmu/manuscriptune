@@ -1,21 +1,5 @@
 {
-  "active_worktrees": {
-    "250": {
-      "issue_number": 250,
-      "branch": "claude/issue-250-plot-api-routes",
-      "worktree_path": "worktrees/claude-issue-250-plot-api-routes",
-      "pid": null,
-      "started_at": 1783528331.2970781,
-      "declared_footprint": [
-        "src/routes/plots.py",
-        "tests/test_review_server.py"
-      ],
-      "recompute_count": 0,
-      "forced_serial": false,
-      "external_id": "session_01Mv4RSVQxcqfJBP2BfuuBYo",
-      "external_url": "https://claude.ai/code/session_01Mv4RSVQxcqfJBP2BfuuBYo"
-    }
-  },
+  "active_worktrees": {},
   "launch_history": [
     1783423174.7666795,
     1783455253.6116974,
