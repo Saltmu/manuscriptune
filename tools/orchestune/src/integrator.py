@@ -440,6 +440,11 @@ class Integrator:
 
         env = os.environ.copy()
         venv_path = self.original_root / ".venv"
+        if "tools/orchestune" in str(venv_path):
+            parent_venv = venv_path.parent.parent.parent / ".venv"
+            if parent_venv.exists():
+                venv_path = parent_venv
+
         if venv_path.exists():
             env["VIRTUAL_ENV"] = str(venv_path.resolve())
             bin_path = venv_path / "bin"
