@@ -685,3 +685,38 @@ class TestIntegrator:
 
         assert res["status"] == "success"
         assert res["merged"] == ["task-1", "task-2"]
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("pathlib.Path.exists")
+    def test_integrator_ci_env_injection(self, mock_exists, mock_run, mock_list):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        # .venv と bin_path の exists() を True にする
+        mock_exists.return_value = True
+
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        integrator.run()
+
+        # subprocess.run の引数をチェック
+        ci_run_calls = [
+            call
+            for call in mock_run.call_args_list
+            if len(call.args) > 0
+            and isinstance(call.args[0], list)
+            and "./scripts/local-ci.sh" in call.args[0]
+        ]
+        assert len(ci_run_calls) == 1
+        call_kwargs = ci_run_calls[0].kwargs
+        assert "env" in call_kwargs
+        env = call_kwargs["env"]
+        assert "VIRTUAL_ENV" in env
+        assert env["VIRTUAL_ENV"].endswith(".venv")
+        assert "PATH" in env
+        assert env["PATH"].startswith(str(integrator.original_root / ".venv" / "bin"))
