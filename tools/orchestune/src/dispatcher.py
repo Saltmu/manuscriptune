@@ -633,6 +633,76 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
         return report
 
 
+def write_github_step_summary(
+    cycle_report: CycleReport | None,
+    integrator_report: dict | None,
+    summary_path: str,
+) -> None:
+    lines = ["## 🤖 Orchestune Dispatch Summary\n"]
+
+    if integrator_report:
+        lines.append("### 🔍 仮マージ検証（Integrator）結果")
+        status = integrator_report.get("status", "unknown")
+        lines.append(f"全体ステータス: **{status}**\n")
+
+        merged = integrator_report.get("merged", [])
+        failed = integrator_report.get("failed", [])
+        failed_reasons = integrator_report.get("failed_reasons", {})
+
+        if not merged and not failed:
+            lines.append("検証対象の完了タスク（`status:done`）はありませんでした。\n")
+        else:
+            lines.append("| サブタスクID | 結果 | 詳細 / 理由 |")
+            lines.append("| --- | --- | --- |")
+            for task_id in merged:
+                lines.append(
+                    f"| `{task_id}` | ✅ 成功 | 仮マージCI通過またはマージ済みスキップ |"
+                )
+            for task_id in failed:
+                reason = failed_reasons.get(task_id, "不明なエラー")
+                reason_short = reason.split("\n")[0]
+                lines.append(f"| `{task_id}` | ❌ 失敗 | {reason_short} |")
+            lines.append("")
+
+    if cycle_report:
+        lines.append("### 🚀 新規起動タスク")
+        if not cycle_report.selected:
+            lines.append("今回新たに起動されたタスクはありません。\n")
+        else:
+            lines.append("| サブタスクID | Issue番号 | 優先度 |")
+            lines.append("| --- | --- | --- |")
+            for task in cycle_report.selected:
+                lines.append(
+                    f"| `{task.subtask_id}` | #{task.issue_number} | {task.priority} |"
+                )
+            lines.append("")
+
+        lines.append("### 🔒 外部ロック（External Lock）変更")
+        to_lock = cycle_report.lock_changes.get("to_lock", [])
+        to_unlock = cycle_report.lock_changes.get("to_unlock", [])
+
+        if not to_lock and not to_unlock:
+            lines.append("外部ロックの変更はありませんでした。\n")
+        else:
+            lines.append("| サブタスクID | Issue番号 | アクション |")
+            lines.append("| --- | --- | --- |")
+            for task in to_lock:
+                lines.append(
+                    f"| `{task.subtask_id}` | #{task.issue_number} | 🔒 ロック付与 (`status:external-lock`) |"
+                )
+            for task in to_unlock:
+                lines.append(
+                    f"| `{task.subtask_id}` | #{task.issue_number} | 🔓 ロック解除 |"
+                )
+            lines.append("")
+
+    try:
+        with open(summary_path, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception as e:
+        print(f"Warning: Failed to write to GITHUB_STEP_SUMMARY: {e}", file=sys.stderr)
+
+
 def _sync_external_locks(
     tasks_by_issue: dict[int, Task],
     prs: list[PrRecord],
@@ -893,6 +963,8 @@ def main(argv: list[str] | None = None) -> int:
         max_recompute_retries=args.max_recompute_retries,
         not_needed_review_state_path=args.not_needed_review_state_path,
     )
+    report = None
+    integrator_run_report = None
     try:
         report = run_dispatch_cycle(config)
         print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
@@ -969,6 +1041,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(integrator_run_report, ensure_ascii=False, indent=2))
             except Exception as ie:
                 print(f"Warning: Integrator failed to run: {ie}", file=sys.stderr)
+
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            write_github_step_summary(
+                cycle_report=report,
+                integrator_report=integrator_run_report,
+                summary_path=summary_path,
+            )
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
