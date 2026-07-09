@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -33,6 +34,8 @@ class Integrator:
         self.config = config
         if self.config.ci_command is None:
             self.config.ci_command = ["./scripts/local-ci.sh"]
+        self.original_root = Path(self.config.repository_root).resolve()
+        self.failed_reasons: dict[str, str] = {}
 
     def run(self) -> dict:
         sorted_done_tasks = self._get_sorted_done_tasks()
@@ -162,6 +165,7 @@ class Integrator:
                 "status": "partial_success" if merged_tasks else "failure",
                 "merged": merged_tasks,
                 "failed": failed_tasks,
+                "failed_reasons": self.failed_reasons,
             }
         finally:
             if temp_worktree_path:
@@ -298,9 +302,14 @@ class Integrator:
         merged_tasks = []
         failed_tasks = []
 
+        open_pr_branches = set()
         if self.config.apply:
             self._ensure_git_identity()
             self._ensure_full_history()
+            try:
+                open_pr_branches = {pr.head_ref for pr in github.list_open_prs()}
+            except Exception as e:
+                print(f"Warning: Failed to list open PRs: {e}", file=sys.stderr)
 
         for task in sorted_done_tasks:
             branch_name = (
@@ -325,6 +334,16 @@ class Integrator:
                         capture_output=True,
                     )
                 except subprocess.CalledProcessError as e:
+                    # もし対象ブランチのOpen PRが存在しない場合は、すでにマージ及びブランチ削除
+                    # 済みとみなして、失敗扱いにはせず正常マージ完了扱いでスキップする。
+                    if branch_name not in open_pr_branches:
+                        print(
+                            f"[Integrator] Branch {branch_name} not found and no open PR exists. "
+                            "Assuming already merged, skipping integration merge."
+                        )
+                        merged_tasks.append(task.subtask_id)
+                        continue
+
                     self._handle_failure(
                         task, f"Failed to fetch branch: {e.stderr.decode()}"
                     )
@@ -435,6 +454,20 @@ class Integrator:
     def _run_ci_with_flaky_check(self) -> tuple[bool, str]:
         ci_cmd = self.config.ci_command or ["./scripts/local-ci.sh"]
         last_output = ""
+
+        env = os.environ.copy()
+        venv_path = self.original_root / ".venv"
+        if "tools/orchestune" in str(venv_path):
+            parent_venv = venv_path.parent.parent.parent / ".venv"
+            if parent_venv.exists():
+                venv_path = parent_venv
+
+        if venv_path.exists():
+            env["VIRTUAL_ENV"] = str(venv_path.resolve())
+            bin_path = venv_path / "bin"
+            if bin_path.exists():
+                env["PATH"] = f"{bin_path.resolve()}{os.pathsep}{env.get('PATH', '')}"
+
         for _ in range(1 + self.config.max_flaky_retries):
             try:
                 subprocess.run(
@@ -442,6 +475,7 @@ class Integrator:
                     cwd=str(self.config.repository_root),
                     check=True,
                     capture_output=True,
+                    env=env,
                 )
                 return True, ""
             except subprocess.CalledProcessError as e:
@@ -458,6 +492,7 @@ class Integrator:
     def _handle_failure(
         self, task: Task, reason: str, ci_output: str | None = None
     ) -> None:
+        self.failed_reasons[task.subtask_id] = reason
         if ci_output:
             # #295: ジョブログ（stderr）には切り詰めずに全文を残し、
             # コメントに書ききれない詳細もそこから追跡できるようにする。

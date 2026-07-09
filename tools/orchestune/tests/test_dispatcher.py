@@ -2164,3 +2164,114 @@ class TestStaleActiveEntryReconciliation:
 
         loaded = load_run_state(run_state_path)
         assert "1" not in loaded.active_worktrees
+
+
+class TestSyncExternalLocks:
+    @patch("src.dispatcher.github.list_remote_branches")
+    @patch("src.dispatcher.github.remove_label")
+    @patch("src.dispatcher.github.add_label")
+    def test_sync_external_locks_unlocks_without_requeue_for_done_tasks(
+        self, mock_add_label, mock_remove_label, mock_list_branches
+    ):
+        from src.dispatcher import _sync_external_locks
+
+        mock_list_branches.return_value = []
+
+        done_task = Task(
+            issue_number=1,
+            subtask_id="task-1",
+            footprint=("src/shared.py",),
+            symbols=(),
+            risk=False,
+            priority="medium",
+            progress_partial=False,
+            status_labels=("status:done", "status:external-lock"),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+
+        run_state = RunState(active_worktrees={})
+        config = DispatcherConfig(apply=True)
+
+        res = _sync_external_locks(
+            tasks_by_issue={1: done_task},
+            prs=[],
+            run_state=run_state,
+            config=config,
+        )
+
+        assert res.to_lock == []
+        assert [t.issue_number for t in res.to_unlock] == [1]
+
+        mock_remove_label.assert_called_once_with(1, "status:external-lock")
+        assert mock_add_label.call_count == 0
+
+    def test_write_github_step_summary(self, tmp_path):
+        from src.dispatcher import write_github_step_summary
+
+        summary_file = tmp_path / "step_summary.md"
+
+        task_selected = Task(
+            issue_number=10,
+            subtask_id="task-launch-10",
+            footprint=(),
+            symbols=(),
+            risk=False,
+            priority="high",
+            progress_partial=False,
+            status_labels=(),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+        task_lock = Task(
+            issue_number=20,
+            subtask_id="task-lock-20",
+            footprint=(),
+            symbols=(),
+            risk=False,
+            priority="medium",
+            progress_partial=False,
+            status_labels=(),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+
+        cycle_report = CycleReport(
+            selected=[task_selected],
+            quota_slots_available=1,
+            lock_changes={
+                "to_lock": [task_lock],
+                "to_unlock": [],
+            },
+            deviation_events=[],
+            completion_events=[],
+            promotion_events=[],
+            applied=True,
+        )
+
+        integrator_report = {
+            "status": "partial_success",
+            "merged": ["task-merged-1"],
+            "failed": ["task-failed-2"],
+            "failed_reasons": {
+                "task-failed-2": "CI verification failed\nDetailed error message here"
+            },
+        }
+
+        write_github_step_summary(
+            cycle_report=cycle_report,
+            integrator_report=integrator_report,
+            summary_path=str(summary_file),
+        )
+
+        assert summary_file.exists()
+        content = summary_file.read_text(encoding="utf-8")
+        assert "## 🤖 Orchestune Dispatch Summary" in content
+        assert "### 🔍 仮マージ検証（Integrator）結果" in content
+        assert "全体ステータス: **partial_success**" in content
+        assert "| `task-merged-1` | ✅ 成功 |" in content
+        assert "| `task-failed-2` | ❌ 失敗 | CI verification failed |" in content
+        assert "### 🚀 新規起動タスク" in content
+        assert "| `task-launch-10` | #10 | high |" in content
+        assert "### 🔒 外部ロック（External Lock）変更" in content
+        assert (
+            "| `task-lock-20` | #20 | 🔒 ロック付与 (`status:external-lock`) |"
+            in content
+        )

@@ -82,10 +82,13 @@ jobs:
         # ./scripts/local-ci.sh を実行するが、上記の Install dependencies は
         # tools/orchestune（このジョブのdefault working-directory）のpoetry環境しか
         # 整備しないため、ルートプロジェクト用に別途セットアップする。
+        # #301: v1キャッシュが早期に作られたまま(poetry.lock変更なしでは
+        # 再構築されない)不整合を起こしていた疑いがあるため、v2へバンプして
+        # 強制的に作り直す。
         uses: actions/cache@v5
         with:
           path: .venv
-          key: root-venv-v1-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
+          key: root-venv-v2-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
 
       - name: Install root project dependencies
         working-directory: .

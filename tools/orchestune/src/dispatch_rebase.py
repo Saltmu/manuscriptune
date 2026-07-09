@@ -160,6 +160,22 @@ def _handle_footprint_deviation(
     return event
 
 
+def _get_ci_env(repository_root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    venv_path = repository_root / ".venv"
+    if "tools/orchestune" in str(venv_path):
+        parent_venv = venv_path.parent.parent.parent / ".venv"
+        if parent_venv.exists():
+            venv_path = parent_venv
+
+    if venv_path.exists():
+        env["VIRTUAL_ENV"] = str(venv_path.resolve())
+        bin_path = venv_path / "bin"
+        if bin_path.exists():
+            env["PATH"] = f"{bin_path.resolve()}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
 def _try_auto_rebase(
     active: ActiveWorktree,
     active_task: Task | None,
@@ -217,11 +233,13 @@ def _try_auto_rebase(
                             check=True,
                         )
 
+                        env = _get_ci_env(Path(config.worktree_root).resolve().parent)
                         ci_res = subprocess.run(
                             ["./scripts/local-ci.sh"],
                             cwd=active.worktree_path,
                             capture_output=True,
                             text=True,
+                            env=env,
                         )
                         if ci_res.returncode != 0:
                             raise subprocess.CalledProcessError(
