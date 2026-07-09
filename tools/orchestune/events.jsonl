@@ -44,3 +44,4 @@
 {"timestamp": 1783610383.2293978, "quota_slots_available": 1, "selected": [{"issue_number": 249, "subtask_id": "plot-writer-service"}], "deviation_events": [], "completion_events": [], "promotion_events": []}
 {"timestamp": 1783610689.99396, "quota_slots_available": 0, "selected": [], "deviation_events": [], "completion_events": [{"issue_number": 249, "worktree_path": "worktrees/claude-issue-249-plot-writer-service", "action": "completed", "subtask_id": "plot-writer-service"}], "promotion_events": []}
 {"timestamp": 1783611206.6860943, "quota_slots_available": 0, "selected": [], "deviation_events": [], "completion_events": [{"issue_number": 250, "worktree_path": "worktrees/claude-issue-250-plot-api-routes", "action": "not_needed_review_dispatched", "subtask_id": "plot-api-routes"}], "promotion_events": []}
+{"timestamp": 1783611301.4667006, "quota_slots_available": 0, "selected": [], "deviation_events": [], "completion_events": [], "promotion_events": []}
