@@ -13,11 +13,11 @@ from src.github import (
     add_label,
     branch_changed_files,
     close_issue,
+    create_pull_request,
     get_issue_labels,
     list_issues_by_label,
     list_open_prs,
     list_remote_branches,
-    merge_pr,
     remove_label,
 )
 
@@ -406,33 +406,52 @@ class TestCloseIssue:
             mock_run.assert_not_called()
 
 
-class TestMergePr:
-    def test_merges_with_default_merge_method_and_deletes_branch(self):
+class TestCreatePullRequest:
+    def test_creates_pr_and_returns_number_parsed_from_url(self):
         with patch("src.github.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=""
+                args=[],
+                returncode=0,
+                stdout="https://github.com/Saltmu/manuscriptune/pull/315\n",
             )
-            merge_pr(42)
-        called_args = mock_run.call_args.args[0]
-        assert called_args == ["gh", "pr", "merge", "42", "--merge", "--delete-branch"]
-
-    def test_supports_alternate_merge_method(self):
-        with patch("src.github.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=""
+            number = create_pull_request(
+                head="integration/temp-main",
+                base="main",
+                title="Integrate completed tasks",
+                body="body text",
             )
-            merge_pr(42, merge_method="squash")
+        assert number == 315
         called_args = mock_run.call_args.args[0]
-        assert "--squash" in called_args
+        assert called_args == [
+            "gh",
+            "pr",
+            "create",
+            "--head",
+            "integration/temp-main",
+            "--base",
+            "main",
+            "--title",
+            "Integrate completed tasks",
+            "--body-file",
+            "-",
+        ]
+        assert mock_run.call_args.kwargs.get("input") == "body text"
 
-    def test_rejects_invalid_merge_method(self):
+    def test_rejects_invalid_head_ref(self):
         with patch("src.github.subprocess.run") as mock_run:
             with pytest.raises(ValueError):
-                merge_pr(42, merge_method="evil; rm -rf /")
+                create_pull_request(
+                    head="evil; rm -rf /", base="main", title="t", body="b"
+                )
             mock_run.assert_not_called()
 
-    def test_rejects_invalid_pr_number(self):
+    def test_rejects_invalid_base_ref(self):
         with patch("src.github.subprocess.run") as mock_run:
             with pytest.raises(ValueError):
-                merge_pr("42; rm -rf /")
+                create_pull_request(
+                    head="integration/temp-main",
+                    base="evil; rm -rf /",
+                    title="t",
+                    body="b",
+                )
             mock_run.assert_not_called()

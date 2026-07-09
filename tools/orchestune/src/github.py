@@ -143,19 +143,32 @@ def get_issue_labels(issue_number: int | str) -> tuple[str, ...]:
     return tuple(entry["name"] for entry in raw.get("labels", []))
 
 
-_VALID_MERGE_METHODS = frozenset({"merge", "squash", "rebase"})
+def create_pull_request(head: str, base: str, title: str, body: str) -> int:
+    """統合ブランチ（`head`）から`base`へのPRを作成し、PR番号を返す。
 
-
-def merge_pr(pr_number: int | str, merge_method: str = "merge") -> None:
-    """#186: 意味的レビュー通過後、Python側が決定論的にサブタスクPRをマージする。
-
-    このリポジトリの慣習（通常のマージコミット、squashではない）に合わせ、
-    既定は`--merge`。マージ後はブランチを削除する。
+    最終マージは常に人間が行う運用のため、ここではPRを作成するのみで
+    マージは一切行わない。
     """
-    number = _validate_issue_number(pr_number)
-    if merge_method not in _VALID_MERGE_METHODS:
-        raise ValueError(f"merge_methodが不正です: {merge_method!r}")
-    _run(["gh", "pr", "merge", str(number), f"--{merge_method}", "--delete-branch"])
+    _validate_ref_name(head)
+    _validate_ref_name(base)
+    stdout = _run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--head",
+            head,
+            "--base",
+            base,
+            "--title",
+            title,
+            "--body-file",
+            "-",
+        ],
+        input_text=body,
+    )
+    url = stdout.strip().splitlines()[-1]
+    return int(url.rstrip("/").rsplit("/", 1)[-1])
 
 
 def list_remote_branches() -> list[str]:

@@ -9,7 +9,7 @@ from pathlib import Path
 from src import github
 from src.dag import SubTask, build_dag
 from src.dispatcher import Task, parse_task_from_issue
-from src.integration_coordinator import IntegrationCoordinator, record_pending_review
+from src.integration_coordinator import IntegrationCoordinator
 
 
 @dataclass
@@ -21,12 +21,12 @@ class IntegratorConfig:
     max_flaky_retries: int = 2
     parent_issue_number: int | None = None
     apply: bool = False
-    # #186: CI通過後のLLM統合コーディネーターによる意味的レビュー。
-    # 当初構想どおり既定ON。ただし`coordinator`が注入されている場合のみ実行され、
-    # 未注入なら安全にスキップされる（`run()`のガードを参照）。
+    # Integratorの仕事は「統合ブランチ(temp_branch)を作成しCI通過を確認した上で、
+    # base_branchへのPRを作成/再利用する」までに限定される。最終マージは常に人間が行う。
+    # 意味的レビュー（LLMによる統合diffのバグ検知）は`coordinator`が注入されている場合のみ
+    # 実行され、結果は統合PRへのコメントとして残るのみで、自動マージ等は一切行わない。
     enable_semantic_review: bool = True
     coordinator: IntegrationCoordinator | None = None
-    review_state_path: Path = Path("integration_review_state.json")
 
 
 class Integrator:
@@ -109,56 +109,38 @@ class Integrator:
                             file=sys.stderr,
                         )
 
-                    # #186: 意味的レビューが有効なら、dispatcherと同一のルーチンを起動して
-                    # レビューを委譲する。合否はレビューセッションが親Issueへラベル付与で
-                    # 伝え、実際のPRマージはPython側(process_pending_reviews)が後続サイクルで
-                    # 決定論的に実行する（レビューセッション自身はマージしない）。
+                    integration_pr_number = self._ensure_integration_pr(merged_tasks)
+
+                    # 意味的レビュー（LLMによる統合diffのバグ検知）はfire-and-forgetで
+                    # 起動するのみ。結果は統合PRへのコメントとして残るだけで、Python側は
+                    # 合否の追跡・自動マージ等の後続処理を一切行わない（最終マージは常に人間）。
+                    semantic_review_dispatched = False
                     if (
                         self.config.enable_semantic_review
                         and self.config.coordinator is not None
-                        and self.config.parent_issue_number
+                        and integration_pr_number is not None
                     ):
-                        new_subtask_prs = self._resolve_open_prs_for_merge(
-                            sorted_done_tasks, merged_tasks
-                        )
-                        if new_subtask_prs:
-                            new_subtask_ids = [sid for sid, _, _ in new_subtask_prs]
-                            handle = self.config.coordinator.dispatch_review(
+                        try:
+                            self.config.coordinator.dispatch_review(
                                 temp_branch=self.config.temp_branch,
                                 base_branch=self.config.base_branch,
+                                pr_number=integration_pr_number,
                                 parent_issue_number=self.config.parent_issue_number,
-                                merged_subtask_ids=new_subtask_ids,
+                                merged_subtask_ids=merged_tasks,
                             )
-                            record_pending_review(
-                                self.config.review_state_path,
-                                parent_issue_number=self.config.parent_issue_number,
-                                subtask_prs=new_subtask_prs,
-                                session_handle=handle,
+                            semantic_review_dispatched = True
+                        except Exception as e:
+                            print(
+                                f"Warning: Failed to dispatch semantic review: {e}",
+                                file=sys.stderr,
                             )
-                            github.add_comment(
-                                self.config.parent_issue_number,
-                                f"🔍 完了タスク ({', '.join(new_subtask_ids)}) の仮マージCIが通過したため、"
-                                "統合コーディネーターによる意味的レビューを開始しました。\n"
-                                "問題なければサブタスクPRは自動マージされ、問題があれば該当サブタスクが"
-                                "差し戻されます（この判定・実行を除き、最終的なマージ操作は"
-                                "すべてPython側が決定論的に行います）。\n"
-                                f"レビューセッション: {handle.external_url or '(URL不明)'}",
-                            )
-                            return {
-                                "status": "semantic_review_dispatched",
-                                "merged": new_subtask_ids,
-                                "review_session_url": handle.external_url,
-                            }
-                        # 対象サブタスクが全て既にマージ済み（再選出）だった場合は
-                        # レビューする新規差分が無いため、静かに成功として扱う。
-                        return {"status": "success", "merged": merged_tasks}
 
-                    if self.config.parent_issue_number:
-                        github.add_comment(
-                            self.config.parent_issue_number,
-                            f"🎉 すべての完了タスク ({', '.join(merged_tasks)}) の仮マージCIが正常に通過しました。\n"
-                            f"仮マージブランチ `{self.config.temp_branch}` がリモートにプッシュされました。人手での最終マージが可能です。",
-                        )
+                    return {
+                        "status": "success",
+                        "merged": merged_tasks,
+                        "integration_pr_number": integration_pr_number,
+                        "semantic_review_dispatched": semantic_review_dispatched,
+                    }
                 return {"status": "success", "merged": merged_tasks}
 
             return {
@@ -185,35 +167,35 @@ class Integrator:
                 except Exception:
                     pass
 
-    def _resolve_open_prs_for_merge(
-        self, sorted_done_tasks: list[Task], merged_tasks: list[str]
-    ) -> list[tuple[str, int, int]]:
-        """#186: `merged_tasks`のうち、まだmainへ未マージ（openなPRが存在する）
-        サブタスクだけを (subtask_id, issue_number, pr_number) のタプルとして、
-        `merged_tasks`の依存順を保ったまま返す。
+    def _ensure_integration_pr(self, merged_tasks: list[str]) -> int | None:
+        """統合ブランチ(`temp_branch`)から`base_branch`へのPRを作成/再利用する。
 
-        `status:done`はdependency解決のためcloseされたIssueにも意図的に残る
-        （#236）ため、`_get_sorted_done_tasks`は既にmainへマージ済みの
-        サブタスクを毎サイクル再選出しうる。それらはopenなPRを持たないため、
-        ここで黙って除外される（再マージや意味的レビューの対象外）。
+        既にopenなPRがあれば重複作成せずその番号を返す。PR作成自体に失敗しても
+        （差分無し等）Integrator全体は失敗させず、警告ログのみ出して`None`を返す。
         """
-        open_pr_numbers_by_branch = {
-            pr.head_ref: pr.number for pr in github.list_open_prs()
-        }
-        task_by_subtask = {
-            task.subtask_id: task for task in sorted_done_tasks if task.subtask_id
-        }
-        resolved: list[tuple[str, int, int]] = []
-        for subtask_id in merged_tasks:
-            task = task_by_subtask.get(subtask_id)
-            if task is None:
-                continue
-            branch_name = f"claude/issue-{task.issue_number}-{subtask_id}"
-            pr_number = open_pr_numbers_by_branch.get(branch_name)
-            if pr_number is None:
-                continue
-            resolved.append((subtask_id, task.issue_number, pr_number))
-        return resolved
+        try:
+            existing = [
+                pr
+                for pr in github.list_open_prs()
+                if pr.head_ref == self.config.temp_branch
+            ]
+            if existing:
+                return existing[0].number
+
+            base = self.config.base_branch.removeprefix("origin/")
+            return github.create_pull_request(
+                head=self.config.temp_branch,
+                base=base,
+                title=f"Integrate completed tasks ({', '.join(merged_tasks)})",
+                body=(
+                    "Orchestune Integrator が仮マージCI通過後に作成した統合PRです。\n"
+                    f"統合済みタスク: {', '.join(merged_tasks)}\n\n"
+                    "最終マージは人間が行ってください。"
+                ),
+            )
+        except Exception as e:
+            print(f"Warning: Failed to ensure integration PR: {e}", file=sys.stderr)
+            return None
 
     def _get_sorted_done_tasks(self) -> list[Task]:
         done_issues = github.list_issues_by_label("status:done", state="all")

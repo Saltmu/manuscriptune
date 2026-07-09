@@ -933,12 +933,6 @@ def main(argv: list[str] | None = None) -> int:
         help="#215: クラウドルーチンのAPIトークン（未指定時はORCHESTUNE_ROUTINE_TOKEN環境変数を使用）",
     )
     parser.add_argument(
-        "--integration-review-state-path",
-        type=Path,
-        default=Path("integration_review_state.json"),
-        help="#186: 保留中の意味的レビュー（合否ポーリング・自動マージ待ち）の永続化先",
-    )
-    parser.add_argument(
         "--not-needed-review-state-path",
         type=Path,
         default=Path("not_needed_review_state.json"),
@@ -970,29 +964,15 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_report_to_dict(report), ensure_ascii=False, indent=2))
 
         if config.apply:
-            # #186: CI通過後にLLM統合コーディネーターの意味的レビューを行う。
-            # 当初構想どおり既定ON。`ORCHESTUNE_SEMANTIC_REVIEW=0`で無効化できる。
+            # 統合コーディネーターによる意味的レビュー（LLMによる統合PRのバグ検知、結果は
+            # PRコメントのみで完結）と、#282のstatus:not-needed独立検証レビューの
+            # 両方を、`ORCHESTUNE_SEMANTIC_REVIEW=0`でまとめて無効化できる。
             semantic_review_enabled = (
                 os.environ.get("ORCHESTUNE_SEMANTIC_REVIEW", "1") != "0"
             )
 
             if semantic_review_enabled:
-                try:
-                    from src.integration_coordinator import process_pending_reviews
-
-                    review_report = process_pending_reviews(
-                        args.integration_review_state_path
-                    )
-                    print("Pending Semantic Review Report:")
-                    print(json.dumps(review_report, ensure_ascii=False, indent=2))
-                except Exception as re:
-                    print(
-                        f"Warning: failed to process pending semantic reviews: {re}",
-                        file=sys.stderr,
-                    )
-
                 # #282: status:not-needed判定の独立検証レビュー（保留分）のポーリング。
-                # 同じORCHESTUNE_SEMANTIC_REVIEWフラグでまとめて無効化できる。
                 try:
                     from src.integration_coordinator import (
                         process_pending_not_needed_reviews,
@@ -1019,11 +999,11 @@ def main(argv: list[str] | None = None) -> int:
                 integrator_config = IntegratorConfig(
                     parent_issue_number=config.parent_issue_number,
                     apply=config.apply,
-                    review_state_path=args.integration_review_state_path,
                 )
                 # レビューはdispatcherと同一のクラウドルーチンを再利用して起動するため、
-                # 実ディスパッチ先がクラウドルーチンのときのみ新規レビューを有効化する
-                # （保留分のポーリング・マージは上のprocess_pending_reviewsが常に担う）。
+                # 実ディスパッチ先がクラウドルーチンのときのみ意味的レビューを有効化する。
+                # レビューセッションは統合PRへコメントを残すのみで、自動マージ等の
+                # 後続処理はPython側では一切行わない。
                 if semantic_review_enabled and isinstance(
                     config.dispatch_target, ClaudeCodeCloudRoutineDispatchTarget
                 ):
