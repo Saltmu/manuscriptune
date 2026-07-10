@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 from src.dispatch_targets import DispatchHandle
@@ -792,3 +793,96 @@ class TestIntegrator:
         mock_remove.assert_not_called()
         mock_add.assert_not_called()
         mock_comment.assert_not_called()
+
+
+class TestIntegratorWorktreeIsolation:
+    """#254: repository_rootの一時差し替え・ワークツリー分離・クリーンアップの検証。"""
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.list_open_prs")
+    @patch("src.integrator.github.create_pull_request")
+    def test_cleanup_uses_original_root_not_cwd(
+        self, mock_create_pr, mock_open_prs, mock_run, mock_list
+    ):
+        # repository_rootをカレントディレクトリ以外に明示指定した場合でも、
+        # 一時ワークツリーの削除はoriginal_root（呼び出し時のrepository_root）
+        # を基準に行われるべきで、決め打ちのPath(".")であってはならない。
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+        mock_open_prs.return_value = []
+        mock_create_pr.return_value = 1
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+
+        custom_root = Path("/custom/repo/root")
+        config = IntegratorConfig(apply=True, repository_root=custom_root)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "success"
+        remove_calls = [
+            call
+            for call in mock_run.call_args_list
+            if "worktree" in call.args[0] and "remove" in call.args[0]
+        ]
+        assert len(remove_calls) == 1
+        assert remove_calls[0].kwargs["cwd"] == str(custom_root.resolve())
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.remove_label")
+    @patch("src.integrator.github.add_label")
+    @patch("src.integrator.github.add_comment")
+    def test_cleanup_runs_even_when_merge_fails(
+        self, mock_comment, mock_add, mock_remove, mock_run, mock_list
+    ):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        def run_side_effect(args, **kwargs):
+            if "merge" in args and "--abort" not in args:
+                raise subprocess.CalledProcessError(returncode=1, cmd=args, stderr=b"")
+            return subprocess.CompletedProcess(args=args, returncode=0)
+
+        mock_run.side_effect = run_side_effect
+
+        custom_root = Path("/custom/repo/root")
+        config = IntegratorConfig(apply=True, repository_root=custom_root)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "failure"
+        remove_calls = [
+            call
+            for call in mock_run.call_args_list
+            if "worktree" in call.args[0] and "remove" in call.args[0]
+        ]
+        assert len(remove_calls) == 1
+        assert remove_calls[0].kwargs["cwd"] == str(custom_root.resolve())
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    def test_worktree_creation_failure_reports_status(self, mock_run, mock_list):
+        issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
+        mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
+
+        def run_side_effect(args, **kwargs):
+            if "worktree" in args and "add" in args:
+                raise subprocess.CalledProcessError(returncode=1, cmd=args, stderr=b"")
+            return subprocess.CompletedProcess(args=args, returncode=0)
+
+        mock_run.side_effect = run_side_effect
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        assert res["status"] == "failed_to_create_temp_worktree"
+        remove_calls = [
+            call
+            for call in mock_run.call_args_list
+            if "worktree" in call.args[0] and "remove" in call.args[0]
+        ]
+        assert remove_calls == []

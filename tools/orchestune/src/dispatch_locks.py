@@ -21,6 +21,15 @@ _HOTSPOT_PATTERNS = (
 )
 
 
+def _is_hotspot(path: str) -> bool:
+    """ほぼ全タスクが触れうる「ホットスポットファイル」かどうかを判定する。
+
+    footprint逸脱検知(check_footprint_deviation)・外部ロック判定
+    (scan_external_locks)の双方で、これらのファイルだけの重複・変更は
+    無視する(#200, #209)。"""
+    return any(pattern.search(path) for pattern in _HOTSPOT_PATTERNS)
+
+
 @dataclass
 class ExternalLockScanResult:
     to_lock: list[Task]
@@ -58,8 +67,12 @@ def scan_external_locks(
             if pr.head_ref not in active_set
             and task.issue_number not in pr.closes_issue_numbers
         ]
+        # #209: poetry.lock等のホットスポットファイルだけの重複は、実質的な
+        # 直列化(外部ロック)を引き起こさない(check_footprint_deviationと同じ
+        # 除外パターンを適用する)。
+        task_footprint = {path for path in task.footprint if not _is_hotspot(path)}
         overlaps = any(
-            set(task.footprint) & footprint
+            task_footprint & {path for path in footprint if not _is_hotspot(path)}
             for footprint in [*branch_footprints, *pr_footprints]
         )
         if overlaps and not currently_locked:
@@ -107,16 +120,11 @@ def check_footprint_deviation(
             continue
 
         # ホットスポットファイルは逸脱チェックから除外する
-        is_hotspot = False
-        for pattern in _HOTSPOT_PATTERNS:
-            if pattern.search(path):
-                print(
-                    f"Warning: Footprint deviation detected on hotspot file '{path}', skipping DAG recompute.",
-                    file=sys.stderr,
-                )
-                is_hotspot = True
-                break
-        if is_hotspot:
+        if _is_hotspot(path):
+            print(
+                f"Warning: Footprint deviation detected on hotspot file '{path}', skipping DAG recompute.",
+                file=sys.stderr,
+            )
             continue
         if added_str == "-" or deleted_str == "-":
             changed_lines = min_changed_lines + 1

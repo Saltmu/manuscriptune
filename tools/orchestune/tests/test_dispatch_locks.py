@@ -160,6 +160,55 @@ class TestScanExternalLocks:
         assert result.to_lock == []
         assert [t.issue_number for t in result.to_unlock] == [1]
 
+    def test_does_not_lock_on_hotspot_file_overlap_only(self):
+        """#209: poetry.lock等のホットスポットファイルだけが重複していても、
+        実質的な直列化(外部ロック)を引き起こさない。"""
+        queued = [_task(1, footprint=("poetry.lock",))]
+        prs = [
+            PrRecord(number=99, head_ref="feat/other", changed_files=("poetry.lock",))
+        ]
+        result = scan_external_locks(
+            queued, remote_branches=[], prs=prs, active_branches=[]
+        )
+        assert result.to_lock == []
+
+    def test_still_locks_when_non_hotspot_overlap_remains(self):
+        """ホットスポット除外は重複ファイル集合の一部にのみ適用され、
+        非ホットスポットな重複が残っていれば従来通りロックする。"""
+        queued = [_task(1, footprint=("poetry.lock", "src/shared.py"))]
+        prs = [
+            PrRecord(
+                number=99,
+                head_ref="feat/other",
+                changed_files=("poetry.lock", "src/shared.py"),
+            )
+        ]
+        result = scan_external_locks(
+            queued, remote_branches=[], prs=prs, active_branches=[]
+        )
+        assert [t.issue_number for t in result.to_lock] == [1]
+
+    def test_unlocks_previously_locked_task_when_only_hotspot_overlap_remains(self):
+        locked_task = Task(
+            issue_number=1,
+            subtask_id="task-1",
+            footprint=("poetry.lock",),
+            symbols=(),
+            risk=False,
+            priority="medium",
+            progress_partial=False,
+            status_labels=("status:external-lock",),
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+        prs = [
+            PrRecord(number=99, head_ref="feat/other", changed_files=("poetry.lock",))
+        ]
+        result = scan_external_locks(
+            [locked_task], remote_branches=[], prs=prs, active_branches=[]
+        )
+        assert result.to_lock == []
+        assert [t.issue_number for t in result.to_unlock] == [1]
+
 
 class TestCheckFootprintDeviation:
     def test_returns_files_outside_declared_footprint(self):
