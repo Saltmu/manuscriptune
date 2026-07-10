@@ -56,6 +56,22 @@ class TestParseDecompositionPlan:
         assert subtasks[0].footprint == ("src/foo.py",)
         assert subtasks[0].symbols == ("foo.Foo",)
         assert subtasks[1].depends_on == ("task-a",)
+        assert subtasks[0].priority == "medium"  # デフォルト
+
+    def test_parses_priority(self, tmp_path):
+        plan = """\
+        ---
+        subtasks:
+          - id: task-a
+            priority: high
+          - id: task-b
+            priority: low
+        ---
+        """
+        path = _write_plan(tmp_path, plan)
+        subtasks = parse_decomposition_plan(path)
+        assert subtasks[0].priority == "high"
+        assert subtasks[1].priority == "low"
 
     def test_missing_frontmatter_raises(self, tmp_path):
         path = _write_plan(tmp_path, "# no frontmatter here\n")
@@ -175,7 +191,7 @@ class TestSimilarityScore:
         assert _otsuka_ochiai(s1, s2) == pytest.approx(2 / 3)
 
 
-def _subtask(id_, footprint, symbols, depends_on=()):
+def _subtask(id_, footprint, symbols, depends_on=(), priority="medium"):
     return SubTask(
         id=id_,
         description="",
@@ -184,6 +200,7 @@ def _subtask(id_, footprint, symbols, depends_on=()):
         depends_on=tuple(depends_on),
         risk=False,
         risk_reasons=(),
+        priority=priority,
     )
 
 
@@ -469,3 +486,121 @@ class TestRecomputeDagForFootprintChange:
             recompute_dag_for_footprint_change(
                 subtasks, subtask_id="ghost", updated_footprint=[]
             )
+
+
+class TestPriorityAndVolumeDirection:
+    def test_priority_determines_edge_direction(self):
+        # a: medium, b: high -> high (b) から medium (a) へエッジが張られる (b -> a)
+        subtasks = [
+            SubTask("a", "", ("src/shared.py",), (), (), False, (), "medium"),
+            SubTask("b", "", ("src/shared.py",), (), (), False, (), "high"),
+        ]
+        dag = build_dag(subtasks, threshold=0.1)
+        reasons = {(e.source, e.target): e.reason for e in dag.edges}
+        assert reasons.get(("b", "a")) == "similarity"
+
+    def test_volume_determines_edge_direction_when_priority_equal(self):
+        # priorityはどちらもmedium。a の footprint数は2、b は1 -> a から b へエッジが張られる (a -> b)
+        subtasks = [
+            SubTask(
+                "a", "", ("src/x.py", "src/shared.py"), (), (), False, (), "medium"
+            ),
+            SubTask("b", "", ("src/shared.py",), (), (), False, (), "medium"),
+        ]
+        dag = build_dag(subtasks, threshold=0.1)
+        reasons = {(e.source, e.target): e.reason for e in dag.edges}
+        assert reasons.get(("a", "b")) == "similarity"
+
+    def test_id_order_determines_edge_direction_when_all_equal(self):
+        # 全て等しい場合、辞書順で a -> b
+        subtasks = [
+            SubTask("a", "", ("src/shared.py",), (), (), False, (), "medium"),
+            SubTask("b", "", ("src/shared.py",), (), (), False, (), "medium"),
+        ]
+        dag = build_dag(subtasks, threshold=0.1)
+        reasons = {(e.source, e.target): e.reason for e in dag.edges}
+        assert reasons.get(("a", "b")) == "similarity"
+
+
+class TestWeightedSimilarity:
+    def test_file_overlap_has_higher_score_than_symbol_overlap(self):
+        # ファイルが1つ重なり、シンボルは異なるペア
+        subtasks_file = [
+            _subtask("a", ["src/x.py"], ["symbol1"]),
+            _subtask("b", ["src/x.py"], ["symbol2"]),
+        ]
+        # シンボルが1つ重なり、ファイルは異なるペア
+        subtasks_symbol = [
+            _subtask("a", ["src/x.py"], ["symbol_shared"]),
+            _subtask("b", ["src/y.py"], ["symbol_shared"]),
+        ]
+
+        edges_file = build_similarity_edges(subtasks_file, threshold=0.0)
+        edges_symbol = build_similarity_edges(subtasks_symbol, threshold=0.0)
+
+        assert len(edges_file) == 1
+        assert len(edges_symbol) == 1
+        # ファイル重なりの方がスコア（類似度）が高くなるはず
+        assert edges_file[0].score > edges_symbol[0].score
+
+
+class TestGlobalIgnorePatterns:
+    def test_ignored_files_do_not_cause_similarity_edges(self):
+        # pyproject.toml だけが共通しているケース
+        subtasks = [
+            _subtask("a", ["pyproject.toml", "src/a.py"], []),
+            _subtask("b", ["pyproject.toml", "src/b.py"], []),
+        ]
+        # 無視されていれば、実質共通ファイルがないため類似度エッジは張られないはず
+        edges = build_similarity_edges(subtasks, threshold=0.1)
+        assert len(edges) == 0
+
+
+class TestCycleResolution:
+    def test_resolves_cycle_by_removing_weakest_similarity_edge(self, caplog):
+        import logging
+
+        # a -> b (明示) -> c (類似) -> a (類似) のサイクルが発生。
+        # a: medium, b: high, c: high
+        # c -> a の方が類似度が低いはず（共通要素が少ないため）。
+        # このため、c -> a のエッジが自動削除されてサイクルが解消されるはず。
+        subtasks = [
+            SubTask("a", "", ("src/a.py",), ("c_shared",), (), False, (), "medium"),
+            SubTask(
+                "b",
+                "",
+                ("src/b.py", "src/bc1.py", "src/bc2.py"),
+                ("bc_shared",),
+                ("a",),
+                False,
+                (),
+                "high",
+            ),
+            SubTask(
+                "c",
+                "",
+                ("src/c.py", "src/bc1.py", "src/bc2.py"),
+                ("bc_shared", "c_shared"),
+                (),
+                False,
+                (),
+                "high",
+            ),
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            dag = build_dag(subtasks, threshold=0.1)
+
+        # サイクルが解消され、エラーにならずにDAGが構築できること
+        assert dag.topological_order == ["a", "b", "c"]
+        # 警告ログが出力されていること
+        assert "循環参照を検出したため、類似度エッジを自動解消しました" in caplog.text
+
+    def test_does_not_resolve_explicit_only_cycles(self):
+        # 明示的な依存関係のみで循環が発生した場合、自動解消できずに例外を投げること
+        subtasks = [
+            _subtask("a", [], [], depends_on=["b"]),
+            _subtask("b", [], [], depends_on=["a"]),
+        ]
+        with pytest.raises(DagCycleError):
+            build_dag(subtasks)
