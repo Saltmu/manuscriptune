@@ -160,7 +160,7 @@ class Integrator:
                             "--force",
                             str(temp_worktree_path),
                         ],
-                        cwd=str(Path(".")),
+                        cwd=str(self.original_root),
                         capture_output=True,
                         check=True,
                     )
