@@ -648,6 +648,7 @@ def write_github_step_summary(
         merged = integrator_report.get("merged", [])
         failed = integrator_report.get("failed", [])
         failed_reasons = integrator_report.get("failed_reasons", {})
+        integration_pr_number = integrator_report.get("integration_pr_number")
 
         if not merged and not failed:
             lines.append("検証対象の完了タスク（`status:done`）はありませんでした。\n")
@@ -663,6 +664,21 @@ def write_github_step_summary(
                 reason_short = reason.split("\n")[0]
                 lines.append(f"| `{task_id}` | ❌ 失敗 | {reason_short} |")
             lines.append("")
+
+        # Integratorの仕事は統合PRの作成までで、最終マージは常に人間が行うため、
+        # そのPRへのリンクをサマリー上で必ず可視化する（run #68のように、成功していても
+        # 誰にも気づかれず放置されるのを防ぐ）。
+        if integration_pr_number:
+            repo_slug = os.environ.get("GITHUB_REPOSITORY")
+            pr_ref = (
+                f"https://github.com/{repo_slug}/pull/{integration_pr_number}"
+                if repo_slug
+                else f"#{integration_pr_number}"
+            )
+            lines.append(
+                f"➡️ **統合PR #{integration_pr_number}** が作成/検出されました。"
+                f"最終マージには人間によるレビューが必要です: {pr_ref}\n"
+            )
 
     if cycle_report:
         lines.append("### 🚀 新規起動タスク")

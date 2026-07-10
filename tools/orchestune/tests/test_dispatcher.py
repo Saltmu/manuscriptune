@@ -2275,3 +2275,74 @@ class TestSyncExternalLocks:
             "| `task-lock-20` | #20 | 🔒 ロック付与 (`status:external-lock`) |"
             in content
         )
+
+    def test_write_github_step_summary_includes_integration_pr_link(
+        self, tmp_path, monkeypatch
+    ):
+        from src.dispatcher import write_github_step_summary
+
+        monkeypatch.setenv("GITHUB_REPOSITORY", "Saltmu/manuscriptune")
+        summary_file = tmp_path / "step_summary.md"
+
+        integrator_report = {
+            "status": "success",
+            "merged": ["task-merged-1"],
+            "failed": [],
+            "integration_pr_number": 315,
+        }
+
+        write_github_step_summary(
+            cycle_report=None,
+            integrator_report=integrator_report,
+            summary_path=str(summary_file),
+        )
+
+        content = summary_file.read_text(encoding="utf-8")
+        assert "統合PR #315" in content
+        assert "https://github.com/Saltmu/manuscriptune/pull/315" in content
+
+    def test_write_github_step_summary_without_repository_env_omits_link(
+        self, tmp_path, monkeypatch
+    ):
+        from src.dispatcher import write_github_step_summary
+
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        summary_file = tmp_path / "step_summary.md"
+
+        integrator_report = {
+            "status": "success",
+            "merged": ["task-merged-1"],
+            "failed": [],
+            "integration_pr_number": 315,
+        }
+
+        write_github_step_summary(
+            cycle_report=None,
+            integrator_report=integrator_report,
+            summary_path=str(summary_file),
+        )
+
+        content = summary_file.read_text(encoding="utf-8")
+        assert "統合PR #315" in content
+        assert "https://github.com/" not in content
+
+    def test_write_github_step_summary_no_pr_number_omits_pr_line(self, tmp_path):
+        from src.dispatcher import write_github_step_summary
+
+        summary_file = tmp_path / "step_summary.md"
+
+        integrator_report = {
+            "status": "success",
+            "merged": ["task-merged-1"],
+            "failed": [],
+            "integration_pr_number": None,
+        }
+
+        write_github_step_summary(
+            cycle_report=None,
+            integrator_report=integrator_report,
+            summary_path=str(summary_file),
+        )
+
+        content = summary_file.read_text(encoding="utf-8")
+        assert "統合PR" not in content
