@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections import deque
@@ -10,7 +11,25 @@ from typing import Any
 
 import yaml
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_SIMILARITY_THRESHOLD = 0.2
+
+_PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+_IGNORED_FOOTPRINT_PATTERNS = (
+    re.compile(r"(^|/)pyproject\.toml$"),
+    re.compile(r"(^|/)poetry\.lock$"),
+    re.compile(r"(^|/)logging\.py$"),
+    re.compile(r"(^|/)logger\.py$"),
+    re.compile(r"(^|/)config\.py$"),
+    re.compile(r"(^|/)settings\.py$"),
+)
+
+
+def _is_ignored_footprint(path_str: str) -> bool:
+    return any(p.search(path_str) for p in _IGNORED_FOOTPRINT_PATTERNS)
+
 
 _RISK_PATH_PATTERNS = (
     re.compile(r"(^|/)data/sources/"),
@@ -35,9 +54,13 @@ class SubTask:
     depends_on: tuple[str, ...]
     risk: bool
     risk_reasons: tuple[str, ...]
+    priority: str = "medium"
 
     def touch_set(self) -> frozenset[str]:
-        return frozenset(self.footprint) | frozenset(self.symbols)
+        filtered_footprint = frozenset(
+            p for p in self.footprint if not _is_ignored_footprint(p)
+        )
+        return filtered_footprint | frozenset(self.symbols)
 
 
 @dataclass(frozen=True)
@@ -153,6 +176,9 @@ def parse_decomposition_plan(path: str | Path) -> list[SubTask]:
         symbols = tuple(str(s) for s in raw.get("symbols", []) or [])
         depends_on = tuple(str(d) for d in raw.get("depends_on", []) or [])
         description = str(raw.get("description", ""))
+        priority = str(raw.get("priority", "medium")).lower()
+        if priority not in ("high", "medium", "low"):
+            priority = "medium"
 
         risk, risk_reasons = _detect_risk_from_values(
             footprint, symbols, description, explicit=bool(raw.get("risk", False))
@@ -167,6 +193,7 @@ def parse_decomposition_plan(path: str | Path) -> list[SubTask]:
                 depends_on=depends_on,
                 risk=risk,
                 risk_reasons=risk_reasons,
+                priority=priority,
             )
         )
 
@@ -215,22 +242,32 @@ def _idf_weights(subtasks: list[SubTask]) -> dict[str, float]:
 
 
 def _weighted_otsuka_ochiai(
-    set_a: frozenset[str], set_b: frozenset[str], weights: dict[str, float]
+    subtask_a: SubTask, subtask_b: SubTask, weights: dict[str, float]
 ) -> float:
     """アイテムごとのIDF重みを考慮した重み付きOtsuka-Ochiai係数（重み付きコサイン類似度）。
 
-    出現頻度が高い（＝疑似結合を招きやすい）アイテムほど重みが1.0に近づき、
-    スコアへの寄与が小さくなる。重みを与えない場合（全アイテムが一意）は
-    `_otsuka_ochiai` と同じ結果になる。
+    マージ衝突の直接的原因となる `footprint` (ファイル) の重みを `symbols` (シンボル) より
+    高く評価するために、ファイルには2.0の倍率を適用します。
     """
+    set_a = subtask_a.touch_set()
+    set_b = subtask_b.touch_set()
     if not set_a or not set_b:
         return 0.0
     shared = set_a & set_b
     if not shared:
         return 0.0
-    weighted_intersection = sum(weights.get(item, 1.0) ** 2 for item in shared)
-    norm_a = math.sqrt(sum(weights.get(item, 1.0) ** 2 for item in set_a))
-    norm_b = math.sqrt(sum(weights.get(item, 1.0) ** 2 for item in set_b))
+
+    def get_weighted_value(item: str, subtask: SubTask) -> float:
+        base_w = weights.get(item, 1.0)
+        multiplier = 1.5 if item in subtask.footprint else 1.0
+        return base_w * multiplier
+
+    weighted_intersection = sum(
+        get_weighted_value(item, subtask_a) * get_weighted_value(item, subtask_b)
+        for item in shared
+    )
+    norm_a = math.sqrt(sum(get_weighted_value(item, subtask_a) ** 2 for item in set_a))
+    norm_b = math.sqrt(sum(get_weighted_value(item, subtask_b) ** 2 for item in set_b))
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return weighted_intersection / (norm_a * norm_b)
@@ -255,6 +292,59 @@ def _find_candidate_pairs(subtasks: list[SubTask]) -> set[tuple[str, str]]:
     return candidates
 
 
+def _determine_edge_direction(
+    subtask_a: SubTask, subtask_b: SubTask, score: float
+) -> DagEdge:
+    a_pri = _PRIORITY_ORDER.get(subtask_a.priority.lower(), 1)
+    b_pri = _PRIORITY_ORDER.get(subtask_b.priority.lower(), 1)
+
+    # 1. 優先度の比較 (小さい方が優先度が高い)
+    if a_pri != b_pri:
+        if a_pri < b_pri:
+            return DagEdge(
+                source=subtask_a.id,
+                target=subtask_b.id,
+                reason="similarity",
+                score=score,
+            )
+        else:
+            return DagEdge(
+                source=subtask_b.id,
+                target=subtask_a.id,
+                reason="similarity",
+                score=score,
+            )
+
+    # 2. footprintの数の比較 (大きい方が先)
+    a_fp_len = len(subtask_a.footprint)
+    b_fp_len = len(subtask_b.footprint)
+    if a_fp_len != b_fp_len:
+        if a_fp_len > b_fp_len:
+            return DagEdge(
+                source=subtask_a.id,
+                target=subtask_b.id,
+                reason="similarity",
+                score=score,
+            )
+        else:
+            return DagEdge(
+                source=subtask_b.id,
+                target=subtask_a.id,
+                reason="similarity",
+                score=score,
+            )
+
+    # 3. 最終手段としてIDの辞書順
+    if subtask_a.id < subtask_b.id:
+        return DagEdge(
+            source=subtask_a.id, target=subtask_b.id, reason="similarity", score=score
+        )
+    else:
+        return DagEdge(
+            source=subtask_b.id, target=subtask_a.id, reason="similarity", score=score
+        )
+
+
 def build_similarity_edges(
     subtasks: list[SubTask], threshold: float = DEFAULT_SIMILARITY_THRESHOLD
 ) -> list[DagEdge]:
@@ -269,13 +359,9 @@ def build_similarity_edges(
     weights = _idf_weights(subtasks)
     edges: list[DagEdge] = []
     for a_id, b_id in sorted(_find_candidate_pairs(subtasks)):
-        score = _weighted_otsuka_ochiai(
-            by_id[a_id].touch_set(), by_id[b_id].touch_set(), weights
-        )
+        score = _weighted_otsuka_ochiai(by_id[a_id], by_id[b_id], weights)
         if score > threshold:
-            edges.append(
-                DagEdge(source=a_id, target=b_id, reason="similarity", score=score)
-            )
+            edges.append(_determine_edge_direction(by_id[a_id], by_id[b_id], score))
     return edges
 
 
@@ -356,19 +442,53 @@ def _topological_sort(node_ids: list[str], edges: list[DagEdge]) -> list[str]:
     return order
 
 
+def _resolve_cycles_if_possible(
+    node_ids: list[str], edges: list[DagEdge]
+) -> list[DagEdge]:
+    edges = list(edges)
+    while True:
+        cycle = _detect_cycle(node_ids, edges)
+        if not cycle:
+            break
+
+        cycle_edges: list[DagEdge] = []
+        for i in range(len(cycle) - 1):
+            src, tgt = cycle[i], cycle[i + 1]
+            for edge in edges:
+                if edge.source == src and edge.target == tgt:
+                    cycle_edges.append(edge)
+                    break
+
+        similarity_cycle_edges = [e for e in cycle_edges if e.reason == "similarity"]
+
+        if not similarity_cycle_edges:
+            raise DagCycleError(f"循環参照を検出しました: {' -> '.join(cycle)}")
+
+        weakest_edge = min(
+            similarity_cycle_edges,
+            key=lambda e: e.score if e.score is not None else 0.0,
+        )
+
+        logger.warning(
+            f"循環参照を検出したため、類似度エッジを自動解消しました: {weakest_edge.source} -> {weakest_edge.target} "
+            f"(reason: {weakest_edge.reason}, score: {weakest_edge.score})"
+        )
+        edges.remove(weakest_edge)
+
+    return edges
+
+
 def _assemble_dag(
     subtask_list: list[SubTask], merged_edges: list[DagEdge]
 ) -> DagResult:
     node_ids = [s.id for s in subtask_list]
 
-    cycle = _detect_cycle(node_ids, merged_edges)
-    if cycle:
-        raise DagCycleError(f"循環参照を検出しました: {' -> '.join(cycle)}")
+    resolved_edges = _resolve_cycles_if_possible(node_ids, merged_edges)
 
-    topological_order = _topological_sort(node_ids, merged_edges)
+    topological_order = _topological_sort(node_ids, resolved_edges)
 
     in_degree = dict.fromkeys(node_ids, 0)
-    for edge in merged_edges:
+    for edge in resolved_edges:
         in_degree[edge.target] += 1
     parallel_leaves = sorted(n for n in node_ids if in_degree[n] == 0)
 
@@ -376,7 +496,7 @@ def _assemble_dag(
 
     return DagResult(
         subtasks={s.id: s for s in subtask_list},
-        edges=merged_edges,
+        edges=resolved_edges,
         topological_order=topological_order,
         parallel_leaves=parallel_leaves,
         risky_subtask_ids=risky_subtask_ids,
@@ -460,6 +580,7 @@ def recompute_dag_for_footprint_change(
         depends_on=old_subtask.depends_on,
         risk=combined_risk,
         risk_reasons=combined_reasons,
+        priority=old_subtask.priority,
     )
 
     updated_subtasks = dict(subtasks)
