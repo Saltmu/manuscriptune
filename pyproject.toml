@@ -27,6 +27,7 @@ httpx2 = "^2.5.0"
 pytest-cov = "^7.1.0"
 pip-audit = "^2.10.1"
 pytest-xdist = "^3.8.0"
+pytest-rerunfailures = "^16.4"
 
 
 

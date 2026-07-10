@@ -3,6 +3,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.utils.flaky_quarantine import load_quarantined_node_ids, mark_flaky_items
+
+
+def pytest_collection_modifyitems(config, items):
+    mark_flaky_items(items, load_quarantined_node_ids())
+
 
 @pytest.fixture
 def mock_ai_client():

@@ -546,7 +546,14 @@ class TestIntegrator:
 
     @patch("src.integrator.github.list_issues_by_label")
     @patch("src.integrator.subprocess.run")
-    def test_ci_flaky_handling(self, mock_run, mock_list):
+    @patch("src.integrator.github.remove_label")
+    @patch("src.integrator.github.add_label")
+    @patch("src.integrator.github.add_comment")
+    def test_ci_failure_runs_only_once_no_whole_script_retry(
+        self, mock_comment, mock_add, mock_remove, mock_run, mock_list
+    ):
+        # #208: quarantine対象外のflakyテストによる失敗は、丸ごとリトライで
+        # 隠さず、1回の実行結果どおりに正しくCI失敗として扱う。
         issue_a = _issue(1, labels=("status:done",), subtask_id="task-1")
         mock_list.side_effect = lambda label, *args, **kwargs: [issue_a]
 
@@ -556,20 +563,18 @@ class TestIntegrator:
             nonlocal ci_calls
             if "local-ci.sh" in args[0] or "local-ci.sh" in args:
                 ci_calls += 1
-                if ci_calls == 1:
-                    raise subprocess.CalledProcessError(returncode=1, cmd=args)
-                return subprocess.CompletedProcess(args=args, returncode=0)
+                raise subprocess.CalledProcessError(returncode=1, cmd=args)
             return subprocess.CompletedProcess(args=args, returncode=0)
 
         mock_run.side_effect = run_side_effect
 
-        config = IntegratorConfig(apply=True, max_flaky_retries=2)
+        config = IntegratorConfig(apply=True)
         integrator = Integrator(config)
         res = integrator.run()
 
-        assert res["status"] == "success"
-        assert res["merged"] == ["task-1"]
-        assert ci_calls == 2
+        assert res["status"] == "failure"
+        assert res["failed"] == ["task-1"]
+        assert ci_calls == 1
 
     @patch("src.integrator.github.list_open_prs")
     @patch("src.integrator.github.list_issues_by_label")
