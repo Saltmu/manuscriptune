@@ -14,6 +14,7 @@ def _issue(
     labels: tuple[str, ...] = (),
     subtask_id: str = "",
     depends_on: tuple[str, ...] = (),
+    parent_number: int | None = 100,
 ) -> IssueRecord:
     body = "```yaml\n"
     if subtask_id:
@@ -23,12 +24,14 @@ def _issue(
         for dep in depends_on:
             body += f"  - {dep}\n"
     body += "```\n"
+    parent = {"number": parent_number} if parent_number is not None else None
     return IssueRecord(
         number=number,
         title=f"Test Issue {number}",
         body=body,
         labels=labels,
         created_at="2026-07-07T00:00:00Z",
+        parent=parent,
     )
 
 

@@ -137,6 +137,37 @@ class TestParseTaskFromIssue:
         assert task.yaml_error is True
         assert task.subtask_id == ""
 
+    def test_parses_parent_number_from_issue(self):
+        issue = IssueRecord(
+            number=10,
+            title="t",
+            body="no yaml",
+            labels=(),
+            created_at="2026-01-01T00:00:00+00:00",
+            parent={"number": 100},
+        )
+        task = parse_task_from_issue(issue)
+        assert task.parent_number == 100
+
+    def test_parses_depends_on_from_blocked_by(self):
+        issue = IssueRecord(
+            number=11,
+            title="t",
+            body="no yaml",
+            labels=(),
+            created_at="2026-01-01T00:00:00+00:00",
+            blocked_by=(20, 30),
+        )
+        issue_to_subtask_id = {20: "task-dep-a", 30: "task-dep-b"}
+        task = parse_task_from_issue(issue, issue_to_subtask_id)
+        assert task.depends_on == ("task-dep-a", "task-dep-b")
+
+    def test_falls_back_to_yaml_when_blocked_by_empty(self):
+        issue = _issue(12, depends_on=("task-yaml-a",))
+        issue_to_subtask_id = {20: "task-dep-a"}
+        task = parse_task_from_issue(issue, issue_to_subtask_id)
+        assert task.depends_on == ("task-yaml-a",)
+
 
 class TestQuotaAvailable:
     def test_full_quota_when_state_empty(self):

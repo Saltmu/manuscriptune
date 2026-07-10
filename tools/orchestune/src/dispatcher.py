@@ -384,6 +384,7 @@ def _promote_blocked_tasks(
     blocked_issues: list[IssueRecord],
     done_issues: list[IssueRecord],
     completed_subtask_ids: set[str],
+    tasks_by_issue: dict[int, Task],
     config: DispatcherConfig,
 ) -> list[dict]:
     """#193: 依存先が全て解決したstatus:blockedタスクをstatus:queuedへ昇格する。
@@ -393,15 +394,15 @@ def _promote_blocked_tasks(
     「解決済み」として扱われる（このタスク自体は依存先の状態を区別しない）。
     """
     done_subtask_ids = {
-        task.subtask_id
-        for task in (parse_task_from_issue(issue) for issue in done_issues)
-        if task.subtask_id
+        tasks_by_issue[issue.number].subtask_id
+        for issue in done_issues
+        if issue.number in tasks_by_issue and tasks_by_issue[issue.number].subtask_id
     } | completed_subtask_ids
 
     events: list[dict] = []
     for issue in blocked_issues:
-        task = parse_task_from_issue(issue)
-        if not task.depends_on:
+        task = tasks_by_issue.get(issue.number)
+        if task is None or not task.depends_on:
             continue
         if not all(dep in done_subtask_ids for dep in task.depends_on):
             continue
@@ -493,16 +494,69 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
         not_needed_issues = github.list_issues_by_label(
             "status:not-needed", state="all"
         )
-        tasks_by_issue = {
-            issue.number: parse_task_from_issue(issue)
-            for issue in [
-                *queued_issues,
-                *locked_issues,
-                *in_progress_issues,
-                *blocked_issues,
-                *done_issues,
-                *not_needed_issues,
+
+        # parent_issue_number が指定されている場合、親Issueが一致する子Issueのみにフィルタリングする
+        if config.parent_issue_number is not None:
+            queued_issues = [
+                i
+                for i in queued_issues
+                if i.parent and i.parent.get("number") == config.parent_issue_number
             ]
+            locked_issues = [
+                i
+                for i in locked_issues
+                if i.parent and i.parent.get("number") == config.parent_issue_number
+            ]
+            in_progress_issues = [
+                i
+                for i in in_progress_issues
+                if i.parent and i.parent.get("number") == config.parent_issue_number
+            ]
+            blocked_issues = [
+                i
+                for i in blocked_issues
+                if i.parent and i.parent.get("number") == config.parent_issue_number
+            ]
+            done_issues = [
+                i
+                for i in done_issues
+                if i.parent and i.parent.get("number") == config.parent_issue_number
+            ]
+            not_needed_issues = [
+                i
+                for i in not_needed_issues
+                if i.parent and i.parent.get("number") == config.parent_issue_number
+            ]
+
+        all_issues = [
+            *queued_issues,
+            *locked_issues,
+            *in_progress_issues,
+            *blocked_issues,
+            *done_issues,
+            *not_needed_issues,
+        ]
+
+        import yaml
+
+        from src.dispatch_scoring import _FOOTPRINT_BLOCK_PATTERN
+
+        issue_to_subtask_id = {}
+        for issue in all_issues:
+            match = _FOOTPRINT_BLOCK_PATTERN.search(issue.body)
+            if match:
+                try:
+                    data = yaml.safe_load(match.group(1))
+                    if isinstance(data, dict):
+                        sub_id = data.get("subtask_id")
+                        if sub_id:
+                            issue_to_subtask_id[issue.number] = str(sub_id)
+                except Exception:
+                    pass
+
+        tasks_by_issue = {
+            issue.number: parse_task_from_issue(issue, issue_to_subtask_id)
+            for issue in all_issues
         }
         issue_number_by_subtask_id = {
             task.subtask_id: task.issue_number
@@ -562,6 +616,7 @@ def run_dispatch_cycle(config: DispatcherConfig) -> CycleReport:
             blocked_issues,
             done_issues + not_needed_issues,
             completed_subtask_ids,
+            tasks_by_issue,
             config,
         )
 

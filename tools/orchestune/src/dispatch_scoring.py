@@ -32,9 +32,13 @@ class Task:
     created_at: str
     depends_on: tuple[str, ...] = ()
     yaml_error: bool = False
+    parent_number: int | None = None
 
 
-def parse_task_from_issue(issue: IssueRecord) -> Task:
+def parse_task_from_issue(
+    issue: IssueRecord,
+    issue_to_subtask_id: dict[int, str] | None = None,
+) -> Task:
     subtask_id = ""
     footprint: tuple[str, ...] = ()
     symbols: tuple[str, ...] = ()
@@ -49,13 +53,27 @@ def parse_task_from_issue(issue: IssueRecord) -> Task:
                 subtask_id = str(data.get("subtask_id", ""))
                 footprint = tuple(str(f) for f in (data.get("footprint") or []))
                 symbols = tuple(str(s) for s in (data.get("symbols") or []))
-                depends_on = tuple(str(d) for d in (data.get("depends_on") or []))
         except yaml.YAMLError as e:
             print(
                 f"Warning: Failed to parse YAML from issue #{issue.number}: {e}",
                 file=sys.stderr,
             )
             yaml_error = True
+
+    if issue_to_subtask_id is not None and issue.blocked_by:
+        depends_on = tuple(
+            issue_to_subtask_id[num]
+            for num in issue.blocked_by
+            if num in issue_to_subtask_id
+        )
+    else:
+        if match and not yaml_error:
+            try:
+                data = yaml.safe_load(match.group(1))
+                if isinstance(data, dict):
+                    depends_on = tuple(str(d) for d in (data.get("depends_on") or []))
+            except Exception:
+                pass
 
     priority = "medium"
     risk = False
@@ -67,6 +85,10 @@ def parse_task_from_issue(issue: IssueRecord) -> Task:
             risk = True
         elif label == "progress:partial":
             progress_partial = True
+
+    parent_number = None
+    if issue.parent:
+        parent_number = issue.parent.get("number")
 
     return Task(
         issue_number=issue.number,
@@ -80,6 +102,7 @@ def parse_task_from_issue(issue: IssueRecord) -> Task:
         created_at=issue.created_at,
         depends_on=depends_on,
         yaml_error=yaml_error,
+        parent_number=parent_number,
     )
 
 
