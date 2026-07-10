@@ -29,8 +29,9 @@ output_schema:
 - `tools/orchestune/`（独立Poetry環境）に `src/dag.py`（分解案パース・DAG構築、#183）と
   `src/dispatcher.py`（クオータ管理・優先度選出・外部排他制御・worktree起動、#184）が実装済みであること。
 - ディスパッチャーの書き込み系操作（ラベル更新・`git worktree`作成・エージェント起動）は、
-  **`--apply`を明示指定しない限り一切実行されない**（既定はdry-run）。安全側に倒した設計であるため、
-  パイロット中は必ずdry-run結果を人間が確認してから`--apply`を実行すること。
+  **既定で実行される**（`--apply`が既定`True`）。dry-run確認したい場合は`--no-apply`を
+  明示指定する（#328でapplyを既定に変更。動作確認したい場合は必ず`--no-apply`結果を
+  人間が確認してから実運用すること）。
 - `dispatcher.py`のエージェント実起動先は`DispatcherConfig.dispatch_target`
   （`src/dispatch_targets.py`の`DispatchTarget`を実装したクラス）で切り替え可能である（#215）。
   既定は`LocalProcessDispatchTarget`（ローカルsubprocessを起動。`command_builder`未指定時は
@@ -112,13 +113,15 @@ output_schema:
    - `prompt`: 「`cd tools/orchestune && poetry run dispatch-cycle` を実行し、選出結果・quota状況・
      external-lock変更・footprint逸脱イベントを人間に要約報告せよ。リスクフラグ付き・quota枯渇の場合は
      その旨を明記せよ。」
-2. `dispatch-cycle` は既定でdry-runである。ラベル更新・worktree作成・エージェント起動は一切行わず、
-   選出結果・クオータ状況・ロック判定のみをJSONで出力する。
-3. 人間がレポートを見て問題ないと判断した場合のみ、以下を手動実行し実際にdispatchする:
+2. `dispatch-cycle` は既定でapply（実際にラベル更新・worktree作成・エージェント起動まで行う）である。
+   動作確認だけしたい場合は`--no-apply`を指定してdry-run実行し、選出結果・クオータ状況・
+   ロック判定のみをJSONで出力させる。
+3. 人間がレポートを見て問題ないと判断した場合、以下を実行し実際にdispatchする（`--no-apply`を
+   付けなければ既定でapplyされる）:
 
    ```bash
    cd tools/orchestune
-   poetry run dispatch-cycle --apply --dispatch-target cloud-routine
+   poetry run dispatch-cycle --dispatch-target cloud-routine
    ```
 
    （#215）このとき、`--dispatch-target cloud-routine`かつ`ORCHESTUNE_ROUTINE_ID`/
@@ -149,7 +152,7 @@ output_schema:
    このサブタスクが完了するまで凍結する**（`quota_slots_available`は0として報告される）。
    一度強制直列化されたサブタスクは、以後の逸脱検知でも再計算・通知を行わない
    （`deviation_events`に`action: "already_forced_serial"`として記録されるのみ）。
-4. dry-run時（`--apply`未指定）は、上記のコメント投稿・ラベル付与は一切行われず、
+4. dry-run時（`--no-apply`指定時）は、上記のコメント投稿・ラベル付与は一切行われず、
    `deviation_events`にどのアクションが実行される見込みかのみが記録される
    （`recompute_count`・`forced_serial`の状態も永続化されない）。
 
@@ -177,7 +180,7 @@ output_schema:
    列挙された全サブタスクIDが`status:done`（または当サイクルで完了したもの）に
    含まれていれば、`status:blocked` → `status:queued`へ自動昇格する
    （`promotion_events`に記録）。昇格したタスク自体は次サイクル以降で選出対象になる。
-5. dry-run時は上記の`git worktree remove`・ラベル遷移は一切行われず、
+5. dry-run時（`--no-apply`指定時）は上記の`git worktree remove`・ラベル遷移は一切行われず、
    `completion_events`・`promotion_events`にプレビューのみが記録される。
 
 ## リモートブランチの自己ロック誤検知修正（#194）
@@ -192,8 +195,8 @@ output_schema:
 
 - [ ] `decomposition_plan.md`のサンプルを1件作成し、上記ステージ1手順3で`build_dag_from_plan`が
       例外なくJSONを返すことを確認した
-- [ ] `poetry run dispatch-cycle`（dry-run、`--run-state-path`等はテスト用一時ディレクトリを指定）が
+- [ ] `poetry run dispatch-cycle --no-apply`（dry-run、`--run-state-path`等はテスト用一時ディレクトリを指定）が
       実際のGitHub Issue（またはモックした`gh`コマンド）に対して例外なくJSONレポートを出力することを確認した
-- [ ] `poetry run dispatch-cycle --apply` を隔離環境で1回実行し、`git worktree`が実際に作成され、
+- [ ] `poetry run dispatch-cycle`（既定でapply）を隔離環境で1回実行し、`git worktree`が実際に作成され、
       `run_state.json`が正しく更新されることを確認した
 - [ ] パイロット運用でこのドラフト導線を実際に使用した

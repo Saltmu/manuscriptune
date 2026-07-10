@@ -896,14 +896,17 @@ def _report_to_dict(report: CycleReport) -> dict:
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="スケジューラ駆動ディスパッチャー: 1サイクル分の選出・dispatchを実行する（既定はdry-run）"
+        description="スケジューラ駆動ディスパッチャー: 1サイクル分の選出・dispatchを実行する"
+        "（既定でラベル更新・worktree作成・エージェント起動まで行う。dry-runには--no-applyを指定）"
     )
     parser.add_argument(
         "--apply",
-        action="store_true",
-        help="実際にラベル更新・worktree作成・エージェント起動を行う（未指定時はdry-run）",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="実際にラベル更新・worktree作成・エージェント起動を行う（既定）。"
+        "--no-applyでdry-run（何も変更しない）にできる。",
     )
     parser.add_argument("--max-concurrent", type=int, default=2)
     parser.add_argument("--max-launches-per-window", type=int, default=1)
@@ -954,6 +957,11 @@ def main(argv: list[str] | None = None) -> int:
         default=Path("not_needed_review_state.json"),
         help="#282: 保留中のstatus:not-needed検証レビュー（合否ポーリング・自動クローズ待ち）の永続化先",
     )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_arg_parser()
     args = parser.parse_args(argv)
 
     config = DispatcherConfig(
