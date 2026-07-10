@@ -40,6 +40,7 @@ class IssueRecord:
     body: str
     labels: tuple[str, ...]
     created_at: str
+    state: str = "OPEN"
     parent: dict | None = None
     blocked_by: tuple[int, ...] = ()
 
@@ -88,7 +89,7 @@ def list_issues_by_label(label: str, state: str = "open") -> list[IssueRecord]:
             "--state",
             state,
             "--json",
-            "number,title,body,labels,createdAt,parent,blockedBy",
+            "number,title,body,labels,createdAt,parent,blockedBy,state",
         ]
     )
     raw_issues = json.loads(stdout)
@@ -99,6 +100,7 @@ def list_issues_by_label(label: str, state: str = "open") -> list[IssueRecord]:
             body=raw["body"],
             labels=tuple(entry["name"] for entry in raw.get("labels", [])),
             created_at=raw["createdAt"],
+            state=raw.get("state", "OPEN"),
             parent=raw.get("parent"),
             blocked_by=tuple(
                 node["number"] for node in raw.get("blockedBy", {}).get("nodes", [])

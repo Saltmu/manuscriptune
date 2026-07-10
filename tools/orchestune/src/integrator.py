@@ -38,7 +38,12 @@ class Integrator:
 
     def run(self) -> dict:
         sorted_done_tasks = self._get_sorted_done_tasks()
-        if not sorted_done_tasks:
+        active_done_tasks = [
+            t
+            for t in sorted_done_tasks
+            if t.issue_state != "CLOSED" and t.parent_state != "CLOSED"
+        ]
+        if not active_done_tasks:
             return {"status": "no_done_tasks", "merged": []}
 
         temp_worktree_path = None
@@ -85,7 +90,7 @@ class Integrator:
                     "error": "Failed to create temp branch",
                 }
 
-            merged_tasks, failed_tasks = self._merge_and_test_tasks(sorted_done_tasks)
+            merged_tasks, failed_tasks = self._merge_and_test_tasks(active_done_tasks)
 
             if merged_tasks and not failed_tasks:
                 if self.config.apply:

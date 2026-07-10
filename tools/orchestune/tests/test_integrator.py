@@ -15,6 +15,8 @@ def _issue(
     subtask_id: str = "",
     depends_on: tuple[str, ...] = (),
     parent_number: int | None = 100,
+    state: str = "OPEN",
+    parent_state: str = "OPEN",
 ) -> IssueRecord:
     body = "```yaml\n"
     if subtask_id:
@@ -24,13 +26,18 @@ def _issue(
         for dep in depends_on:
             body += f"  - {dep}\n"
     body += "```\n"
-    parent = {"number": parent_number} if parent_number is not None else None
+    parent = (
+        {"number": parent_number, "state": parent_state}
+        if parent_number is not None
+        else None
+    )
     return IssueRecord(
         number=number,
         title=f"Test Issue {number}",
         body=body,
         labels=labels,
         created_at="2026-07-07T00:00:00Z",
+        state=state,
         parent=parent,
     )
 
@@ -796,6 +803,55 @@ class TestIntegrator:
         mock_remove.assert_not_called()
         mock_add.assert_not_called()
         mock_comment.assert_not_called()
+
+    @patch("src.integrator.github.list_issues_by_label")
+    @patch("src.integrator.subprocess.run")
+    @patch("src.integrator.github.list_open_prs")
+    @patch("src.integrator.github.create_pull_request")
+    def test_exclude_closed_tasks(
+        self, mock_create_pr, mock_open_prs, mock_run, mock_list
+    ):
+        # 1. 自身がCLOSEDなタスクは除外されること
+        issue_closed = _issue(
+            1, labels=("status:done",), subtask_id="task-1", state="CLOSED"
+        )
+        # 2. 親IssueがCLOSEDなタスクは除外されること
+        issue_parent_closed = _issue(
+            2,
+            labels=("status:done",),
+            subtask_id="task-2",
+            parent_state="CLOSED",
+        )
+        # 3. どちらもOPENなタスクは検証されること
+        issue_active = _issue(3, labels=("status:done",), subtask_id="task-3")
+
+        def list_side_effect(label, *args, **kwargs):
+            if label == "status:done":
+                return [issue_closed, issue_parent_closed, issue_active]
+            return [issue_closed, issue_parent_closed, issue_active]
+
+        mock_list.side_effect = list_side_effect
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b""
+        )
+        mock_open_prs.return_value = []
+        mock_create_pr.return_value = 888
+
+        config = IntegratorConfig(apply=True)
+        integrator = Integrator(config)
+        res = integrator.run()
+
+        # task-1 と task-2 は除外され、task-3 のみがマージ検証される
+        assert res["status"] == "success"
+        assert res["merged"] == ["task-3"]
+        assert res["integration_pr_number"] == 888
+
+        # 実際にマージが走ったのは task-3 のみであることを確認
+        merge_calls = [
+            call for call in mock_run.call_args_list if "merge" in call.args[0]
+        ]
+        assert len(merge_calls) == 1
+        assert any("claude/issue-3-task-3" in arg for arg in merge_calls[0].args[0])
 
 
 class TestIntegratorWorktreeIsolation:
