@@ -33,6 +33,8 @@ class Task:
     depends_on: tuple[str, ...] = ()
     yaml_error: bool = False
     parent_number: int | None = None
+    issue_state: str = "OPEN"
+    parent_state: str | None = None
 
 
 def parse_task_from_issue(
@@ -87,8 +89,10 @@ def parse_task_from_issue(
             progress_partial = True
 
     parent_number = None
+    parent_state = None
     if issue.parent:
         parent_number = issue.parent.get("number")
+        parent_state = issue.parent.get("state")
 
     return Task(
         issue_number=issue.number,
@@ -103,6 +107,8 @@ def parse_task_from_issue(
         depends_on=depends_on,
         yaml_error=yaml_error,
         parent_number=parent_number,
+        issue_state=issue.state,
+        parent_state=parent_state,
     )
 
 
