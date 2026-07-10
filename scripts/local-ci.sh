@@ -101,42 +101,7 @@ check_changes() {
   fi
 }
 
-# tools/orchestune/ は独立したPoetry環境・ローカルCIを持つため本体の
-# frontend/backend判定からは隔離しているが、品質ゲートから漏れないよう
-# 差分の有無だけを別途検知し、該当ローカルCIを併走させる。
-check_orchestune_changes() {
-  if [ "$FORCE_FULL" = "true" ]; then
-    echo "true"
-    return
-  fi
-
-  local base_commit
-  base_commit=$(git merge-base origin/main HEAD 2>/dev/null || git merge-base main HEAD 2>/dev/null || echo "")
-
-  # 追跡済みファイルの差分に加え、未追跡（新規追加）ファイルも
-  # git ls-files --others で拾う。tools/orchestune/ は新規ディレクトリ
-  # として追加されることが多く、diffだけでは検知漏れするため。
-  local changed_files
-  changed_files=$( {
-    if [ -n "$base_commit" ]; then
-      git diff --name-only "${base_commit}...HEAD" 2>/dev/null
-    fi
-    git diff --name-only --cached 2>/dev/null
-    git diff --name-only 2>/dev/null
-    git ls-files --others --exclude-standard 2>/dev/null
-  } | sort -u )
-
-  if echo "$changed_files" | grep -q '^tools/orchestune/'; then
-    echo "true"
-  else
-    echo "false"
-  fi
-}
-
-run_orchestune_steps() {
-  echo "[orchestune] Running tools/orchestune/scripts/local-ci.sh..."
-  ./tools/orchestune/scripts/local-ci.sh
-}
+# orchestune local-ci steps removed (migrated to standalone repository)
 
 run_frontend_steps() {
   # 1. Build the frontend (tests depend on frontend/dist/index.html existing,
@@ -225,9 +190,6 @@ run_backend_steps() {
 CHANGE_TYPE=$(check_changes)
 echo "Detected change scope: $CHANGE_TYPE"
 
-ORCHESTUNE_CHANGED=$(check_orchestune_changes)
-echo "Orchestune (tools/orchestune) changes detected: $ORCHESTUNE_CHANGED"
-
 LOG_DIR=".local_ci_logs"
 mkdir -p "$LOG_DIR"
 
@@ -238,19 +200,8 @@ trap cleanup EXIT
 
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 BACKEND_LOG="$LOG_DIR/backend.log"
-ORCHESTUNE_LOG="$LOG_DIR/orchestune.log"
-
 FE_EXIT=0
 BE_EXIT=0
-ORCH_EXIT=0
-ORCH_PID=""
-
-# tools/orchestune に差分がある場合は、本体のfrontend/backend判定とは
-# 独立に、隔離されたローカルCIをバックグラウンドで併走させる。
-if [ "$ORCHESTUNE_CHANGED" = "true" ]; then
-  run_orchestune_steps > "$ORCHESTUNE_LOG" 2>&1 &
-  ORCH_PID=$!
-fi
 
 # tests/test_review_server.py::test_get_index requires frontend/dist/index.html
 # to exist. frontend/dist is gitignored, so a clean working tree that has never
@@ -315,28 +266,12 @@ elif [ "$CHANGE_TYPE" = "backend" ]; then
   run_backend_steps || BE_EXIT=$?
 fi
 
-if [ -n "$ORCH_PID" ]; then
-  wait "$ORCH_PID" || ORCH_EXIT=$?
-
-  echo ""
-  echo "========================================="
-  echo "=== Orchestune (tools/orchestune) Task Logs ==="
-  echo "========================================="
-  if [ -f "$ORCHESTUNE_LOG" ]; then
-    cat "$ORCHESTUNE_LOG"
-  else
-    echo "No orchestune logs found."
-  fi
-  echo ""
-fi
-
 # Print final result and exit
-if [ $FE_EXIT -ne 0 ] || [ $BE_EXIT -ne 0 ] || [ $ORCH_EXIT -ne 0 ]; then
+if [ $FE_EXIT -ne 0 ] || [ $BE_EXIT -ne 0 ]; then
   echo "========================================="
   echo "❌ Local CI Check Failed!"
   [ $FE_EXIT -ne 0 ] && echo "  - Frontend steps failed (exit code: $FE_EXIT)"
   [ $BE_EXIT -ne 0 ] && echo "  - Backend steps failed (exit code: $BE_EXIT)"
-  [ $ORCH_EXIT -ne 0 ] && echo "  - Orchestune steps failed (exit code: $ORCH_EXIT)"
   echo "========================================="
   exit 1
 fi
