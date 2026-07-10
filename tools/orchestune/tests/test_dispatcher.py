@@ -2346,3 +2346,25 @@ class TestSyncExternalLocks:
 
         content = summary_file.read_text(encoding="utf-8")
         assert "統合PR" not in content
+
+
+class TestBuildArgParser:
+    """#328: dispatch-cycleの既定挙動をapplyに変更（--no-applyでdry-run）。"""
+
+    def test_apply_defaults_to_true(self):
+        from src.dispatcher import _build_arg_parser
+
+        args = _build_arg_parser().parse_args([])
+        assert args.apply is True
+
+    def test_no_apply_flag_disables_apply(self):
+        from src.dispatcher import _build_arg_parser
+
+        args = _build_arg_parser().parse_args(["--no-apply"])
+        assert args.apply is False
+
+    def test_explicit_apply_flag_still_works(self):
+        from src.dispatcher import _build_arg_parser
+
+        args = _build_arg_parser().parse_args(["--apply"])
+        assert args.apply is True

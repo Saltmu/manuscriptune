@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       apply:
-        description: "ラベル更新・worktree作成・実dispatchまで行う場合はtrue（未指定はdry-run）"
+        description: "ラベル更新・worktree作成・実dispatchまで行う場合はtrue（既定）。dry-runにはfalseを指定"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: write
