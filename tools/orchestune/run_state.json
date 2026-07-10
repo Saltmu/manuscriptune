@@ -1,5 +1,23 @@
 {
-  "active_worktrees": {},
+  "active_worktrees": {
+    "322": {
+      "issue_number": 322,
+      "branch": "claude/issue-322-extract-launch",
+      "worktree_path": "worktrees/claude-issue-322-extract-launch",
+      "pid": null,
+      "started_at": 1783650113.807023,
+      "declared_footprint": [
+        "src/dispatcher.py",
+        "src/dispatch_launch.py",
+        "tests/test_dispatcher.py",
+        "tests/test_dispatch_launch.py"
+      ],
+      "recompute_count": 0,
+      "forced_serial": false,
+      "external_id": "session_01XSVWfAyaRo9rrRZYTk2UcD",
+      "external_url": "https://claude.ai/code/session_01XSVWfAyaRo9rrRZYTk2UcD"
+    }
+  },
   "launch_history": [
     1783423174.7666795,
     1783455253.6116974,
@@ -21,7 +39,8 @@
     1783596260.0131392,
     1783602425.6617277,
     1783606415.666746,
-    1783610383.2293978
+    1783610383.2293978,
+    1783650113.807023
   ],
   "completed_worktrees": [
     {
