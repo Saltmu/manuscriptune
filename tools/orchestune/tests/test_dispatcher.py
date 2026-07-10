@@ -34,6 +34,7 @@ def _issue(
     subtask_id="task-a",
     depends_on=(),
     created_at="2026-01-01T00:00:00+00:00",
+    parent_number=181,
 ):
     footprint_lines = "\n".join(f"  - {f}" for f in footprint) if footprint else "  []"
     symbols_lines = "\n".join(f"  - {s}" for s in symbols) if symbols else "  []"
@@ -52,8 +53,14 @@ def _issue(
         f"{depends_on_lines}\n"
         "```\n"
     )
+    parent = {"number": parent_number} if parent_number is not None else None
     return IssueRecord(
-        number=number, title="t", body=body, labels=labels, created_at=created_at
+        number=number,
+        title="t",
+        body=body,
+        labels=labels,
+        created_at=created_at,
+        parent=parent,
     )
 
 
@@ -333,6 +340,114 @@ class TestRunDispatchCycle:
 
         assert report.selected == []
         assert report.quota_slots_available == 0
+
+    def test_run_dispatch_cycle_filters_by_parent_issue_number(self, tmp_path):
+        config = DispatcherConfig(
+            max_concurrent=2,
+            max_launches_per_window=2,
+            window_seconds=3600,
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            parent_issue_number=100,
+            apply=False,
+        )
+        sub_issue_1 = _issue(
+            1,
+            labels=("status:queued",),
+            subtask_id="task-a",
+        )
+        sub_issue_1 = IssueRecord(
+            number=sub_issue_1.number,
+            title=sub_issue_1.title,
+            body=sub_issue_1.body,
+            labels=sub_issue_1.labels,
+            created_at=sub_issue_1.created_at,
+            parent={"number": 100},
+        )
+        sub_issue_2 = _issue(
+            2,
+            labels=("status:queued",),
+            subtask_id="task-b",
+        )
+        sub_issue_2 = IssueRecord(
+            number=sub_issue_2.number,
+            title=sub_issue_2.title,
+            body=sub_issue_2.body,
+            labels=sub_issue_2.labels,
+            created_at=sub_issue_2.created_at,
+            parent={"number": 200},
+        )
+        sub_issue_3 = _issue(
+            3,
+            labels=("status:queued",),
+            subtask_id="task-c",
+        )
+
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+        ):
+
+            def _list(label, **_):
+                if label == "status:queued":
+                    return [sub_issue_1, sub_issue_2, sub_issue_3]
+                return []
+
+            mock_list.side_effect = _list
+            report = run_dispatch_cycle(config)
+
+        # parent=100 の sub_issue_1 のみが選出される
+        assert [t.issue_number for t in report.selected] == [1]
+
+    def test_run_dispatch_cycle_resolves_depends_on_from_blocked_by(self, tmp_path):
+        config = DispatcherConfig(
+            max_concurrent=2,
+            max_launches_per_window=2,
+            window_seconds=3600,
+            run_state_path=tmp_path / "run_state.json",
+            worktree_root=tmp_path / "worktrees",
+            log_dir=tmp_path / "logs",
+            apply=True,
+        )
+        done_issue = _issue(1, labels=("status:done",), subtask_id="task-a")
+        blocked_issue = _issue(
+            2,
+            labels=("status:blocked",),
+            subtask_id="task-b",
+            depends_on=(),
+        )
+        blocked_issue = IssueRecord(
+            number=blocked_issue.number,
+            title=blocked_issue.title,
+            body=blocked_issue.body,
+            labels=blocked_issue.labels,
+            created_at=blocked_issue.created_at,
+            blocked_by=(1,),
+        )
+        with (
+            patch("src.dispatcher.github.list_issues_by_label") as mock_list,
+            patch("src.dispatcher.github.list_remote_branches", return_value=[]),
+            patch("src.dispatcher.github.list_open_prs", return_value=[]),
+            patch("src.dispatcher.github.add_label") as mock_add_label,
+            patch("src.dispatcher.github.remove_label") as mock_remove_label,
+        ):
+
+            def _list(label, **_):
+                if label == "status:done":
+                    return [done_issue]
+                if label == "status:blocked":
+                    return [blocked_issue]
+                return []
+
+            mock_list.side_effect = _list
+            report = run_dispatch_cycle(config)
+
+        # BがAの完了により昇格したことを確認
+        mock_remove_label.assert_any_call(2, "status:blocked")
+        mock_add_label.assert_any_call(2, "status:queued")
+        assert report.promotion_events == [{"issue_number": 2, "subtask_id": "task-b"}]
 
 
 class TestRunDispatchCycleBranchNormalization:

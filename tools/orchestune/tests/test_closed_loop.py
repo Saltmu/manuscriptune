@@ -148,6 +148,8 @@ class DummyGitHub:
                     body=issue.body,
                     labels=new_labels,
                     created_at=issue.created_at,
+                    parent=issue.parent,
+                    blocked_by=issue.blocked_by,
                 )
 
     def remove_label(self, issue_number: int | str, label: str) -> None:
@@ -162,6 +164,8 @@ class DummyGitHub:
                     body=issue.body,
                     labels=new_labels,
                     created_at=issue.created_at,
+                    parent=issue.parent,
+                    blocked_by=issue.blocked_by,
                 )
 
     def add_comment(self, issue_number: int | str, body: str) -> None:
@@ -469,6 +473,7 @@ def test_closed_loop_dag_recomputation_serialization():
         body=issue_body_1,
         labels=("status:queued",),
         created_at="2026-07-07T00:00:00Z",
+        parent={"number": 100},
     )
     dummy_github.add_issue(issue_1)
 
@@ -479,6 +484,7 @@ def test_closed_loop_dag_recomputation_serialization():
         body=issue_body_2,
         labels=("status:queued",),
         created_at="2026-07-07T00:00:00Z",
+        parent={"number": 100},
     )
     dummy_github.add_issue(issue_2)
 

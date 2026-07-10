@@ -231,6 +231,21 @@ class Integrator:
             state = "all" if label == "status:done" else "open"
             all_issues.extend(github.list_issues_by_label(label, state=state))
 
+        # parent_issue_number が指定されている場合、親Issueが一致する子Issueのみにフィルタリングする
+        if self.config.parent_issue_number is not None:
+            done_issues = [
+                i
+                for i in done_issues
+                if i.parent
+                and i.parent.get("number") == self.config.parent_issue_number
+            ]
+            all_issues = [
+                i
+                for i in all_issues
+                if i.parent
+                and i.parent.get("number") == self.config.parent_issue_number
+            ]
+
         seen_numbers = set()
         unique_issues = []
         for issue in all_issues:
@@ -238,7 +253,14 @@ class Integrator:
                 seen_numbers.add(issue.number)
                 unique_issues.append(issue)
 
-        tasks = [parse_task_from_issue(issue) for issue in unique_issues]
+        # すべてのIssueについて、YAML内の subtask_id を事前スキャンしてマッピングを構築する
+        issue_to_subtask_id = self._build_issue_to_subtask_id_map(
+            unique_issues + done_issues
+        )
+
+        tasks = [
+            parse_task_from_issue(issue, issue_to_subtask_id) for issue in unique_issues
+        ]
         subtasks = [
             SubTask(
                 id=task.subtask_id,
@@ -260,7 +282,9 @@ class Integrator:
             print(f"Warning: Failed to build DAG: {e}", file=sys.stderr)
             topological_order = [t.id for t in subtasks]
 
-        done_tasks = [parse_task_from_issue(issue) for issue in done_issues]
+        done_tasks = [
+            parse_task_from_issue(issue, issue_to_subtask_id) for issue in done_issues
+        ]
         done_task_map = {t.subtask_id: t for t in done_tasks if t.subtask_id}
 
         sorted_done_tasks = []
@@ -275,6 +299,27 @@ class Integrator:
                 sorted_done_tasks.append(t)
 
         return sorted_done_tasks
+
+    def _build_issue_to_subtask_id_map(
+        self, issues: list[github.IssueRecord]
+    ) -> dict[int, str]:
+        import yaml
+
+        from src.dispatch_scoring import _FOOTPRINT_BLOCK_PATTERN
+
+        issue_to_subtask_id = {}
+        for issue in issues:
+            match = _FOOTPRINT_BLOCK_PATTERN.search(issue.body)
+            if match:
+                try:
+                    data = yaml.safe_load(match.group(1))
+                    if isinstance(data, dict):
+                        sub_id = data.get("subtask_id")
+                        if sub_id:
+                            issue_to_subtask_id[issue.number] = str(sub_id)
+                except Exception:
+                    pass
+        return issue_to_subtask_id
 
     def _create_temp_branch(self) -> bool:
         if not self.config.apply:
