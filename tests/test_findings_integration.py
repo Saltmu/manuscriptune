@@ -1,6 +1,13 @@
+import os
+
 import yaml
 
-from src.findings.integration import fallback_merge, generate_markdown_report
+from src.findings.integration import (
+    BaseFindingsIntegrator,
+    IntegrationContext,
+    fallback_merge,
+    generate_markdown_report,
+)
 
 
 def _report_kwargs(**overrides):
@@ -85,3 +92,80 @@ def test_fallback_merge_includes_extra_metadata_when_provided():
 
     assert parsed["_metadata"]["fallback_mode"] is True
     assert parsed["_metadata"]["completeness"] == "low"
+
+
+class _FakeIntegrator(BaseFindingsIntegrator):
+    """Minimal concrete subclass used to exercise BaseFindingsIntegrator.run()
+    in isolation, without going through the text/plot CLI modules."""
+
+    def __init__(self, model, *, findings, llm_result, prepare_ok=True):
+        super().__init__(model)
+        self._findings = findings
+        self._llm_result = llm_result
+        self._prepare_ok = prepare_ok
+        self.report_calls: list[list[dict]] = []
+
+    def _collect_raw_findings(self, output_dir):
+        return self._findings
+
+    def _prepare(self, output_dir, **kwargs):
+        if not self._prepare_ok:
+            return None
+        return IntegrationContext(
+            target_text="dummy text",
+            yaml_path=os.path.join(output_dir, "out.yaml"),
+            report_path=os.path.join(output_dir, "out.md"),
+        )
+
+    def _run_integration_llm(self, output_dir, target_text, raw_findings_text):
+        return self._llm_result
+
+    def _fallback_merge(self, all_findings):
+        return "findings: []\n_metadata:\n  fallback_mode: true\n"
+
+    def _generate_markdown_report(self, findings, output_md):
+        self.report_calls.append(findings)
+        with open(output_md, "w", encoding="utf-8") as f:
+            f.write("report")
+
+
+def test_base_integrator_run_dir_not_exists():
+    integrator = _FakeIntegrator("model", findings=[], llm_result=None)
+    assert integrator.run("non_existent_dir") is False
+
+
+def test_base_integrator_run_prepare_fails(tmp_path):
+    integrator = _FakeIntegrator(
+        "model", findings=[], llm_result=None, prepare_ok=False
+    )
+    assert integrator.run(str(tmp_path)) is False
+
+
+def test_base_integrator_run_no_findings_writes_empty(tmp_path):
+    integrator = _FakeIntegrator("model", findings=[], llm_result=None)
+    assert integrator.run(str(tmp_path)) is True
+
+    assert (tmp_path / "out.yaml").read_text(encoding="utf-8") == "findings: []\n"
+    assert (tmp_path / "out.md").exists()
+    assert integrator.report_calls == [[]]
+
+
+def test_base_integrator_run_uses_llm_result(tmp_path):
+    integrator = _FakeIntegrator(
+        "model",
+        findings=[{"id": "X-001"}],
+        llm_result="findings:\n  - id: X-001\n",
+    )
+    assert integrator.run(str(tmp_path)) is True
+
+    content = (tmp_path / "out.yaml").read_text(encoding="utf-8")
+    assert "X-001" in content
+    assert integrator.report_calls == [[{"id": "X-001"}]]
+
+
+def test_base_integrator_run_falls_back_when_llm_fails(tmp_path):
+    integrator = _FakeIntegrator("model", findings=[{"id": "X-001"}], llm_result=None)
+    assert integrator.run(str(tmp_path)) is True
+
+    content = (tmp_path / "out.yaml").read_text(encoding="utf-8")
+    assert "fallback_mode: true" in content

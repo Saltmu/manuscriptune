@@ -3,11 +3,11 @@ import os
 import sys
 
 from src.findings import integration as _integration
+from src.findings.integration import BaseFindingsIntegrator, IntegrationContext
 from src.utils import project_paths
 from src.utils.ai_task import FindingsIntegrationInput, FindingsIntegrationTask
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
-from src.utils.yaml_handler import YamlHandler
 
 logger = get_logger(__name__)
 
@@ -103,71 +103,44 @@ def _fallback_merge(all_findings: list[dict]) -> str:
     )
 
 
+class TextFindingsIntegrator(BaseFindingsIntegrator):
+    """Findings integrator for novel text review (see BaseFindingsIntegrator)."""
+
+    def _collect_raw_findings(self, output_dir):
+        return _collect_raw_findings(output_dir)
+
+    def _prepare(self, output_dir, **kwargs):
+        basename = os.path.basename(os.path.abspath(output_dir))
+        formatted_txt_path = project_paths.resolve_formatted_draft_path(
+            output_dir, basename
+        )
+        if not os.path.exists(formatted_txt_path):
+            logger.error(f"'{basename}_formatted.txt' not found in {output_dir}.")
+            return None
+        return IntegrationContext(
+            target_text=read_file(formatted_txt_path),
+            yaml_path=project_paths.get_findings_yaml_path(output_dir, basename),
+            report_path=project_paths.get_report_md_path(output_dir, basename),
+        )
+
+    def _run_integration_llm(self, output_dir, target_text, raw_findings_text):
+        return run_integration_llm(
+            output_dir, target_text, raw_findings_text, self.model
+        )
+
+    def _fallback_merge(self, all_findings):
+        return _fallback_merge(all_findings)
+
+    def _generate_markdown_report(self, findings, output_md):
+        generate_markdown_report(findings, output_md)
+
+
 def integrate_findings_in_dir(output_dir, model):
     """
     Integrates and resolves conflicts in parallel review findings.
     Returns True on success, False on failure.
     """
-    if not os.path.exists(output_dir):
-        logger.error(f"Directory '{output_dir}' does not exist.")
-        return False
-
-    basename = os.path.basename(os.path.abspath(output_dir))
-    formatted_txt_path = project_paths.resolve_formatted_draft_path(
-        output_dir, basename
-    )
-    if not os.path.exists(formatted_txt_path):
-        logger.error(f"'{basename}_formatted.txt' not found in {output_dir}.")
-        return False
-
-    target_text = read_file(formatted_txt_path)
-
-    # Collect findings
-    all_findings = _collect_raw_findings(output_dir)
-
-    if not all_findings:
-        logger.info("No findings to merge. Writing empty integrated findings.")
-        integrated_yaml_path = project_paths.get_findings_yaml_path(
-            output_dir, basename
-        )
-        with open(integrated_yaml_path, "w", encoding="utf-8") as f:
-            f.write("findings: []\n")
-        generate_markdown_report(
-            [], project_paths.get_report_md_path(output_dir, basename)
-        )
-        logger.info("Done.")
-        return True
-
-    raw_findings_text = YamlHandler.dump({"findings": all_findings})
-
-    # Run integration via LLM
-    merged_yaml_content = run_integration_llm(
-        output_dir, target_text, raw_findings_text, model
-    )
-
-    if not merged_yaml_content:
-        logger.error("LLM integration failed. Performing mechanical fallback merging.")
-        merged_yaml_content = _fallback_merge(all_findings)
-
-    # Write output
-    integrated_yaml_path = project_paths.get_findings_yaml_path(output_dir, basename)
-    with open(integrated_yaml_path, "w", encoding="utf-8") as f:
-        f.write(merged_yaml_content + "\n")
-    logger.info(f"Saved integrated findings to {integrated_yaml_path}")
-
-    # Parse back the merged findings to generate Markdown report
-    try:
-        merged_findings_list = YamlHandler.load_findings(merged_yaml_content)
-    except Exception:
-        merged_findings_list = []
-        logger.warning(
-            "Could not parse merged YAML back for Markdown report generation."
-        )
-
-    report_md_path = project_paths.get_report_md_path(output_dir, basename)
-    generate_markdown_report(merged_findings_list, report_md_path)
-    logger.info(f"Saved Markdown report to {report_md_path}")
-    return True
+    return TextFindingsIntegrator(model).run(output_dir)
 
 
 def main():
