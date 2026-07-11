@@ -5,6 +5,9 @@ Used by both ``src/cli/integrate_findings.py`` (novel text review) and
 YAML discovery strategy, path resolution, and report wording.
 """
 
+import os
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
 
 from src.utils.ai_client import AgyClientError
@@ -112,3 +115,97 @@ def fallback_merge(
     if extra_metadata:
         result["_metadata"] = extra_metadata
     return YamlHandler.dump(result)
+
+
+@dataclass
+class IntegrationContext:
+    """Resolved inputs/outputs for a single integration run."""
+
+    target_text: str
+    yaml_path: str
+    report_path: str
+
+
+class BaseFindingsIntegrator(ABC):
+    """Common flow for merging parallel review findings into a single result.
+
+    Subclasses supply the findings-type-specific pieces (discovery strategy,
+    path resolution, and the underlying LLM/report configuration) by
+    implementing the abstract hooks below; ``run()`` implements the shared
+    "check inputs -> collect -> merge (LLM or fallback) -> write outputs"
+    sequence that used to be duplicated between the text and plot CLIs.
+    """
+
+    def __init__(self, model: str):
+        self.model = model
+
+    @abstractmethod
+    def _collect_raw_findings(self, output_dir: str) -> list[dict]: ...
+
+    @abstractmethod
+    def _prepare(self, output_dir: str, **kwargs: Any) -> IntegrationContext | None:
+        """Validates inputs and resolves target text / output paths.
+
+        Returns ``None`` (after logging the reason) if inputs are invalid.
+        """
+        ...
+
+    @abstractmethod
+    def _run_integration_llm(
+        self, output_dir: str, target_text: str, raw_findings_text: str
+    ) -> str | None: ...
+
+    @abstractmethod
+    def _fallback_merge(self, all_findings: list[dict]) -> str: ...
+
+    @abstractmethod
+    def _generate_markdown_report(
+        self, findings: list[dict], output_md: str
+    ) -> None: ...
+
+    def run(self, output_dir: str, **kwargs: Any) -> bool:
+        if not os.path.exists(output_dir):
+            logger.error(f"Directory '{output_dir}' does not exist.")
+            return False
+
+        ctx = self._prepare(output_dir, **kwargs)
+        if ctx is None:
+            return False
+
+        all_findings = self._collect_raw_findings(output_dir)
+
+        if not all_findings:
+            logger.info("No findings to merge. Writing empty integrated findings.")
+            with open(ctx.yaml_path, "w", encoding="utf-8") as f:
+                f.write("findings: []\n")
+            self._generate_markdown_report([], ctx.report_path)
+            logger.info("Done.")
+            return True
+
+        raw_findings_text = YamlHandler.dump({"findings": all_findings})
+
+        merged_yaml_content = self._run_integration_llm(
+            output_dir, ctx.target_text, raw_findings_text
+        )
+
+        if not merged_yaml_content:
+            logger.error(
+                "LLM integration failed. Performing mechanical fallback merging."
+            )
+            merged_yaml_content = self._fallback_merge(all_findings)
+
+        with open(ctx.yaml_path, "w", encoding="utf-8") as f:
+            f.write(merged_yaml_content + "\n")
+        logger.info(f"Saved integrated findings to {ctx.yaml_path}")
+
+        try:
+            merged_findings_list = YamlHandler.load_findings(merged_yaml_content)
+        except Exception:
+            merged_findings_list = []
+            logger.warning(
+                "Could not parse merged YAML back for Markdown report generation."
+            )
+
+        self._generate_markdown_report(merged_findings_list, ctx.report_path)
+        logger.info(f"Saved Markdown report to {ctx.report_path}")
+        return True

@@ -3,11 +3,11 @@ import os
 import sys
 
 from src.findings import integration as _integration
+from src.findings.integration import BaseFindingsIntegrator, IntegrationContext
 from src.utils import project_paths
 from src.utils.ai_task import PlotFindingsIntegrationInput, PlotFindingsIntegrationTask
 from src.utils.file_io import read_file
 from src.utils.logger import get_logger
-from src.utils.yaml_handler import YamlHandler
 
 logger = get_logger(__name__)
 
@@ -76,68 +76,39 @@ def _fallback_merge(all_findings: list[dict]) -> str:
     return _integration.fallback_merge(all_findings, id_prefix="PINT")
 
 
+class PlotFindingsIntegrator(BaseFindingsIntegrator):
+    """Findings integrator for plot review (see BaseFindingsIntegrator)."""
+
+    def _collect_raw_findings(self, output_dir):
+        return _collect_raw_findings(output_dir)
+
+    def _prepare(self, output_dir, *, plot_filepath, **kwargs):
+        if not os.path.exists(plot_filepath):
+            logger.error(f"Plot file '{plot_filepath}' does not exist.")
+            return None
+        basename = os.path.basename(plot_filepath)
+        plot_stem = os.path.splitext(basename)[0]
+        return IntegrationContext(
+            target_text=read_file(plot_filepath),
+            yaml_path=project_paths.get_plot_findings_yaml_path(output_dir, plot_stem),
+            report_path=project_paths.get_plot_report_md_path(output_dir, plot_stem),
+        )
+
+    def _run_integration_llm(self, output_dir, target_text, raw_findings_text):
+        return run_integration_llm(
+            output_dir, target_text, raw_findings_text, self.model
+        )
+
+    def _fallback_merge(self, all_findings):
+        return _fallback_merge(all_findings)
+
+    def _generate_markdown_report(self, findings, output_md):
+        generate_markdown_report(findings, output_md)
+
+
 def integrate_plot_findings_in_dir(output_dir, plot_filepath, model):
     """Integrates and resolves conflicts in parallel plot review findings."""
-    if not os.path.exists(output_dir):
-        logger.error(f"Directory '{output_dir}' does not exist.")
-        return False
-
-    if not os.path.exists(plot_filepath):
-        logger.error(f"Plot file '{plot_filepath}' does not exist.")
-        return False
-
-    basename = os.path.basename(plot_filepath)
-    plot_stem = os.path.splitext(basename)[0]
-    target_text = read_file(plot_filepath)
-
-    # Collect findings
-    all_findings = _collect_raw_findings(output_dir)
-
-    if not all_findings:
-        logger.info("No plot findings to merge. Writing empty integrated findings.")
-        integrated_yaml_path = project_paths.get_plot_findings_yaml_path(
-            output_dir, plot_stem
-        )
-        with open(integrated_yaml_path, "w", encoding="utf-8") as f:
-            f.write("findings: []\n")
-        generate_markdown_report(
-            [], project_paths.get_plot_report_md_path(output_dir, plot_stem)
-        )
-        logger.info("Done.")
-        return True
-
-    raw_findings_text = YamlHandler.dump({"findings": all_findings})
-
-    # Run integration via LLM
-    merged_yaml_content = run_integration_llm(
-        output_dir, target_text, raw_findings_text, model
-    )
-
-    if not merged_yaml_content:
-        logger.error("LLM integration failed. Performing mechanical fallback merging.")
-        merged_yaml_content = _fallback_merge(all_findings)
-
-    # Write output
-    integrated_yaml_path = project_paths.get_plot_findings_yaml_path(
-        output_dir, plot_stem
-    )
-    with open(integrated_yaml_path, "w", encoding="utf-8") as f:
-        f.write(merged_yaml_content + "\n")
-    logger.info(f"Saved integrated findings to {integrated_yaml_path}")
-
-    # Parse back the merged findings to generate Markdown report
-    try:
-        merged_findings_list = YamlHandler.load_findings(merged_yaml_content)
-    except Exception:
-        merged_findings_list = []
-        logger.warning(
-            "Could not parse merged YAML back for Markdown report generation."
-        )
-
-    report_md_path = project_paths.get_plot_report_md_path(output_dir, plot_stem)
-    generate_markdown_report(merged_findings_list, report_md_path)
-    logger.info(f"Saved Markdown report to {report_md_path}")
-    return True
+    return PlotFindingsIntegrator(model).run(output_dir, plot_filepath=plot_filepath)
 
 
 def main():
