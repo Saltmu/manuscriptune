@@ -47,7 +47,9 @@
     let rightPanelEl;
 
     // Filters reactively computed
-    $: acceptedCount = $findings.filter(f => f.accepted === 'y').length;
+    $: acceptedCount  = $findings.filter(f => f.accepted === 'y').length;
+    $: dismissedCount = $findings.filter(f => f.accepted === 'n').length;
+    $: undecidedCount = $findings.filter(f => f.accepted !== 'y' && f.accepted !== 'n').length;
     
     $: findingsByLine = (() => {
         const map = {};
@@ -105,14 +107,14 @@
     }
 
     // Actions
-    async function toggleAccept(findingId, isChecked) {
+    async function setDecision(findingId, val) {
         const list = $findings;
         const finding = list.find(f => f.id === findingId);
-        if (finding) {
-            finding.accepted = isChecked ? 'y' : 'n';
-            findings.set(list);
-            await saveChanges();
-        }
+        if (!finding) return;
+        // 同じ判断を再度押したら未判断に戻す
+        finding.accepted = (finding.accepted === val) ? null : val;
+        findings.set(list);
+        await saveChanges();
     }
 
     async function saveChanges() {
@@ -400,8 +402,18 @@
         </div>
         <div style="display:flex; align-items:center; gap:16px;">
             {#if $selectedNovelFile && $findings.length > 0}
-                <div class="stats-counter" style="display: block;">
-                    採用: <span>{acceptedCount}</span> / <span>{$findings.length}</span> 件
+                <div class="decision-progress">
+                    <div class="dp-counts">
+                        <span class="dp-accepted">採用 {acceptedCount}</span>
+                        <span class="dp-undecided">未判断 {undecidedCount}</span>
+                        <span class="dp-dismissed">見送り {dismissedCount}</span>
+                        <span class="dp-total">全 {$findings.length} 件</span>
+                    </div>
+                    <div class="decision-progress-bar">
+                        <div class="seg accepted"  style="flex-grow:{acceptedCount}"></div>
+                        <div class="seg undecided" style="flex-grow:{undecidedCount}"></div>
+                        <div class="seg dismissed" style="flex-grow:{dismissedCount}"></div>
+                    </div>
                 </div>
             {/if}
             
@@ -422,8 +434,8 @@
                 <button class="btn-secondary btn-sm" on:click={executeRollback} style="background-color: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
                     ↩️ 元に戻す
                 </button>
-                <button class="btn-primary btn-sm" on:click={() => showApplyModal = true}>
-                    小説へ反映
+                <button class="btn-primary btn-sm" on:click={() => showApplyModal = true} disabled={acceptedCount === 0}>
+                    小説へ反映{acceptedCount > 0 ? ` (${acceptedCount}件)` : ''}
                 </button>
             {/if}
         </div>
@@ -462,8 +474,8 @@
         />
 
         <!-- Column 3: Findings / Execution Logs -->
-        <FindingsPanel 
-            on:toggle-accept={(e) => toggleAccept(e.detail.findingId, e.detail.isChecked)}
+        <FindingsPanel
+            on:toggle-decision={(e) => setDecision(e.detail.findingId, e.detail.val)}
             on:finding-card-click={(e) => handleFindingCardClick(e.detail.lineNo, e.detail.findingId)}
         />
     </div>

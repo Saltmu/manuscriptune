@@ -445,15 +445,6 @@ button {
 .badge-severity.info { background-color: var(--severity-info); }
 .card-location { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; }
 
-.toggle-container { display: flex; align-items: center; gap: 8px; }
-.toggle-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
-.toggle-switch { position: relative; display: inline-block; width: 44px; height: 22px; }
-.toggle-switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .3s; border-radius: 34px; border: 1px solid var(--border-color); }
-.slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
-input:checked + .slider { background-color: var(--accent-color); border-color: var(--accent-color); }
-input:checked + .slider:before { transform: translateX(22px); }
-
 .card-field { font-size: 0.85rem; }
 .field-label { font-weight: 700; color: var(--text-muted); margin-bottom: 2px; font-size: 0.75rem; text-transform: uppercase; }
 .original-text { background-color: rgba(239, 68, 68, 0.08); border-left: 2px solid var(--severity-high); padding: 6px 10px; border-radius: 0 6px 6px 0; font-family: 'Sawarabi Mincho', serif; margin-top: 4px; }
@@ -862,3 +853,96 @@ body.process-running #view-sync .card button {
     flex-direction: column;
     gap: 12px;
 }
+
+/* === レビュー判断: ヘッダー進捗 === */
+.decision-progress {
+    flex: 1;
+    max-width: 520px;
+    min-width: 220px;
+}
+.dp-counts {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+.dp-accepted  { color: #34d399; }
+.dp-undecided { color: #fbbf24; }
+.dp-dismissed { color: var(--text-muted); }
+.dp-total     { color: #64748b; font-weight: 500; margin-left: auto; }
+
+.decision-progress-bar {
+    display: flex;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background-color: #141b2b;
+}
+.decision-progress-bar .seg { min-width: 0; transition: flex-grow 0.3s ease; }
+.decision-progress-bar .seg.accepted  { background-color: #10b981; }
+.decision-progress-bar .seg.undecided { background-color: var(--severity-medium); }
+.decision-progress-bar .seg.dismissed { background-color: #475569; }
+
+/* === カード状態（左バーは既存の .logic/.style を維持） === */
+.finding-card.accepted {
+    background-color: rgba(16, 185, 129, 0.06);
+    border-color: rgba(16, 185, 129, 0.45);
+}
+.finding-card.dismissed {
+    background-color: rgba(15, 23, 42, 0.35);
+    border-color: #2b3648;
+    opacity: 0.58;
+}
+.finding-card.undecided {
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.28), 0 4px 14px rgba(245, 158, 11, 0.06);
+}
+
+/* === 状態チップ === */
+.state-chip {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 12px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+.state-chip.accepted  { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
+.state-chip.dismissed { background: rgba(100,116,139,0.15); color: #cbd5e1; border: 1px solid rgba(100,116,139,0.35); }
+.state-chip.undecided { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.4); }
+
+/* === 判断ボタン === */
+.decision-btn {
+    flex: 1;
+    padding: 8px 10px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.decision-btn.accept {
+    background: rgba(16,185,129,0.08);
+    color: #34d399;
+    border: 1px solid rgba(16,185,129,0.35);
+}
+.decision-btn.accept.active {
+    background: #10b981;
+    color: #fff;
+    border-color: #10b981;
+}
+.decision-btn.dismiss {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+}
+.decision-btn.dismiss.active {
+    background: #475569;
+    color: #fff;
+    border-color: #475569;
+}
+
+/* === 判断フィルターチップの色分け（任意・アクティブ時） === */
+.filter-btn.df-undecided.active { background-color: var(--severity-medium); border-color: var(--severity-medium); }
+.filter-btn.df-accepted.active  { background-color: #10b981; border-color: #10b981; }
+.filter-btn.df-dismissed.active { background-color: #475569; border-color: #475569; }
