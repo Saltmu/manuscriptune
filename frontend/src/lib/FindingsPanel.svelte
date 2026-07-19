@@ -1,13 +1,14 @@
 <script>
     import { createEventDispatcher } from 'svelte';
-    import { 
-        activeEditorTab, 
-        activeCategoryFilter, 
-        activeSeverityFilter, 
-        findings, 
-        consoleLogMap, 
+    import {
+        activeEditorTab,
+        activeCategoryFilter,
+        activeSeverityFilter,
+        activeDecisionFilter,
+        findings,
+        consoleLogMap,
         consoleStatusMap,
-        activeHighlightLine 
+        activeHighlightLine
     } from '../store.js';
     import FindingChat from './FindingChat.svelte';
 
@@ -34,13 +35,26 @@
         return cat.includes('ロジック') || cat.includes('設定') || cat.includes('矛盾') || cat.includes('伏線') || cat.includes('整合性') || cat.includes('logic');
     }
 
-    $: filteredFindings = $findings.filter(f => {
-        const isLogic = isLogicCategory(f.category);
-        if ($activeCategoryFilter === 'logic' && !isLogic) return false;
-        if ($activeCategoryFilter === 'style' && isLogic) return false;
-        if ($activeSeverityFilter !== 'all' && String(f.severity).toLowerCase() !== $activeSeverityFilter) return false;
-        return true;
-    });
+    function decisionOf(f) {
+        if (f.accepted === 'y') return 'accepted';
+        if (f.accepted === 'n') return 'dismissed';
+        return 'undecided';
+    }
+
+    $: filteredFindings = $findings
+        .filter(f => {
+            const isLogic = isLogicCategory(f.category);
+            if ($activeCategoryFilter === 'logic' && !isLogic) return false;
+            if ($activeCategoryFilter === 'style' && isLogic) return false;
+            if ($activeSeverityFilter !== 'all' && String(f.severity).toLowerCase() !== $activeSeverityFilter) return false;
+            if ($activeDecisionFilter !== 'all' && decisionOf(f) !== $activeDecisionFilter) return false;
+            return true;
+        })
+        .slice() // 元配列を破壊しないためコピーしてから sort
+        .sort((a, b) => {
+            const rank = { undecided: 0, accepted: 1, dismissed: 2 };
+            return rank[decisionOf(a)] - rank[decisionOf(b)];
+        });
 
     function handleCardClick(f) {
         const lineNo = parseLineNumber(f.location);
@@ -63,6 +77,11 @@
         <div class="tab-content" style="display: flex; flex-direction: column; flex: 1; overflow: hidden; height: 100%;">
             <!-- Filter Options -->
             <div class="filter-bar" style="display: flex; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--border-color); background-color: rgba(15, 23, 42, 0.2); overflow-x: auto; flex-shrink: 0;">
+                <button class="filter-btn {$activeDecisionFilter === 'all' ? 'active' : ''}" on:click={() => activeDecisionFilter.set('all')}>すべて</button>
+                <button class="filter-btn df-undecided {$activeDecisionFilter === 'undecided' ? 'active' : ''}" on:click={() => activeDecisionFilter.set('undecided')}>未判断</button>
+                <button class="filter-btn df-accepted {$activeDecisionFilter === 'accepted' ? 'active' : ''}" on:click={() => activeDecisionFilter.set('accepted')}>採用</button>
+                <button class="filter-btn df-dismissed {$activeDecisionFilter === 'dismissed' ? 'active' : ''}" on:click={() => activeDecisionFilter.set('dismissed')}>見送り</button>
+                <div style="width: 1px; height: 16px; background-color: var(--border-color); align-self: center; margin: 0 4px;"></div>
                 <button class="filter-btn {$activeCategoryFilter === 'all' ? 'active' : ''}" on:click={() => activeCategoryFilter.set('all')}>すべて</button>
                 <button class="filter-btn {$activeCategoryFilter === 'logic' ? 'active' : ''}" on:click={() => activeCategoryFilter.set('logic')}>設定監査 (Logic)</button>
                 <button class="filter-btn {$activeCategoryFilter === 'style' ? 'active' : ''}" on:click={() => activeCategoryFilter.set('style')}>文芸表現 (Style)</button>
@@ -83,10 +102,11 @@
                         {@const isLogic = isLogicCategory(f.category)}
                         {@const lineNo = parseLineNumber(f.location)}
                         {@const isCardHighlight = $activeHighlightLine === lineNo}
-                        
+                        {@const decision = decisionOf(f)}
+
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
-                        <div 
-                            class="finding-card {isLogic ? 'logic' : 'style'} {isCardHighlight ? 'active' : ''}" 
+                        <div
+                            class="finding-card {isLogic ? 'logic' : 'style'} {decision} {isCardHighlight ? 'active' : ''}"
                             id="finding-card-{f.id}"
                             on:click={() => handleCardClick(f)}
                         >
@@ -103,13 +123,9 @@
                                         <span class="badge badge-apply-pending">未反映 (pending)</span>
                                     {/if}
                                 </div>
-                                <div class="toggle-container" on:click|stopPropagation>
-                                    <span class="toggle-label">採用</span>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" checked={f.accepted === 'y'} on:change={(e) => dispatch('toggle-accept', { findingId: f.id, isChecked: e.target.checked })}>
-                                        <span class="slider"></span>
-                                    </label>
-                                </div>
+                                <span class="state-chip {decision}">
+                                    {decision === 'accepted' ? '✓ 採用' : decision === 'dismissed' ? '見送り' : '⚠ 要判断'}
+                                </span>
                             </div>
                             <div class="card-location">場所: {f.location}</div>
                             <div class="card-field">
@@ -133,7 +149,16 @@
                             <!-- svelte-ignore a11y-click-events-have-key-events -->
                             <!-- svelte-ignore a11y-no-static-element-interactions -->
                             <div class="card-actions" style="margin-top: 12px; display: flex; gap: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;" on:click|stopPropagation>
-                                <button class="filter-btn {activeChatFindingId === f.id ? 'active' : ''}" style="padding: 4px 8px; font-size: 0.75rem;" on:click={() => toggleChat(f.id)}>
+                                <button class="decision-btn accept {decision === 'accepted' ? 'active' : ''}"
+                                    on:click={() => dispatch('toggle-decision', { findingId: f.id, val: 'y' })}>
+                                    {decision === 'accepted' ? '✓ 採用中' : '採用する'}
+                                </button>
+                                <button class="decision-btn dismiss {decision === 'dismissed' ? 'active' : ''}"
+                                    on:click={() => dispatch('toggle-decision', { findingId: f.id, val: 'n' })}>
+                                    {decision === 'dismissed' ? '見送り中' : '見送る'}
+                                </button>
+
+                                <button class="filter-btn {activeChatFindingId === f.id ? 'active' : ''}" style="padding: 4px 8px; font-size: 0.75rem; margin-left: auto;" on:click={() => toggleChat(f.id)}>
                                     {activeChatFindingId === f.id ? '相談を閉じる' : '💬 AIと相談する'}
                                 </button>
                             </div>

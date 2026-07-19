@@ -11,7 +11,7 @@ class FindingItem(BaseModel):
     severity: str
     analysis: str
     suggestion: str
-    accepted: str
+    accepted: str | None = None
     apply_status: str | None = None
     apply_result: str | None = None
     discussion: list[dict[str, Any]] | None = None

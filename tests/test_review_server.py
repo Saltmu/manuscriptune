@@ -367,6 +367,65 @@ def test_routes_api_save_findings_exception():
         assert response.status_code == 500
 
 
+def test_routes_api_get_data_undecided_finding(tmp_path):
+    # レビュー画面改善: 「未判断」(accepted未設定)の指摘を含むYAMLをGET /api/dataで
+    # 読み込めること(旧: accepted必須strのため500になっていた回帰の再現テスト)。
+    novel_path = tmp_path / "dummy.txt"
+    novel_path.write_text("Line 1", encoding="utf-8")
+    yaml_path = tmp_path / "dummy_findings.yaml"
+    yaml_path.write_text(
+        "findings:\n"
+        "  - id: F-001\n"
+        "    location: L1\n"
+        "    original: orig\n"
+        "    category: cat\n"
+        "    severity: high\n"
+        "    analysis: anal\n"
+        "    suggestion: sugg\n"
+        "    accepted: null\n",
+        encoding="utf-8",
+    )
+
+    with patch(
+        "src.services.novel_service.resolve_paths",
+        return_value=(str(novel_path), str(yaml_path)),
+    ):
+        response = client.get("/api/data?file=dummy.txt")
+        assert response.status_code == 200
+        findings = response.json()["findings"]
+        assert findings[0]["accepted"] is None
+
+
+def test_routes_api_save_findings_accepts_undecided(tmp_path):
+    # レビュー画面改善: 「未判断」に戻す(accepted=null)POSTがバリデーションエラーに
+    # ならず保存できること(旧: accepted必須strのため422になっていた回帰の再現テスト)。
+    yaml_path = tmp_path / "dummy_findings.yaml"
+    with patch(
+        "src.services.novel_service.resolve_paths",
+        return_value=("dummy.txt", str(yaml_path)),
+    ):
+        response = client.post(
+            "/api/save",
+            json={
+                "novel_name": "dummy.txt",
+                "findings": [
+                    {
+                        "id": "INT-001",
+                        "location": "1",
+                        "original": "orig",
+                        "category": "cat",
+                        "severity": "high",
+                        "analysis": "anal",
+                        "suggestion": "sugg",
+                        "accepted": None,
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+
 def test_routes_api_create_backup_exception():
     with (
         patch(

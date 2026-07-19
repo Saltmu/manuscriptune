@@ -8,6 +8,7 @@ export const novelLines = writable([]);
 export const findings = writable([]);
 export const activeCategoryFilter = writable('all');
 export const activeSeverityFilter = writable('all');
+export const activeDecisionFilter = writable('all'); // 'all' | 'undecided' | 'accepted' | 'dismissed'
 export const activeHighlightLine = writable(null);
 
 const initialSelectedNovelFile = localStorage.getItem('selectedNovelFile') || "";
